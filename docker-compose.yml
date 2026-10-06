@@ -1,9 +1,9 @@
 # PRVision (00 §4).
 #   docker compose up          The whole app: UI on http://localhost:4210, API on 3100, worker, Postgres, Redis.
-#   npm run dev                Only Postgres and Redis come from here (npm run infra:up); the app runs on the host.
-# Ports bind to 127.0.0.1 only. Host ports for Postgres/Redis default to 5433/6380 (00 §4); override with
-# PRVISION_PG_PORT / PRVISION_REDIS_PORT in .env when those ports are taken, and update DATABASE_URL / REDIS_URL
-# to match. Data persists in named volumes; `npm run infra:reset` deletes it.
+#                              Postgres and Redis stay on Docker's internal network; only 4210 and 3100 are published.
+#   npm run dev                Only Postgres and Redis come from here (npm run infra:up), with host ports from
+#                              docker-compose.dev.yml; the app runs on the host.
+# Ports bind to 127.0.0.1 only. Data persists in named volumes; `npm run infra:reset` deletes it.
 #
 # The app containers mount your home folder at the same path, so a repository you register by its path on this
 # machine resolves inside the container too, and both ways of running share ~/.prvision. Keep your repositories
@@ -43,8 +43,6 @@ services:
       POSTGRES_PASSWORD: prvision
       TZ: UTC
       PGTZ: UTC
-    ports:
-      - "127.0.0.1:${PRVISION_PG_PORT:-5433}:5432"
     volumes:
       - prvision-pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -60,8 +58,6 @@ services:
     restart: unless-stopped
     # BullMQ requires noeviction; AOF keeps queued jobs across container restarts.
     command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
-    ports:
-      - "127.0.0.1:${PRVISION_REDIS_PORT:-6380}:6379"
     volumes:
       - prvision-redisdata:/data
     healthcheck:

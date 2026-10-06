@@ -1,0 +1,10 @@
+# Host ports for Postgres and Redis, used only by `npm run dev` (npm run infra:up), where the app runs on the
+# host and needs to reach them. Defaults 5433/6380 (00 §4); `npm run setup:env` moves to free ports when those
+# are taken and writes PRVISION_PG_PORT / PRVISION_REDIS_PORT and the matching URLs to .env.
+services:
+  postgres:
+    ports:
+      - "127.0.0.1:${PRVISION_PG_PORT:-5433}:5432"
+  redis:
+    ports:
+      - "127.0.0.1:${PRVISION_REDIS_PORT:-6380}:6379"

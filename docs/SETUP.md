@@ -23,7 +23,7 @@
 | `PRVISION_SECRET_KEY` | yes | generated | Encrypts stored secrets |
 | `PRVISION_DATA_DIR` | no | `~/.prvision` | Worktrees, artifacts, fixtures |
 | `LOG_LEVEL` | no | `info` | Logger level |
-| `PRVISION_PG_PORT` / `PRVISION_REDIS_PORT` | no | `5433` / `6380` | Docker host ports (Compose only) |
+| `PRVISION_PG_PORT` / `PRVISION_REDIS_PORT` | no | `5433` / `6380` | Host ports for Postgres and Redis under `npm run dev` (`docker-compose.dev.yml`) |
 
 If 5433 or 6380 is busy and you have not pinned a port, `setup:env` picks the next free one and rewrites
 `DATABASE_URL` / `REDIS_URL` to match. Non-secret tunables (timeouts, limits, names) live in
@@ -65,7 +65,7 @@ If 5433 or 6380 is busy and you have not pinned a port, `setup:env` picks the ne
 
 ```text
 PRVision/
-  package.json  docker-compose.yml  .env.example  README.md  CLAUDE.md
+  package.json  docker-compose.yml  docker-compose.dev.yml  Dockerfile  .env.example  README.md  CLAUDE.md
   scripts/                 check-prereqs.mjs, clean-dev-ports.mjs
   tools/                   fixture tooling (sheet 14)
   backend/                 Express API + BullMQ worker (src/, scripts/, harness-templates/)
