@@ -2,8 +2,7 @@
 
 PRVision is a local-first developer tool. It turns a GitHub pull request, a local branch, or uncommitted
 working-tree changes into a visual review: for every UI component the change touches it shows the component
-rendered **before** (base) and **after** (head), a pixel diff, a structural diff when rendering fails, and an
-AI-written summary. It does not run your app: each changed component is rendered in isolation in headless
+rendered **before** (base) and **after** (head). It does not run your app: each changed component is rendered in isolation in headless
 Chromium, through your repo's own Vite, using a render harness written by AI. The same harness renders base and
 head, so differences come only from the component code.
 
