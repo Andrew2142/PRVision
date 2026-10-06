@@ -1,0 +1,1 @@
+ALTER TABLE "repositories" DROP CONSTRAINT "repositories_react_root_check";

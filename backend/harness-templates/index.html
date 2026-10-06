@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PRVision harness</title>
+    <!--
+      PRVision render harness page (static template, sheet 10).
+      Served by the target repo's Vite at /.prvision-harness/index.html?c=<componentId>.
+      #prvision-root is a full-width block with no padding so components lay out exactly as they
+      would in a page, edge to edge; the backend crops the screenshot to the painted area (anchored at the top-left).
+    -->
+    <style id="prvision-base-style">
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: #ffffff;
+      }
+      #prvision-root {
+        display: flow-root;
+        box-sizing: border-box;
+        width: 100%;
+        min-height: 48px;
+        padding: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="prvision-root"></div>
+    <script type="module" src="./entry.tsx"></script>
+  </body>
+</html>

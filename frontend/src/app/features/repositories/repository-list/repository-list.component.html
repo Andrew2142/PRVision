@@ -1,0 +1,64 @@
+<app-page-header
+  title="Repositories"
+  subtitle="Local clones of Vite + React projects and Angular apps that PRVision can visualize."
+>
+  <button pageHeaderActions mat-flat-button color="primary" type="button" class="!rounded-xl" (click)="openAddDialog()">
+    <mat-icon aria-hidden="true">add</mat-icon> Add repository
+  </button>
+</app-page-header>
+
+@if (loadError()) {
+  <app-inline-alert tone="error" title="Couldn't load repositories">
+    {{ loadErrorMessage() }}
+    <button inlineAlertAction mat-stroked-button type="button" class="!rounded-xl" (click)="load()">Retry</button>
+  </app-inline-alert>
+}
+
+@if (showFirstRun()) {
+  <mat-card
+    class="!rounded-2xl border border-[color:var(--color-border)] bg-[var(--color-bg-secondary)] p-5 shadow-[var(--shadow-md)]"
+    data-testid="first-run"
+  >
+    <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+      <div class="flex items-start gap-4">
+        <span
+          class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[var(--shell-accent-soft)] text-[var(--shell-accent)]"
+        >
+          <mat-icon aria-hidden="true">create_new_folder</mat-icon>
+        </span>
+        <div>
+          <h3 class="text-lg font-semibold text-[var(--color-text-primary)]">Add your first repository</h3>
+          <p class="mt-1 max-w-2xl text-sm leading-6 text-[var(--color-text-secondary)]">
+            Point PRVision at a local clone of a Vite + React project or an Angular app (also inside a monorepo).
+            PRVision creates its own worktrees; your working copy is never modified.
+          </p>
+        </div>
+      </div>
+      <button mat-flat-button color="primary" type="button" class="!rounded-xl shrink-0" (click)="openAddDialog()">
+        <mat-icon aria-hidden="true">add</mat-icon> Add repository
+      </button>
+    </div>
+  </mat-card>
+} @else if (!loadError()) {
+  <div class="dd-ag-grid-panel flex min-h-0 flex-1 flex-col gap-4 p-4 sm:p-5">
+    <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <p class="text-sm text-[var(--color-text-tertiary)]">{{ countLabel() }}</p>
+    </div>
+    <div class="min-h-0 flex-1 overflow-hidden">
+      <app-data-grid
+        [rowData]="repositories()"
+        [columnDefs]="columns"
+        [defaultColDef]="defaultColDef"
+        [loading]="loading()"
+        [pagination]="false"
+        [rowHeight]="56"
+        [getRowId]="rowId"
+        [rowClassRules]="rowClassRules"
+        emptyTitle="No repositories"
+        (gridReady)="onGridReady($event)"
+        (cellClicked)="onCellClicked($event)"
+        (rowClicked)="onRowClicked($event)"
+      />
+    </div>
+  </div>
+}

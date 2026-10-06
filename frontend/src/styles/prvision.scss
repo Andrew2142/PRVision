@@ -1,0 +1,665 @@
+// PRVision theme layer (sheet 12 §6.8.2): dark tokens, dark fixes for Uply rules, PRVision-only classes.
+// Loaded after styles.scss. Must not @use tailwindcss.
+
+/* ===== 1. Theme tokens ===== */
+html.shell--tenant-light {
+  color-scheme: light;
+}
+
+/* Dark palette: Claude-style warm greys, blue accent, no gradients. */
+html.shell--tenant-dark {
+  color-scheme: dark;
+  --color-bg-primary: #151515;
+  --color-bg-secondary: #1e1e1d;
+  --color-bg-tertiary: #262625;
+  --color-bg-quaternary: #2e2e2d;
+  --color-surface: #1e1e1d;
+  --color-surface-hover: #262625;
+  --color-surface-active: #2e2e2d;
+  --color-text-primary: #f0efec;
+  --color-text-secondary: #c3c2b8;
+  --color-text-tertiary: #9c9b93;
+  --color-text-disabled: #5f5e5a;
+  --color-primary: #4f8cff;
+  --color-primary-hover: #6fa0ff;
+  --color-primary-light: #b9d0ff;
+  --color-primary-dark: #1a2c5c;
+  --color-primary-10: rgba(79, 140, 255, 0.1);
+  --color-primary-15: rgba(79, 140, 255, 0.15);
+  --color-primary-20: rgba(79, 140, 255, 0.2);
+  --color-on-primary: #ffffff;
+  --color-success: #3ddc97;
+  --color-warning: #f5b54a;
+  --color-error: #ff6363;
+  --color-info: #6aa8ff;
+  --color-border: #2b2b2a;
+  --color-border-light: #3a3a38;
+  --color-border-accent: #4f8cff;
+  --shell-accent: #4f8cff;
+  --shell-accent-soft: rgba(79, 140, 255, 0.16);
+  --shell-accent-contrast: #ffffff;
+  --shell-sidebar-border: rgba(255, 255, 255, 0.06);
+  --secondary-color: #262625;
+  --accent-color: #2f5fd0;
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-sm: 0 12px 28px -22px rgba(0, 0, 0, 0.7), 0 4px 10px -6px rgba(0, 0, 0, 0.45);
+  --shadow-md: 0 20px 48px -28px rgba(0, 0, 0, 0.65), 0 10px 20px -16px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 28px 68px -34px rgba(0, 0, 0, 0.7), 0 16px 30px -20px rgba(0, 0, 0, 0.55);
+  --shadow-xl: 0 40px 96px -42px rgba(0, 0, 0, 0.75), 0 22px 42px -24px rgba(0, 0, 0, 0.6);
+  --shadow-float: 0 30px 72px -34px rgba(0, 0, 0, 0.8), 0 18px 34px -22px rgba(0, 0, 0, 0.6);
+}
+
+html.shell--tenant-dark .dd-glow-layer {
+  background: var(--color-bg-primary);
+}
+
+/* Uply's dark sidebar, menus, select panels and tooltips hard-code teal/slate; repaint them in the site palette. */
+html.shell--tenant-dark .app-sidebar {
+  background: #111111;
+  animation: none;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.05),
+    0 20px 56px -30px rgba(0, 0, 0, 0.6);
+}
+html.shell--tenant-dark .mat-mdc-card {
+  --mdc-elevated-card-container-color: var(--color-bg-secondary);
+  border-color: var(--color-border) !important;
+}
+html.shell--tenant-dark {
+  .mat-mdc-menu-panel,
+  .mat-mdc-select-panel,
+  div.mat-mdc-select-panel {
+    background: #212121 !important;
+    border: 1px solid var(--color-border-light) !important;
+    box-shadow:
+      0 24px 48px -18px rgba(0, 0, 0, 0.7),
+      0 0 0 1px rgba(255, 255, 255, 0.04) !important;
+  }
+  .mat-mdc-menu-item:hover,
+  .mat-mdc-menu-item.cdk-program-focused,
+  .mat-mdc-menu-item.cdk-keyboard-focused,
+  .mat-mdc-menu-item.mat-mdc-menu-item-highlighted,
+  .mat-mdc-option:hover,
+  .mat-mdc-option.mat-mdc-option-active,
+  .mat-mdc-option.mdc-list-item--selected {
+    background: #2b2b2b !important;
+  }
+  .mat-mdc-tooltip .mdc-tooltip__surface {
+    background: var(--color-bg-tertiary) !important;
+    border: 1px solid var(--color-border-light);
+    box-shadow: 0 16px 32px -16px rgba(0, 0, 0, 0.6);
+  }
+}
+
+/* ===== 2. Dark fixes for Uply rules that hard-code light values ===== */
+html.shell--tenant-dark main .mat-mdc-card {
+  --mdc-elevated-card-container-color: var(--color-bg-secondary);
+  background-color: var(--color-bg-secondary);
+  color: var(--color-text-primary);
+  border-color: var(--color-border) !important;
+  box-shadow: var(--shadow-md) !important;
+}
+html.shell--tenant-dark main .mat-mdc-form-field.mat-form-field-appearance-fill .mat-mdc-text-field-wrapper,
+html.shell--tenant-dark
+  .cdk-overlay-container
+  .mat-mdc-form-field.mat-form-field-appearance-fill
+  .mat-mdc-text-field-wrapper,
+html.shell--tenant-dark
+  app-generic-popup
+  .mat-mdc-form-field.mat-form-field-appearance-fill
+  .mat-mdc-text-field-wrapper {
+  background: var(--color-bg-tertiary) !important;
+  border-color: #4d4d4c !important;
+}
+html.shell--tenant-dark main .mat-mdc-form-field.mat-form-field-appearance-fill.mat-focused .mat-mdc-text-field-wrapper,
+html.shell--tenant-dark
+  app-generic-popup
+  .mat-mdc-form-field.mat-form-field-appearance-fill.mat-focused
+  .mat-mdc-text-field-wrapper {
+  background: var(--color-bg-quaternary) !important;
+  border-color: var(--shell-accent) !important;
+}
+html.shell--tenant-dark .mat-mdc-form-field .mdc-text-field__input,
+html.shell--tenant-dark .mat-mdc-form-field textarea.mat-mdc-input-element,
+html.shell--tenant-dark .mat-mdc-select-value {
+  color: var(--color-text-primary) !important;
+}
+html.shell--tenant-dark .mat-mdc-form-field .mat-mdc-floating-label,
+html.shell--tenant-dark .mat-mdc-form-field-hint {
+  color: var(--color-text-secondary) !important;
+}
+html.shell--tenant-dark .mat-mdc-unelevated-button[disabled],
+html.shell--tenant-dark .mat-mdc-unelevated-button.mat-mdc-button-disabled {
+  --mdc-filled-button-disabled-container-color: rgba(148, 163, 184, 0.14) !important;
+  --mdc-filled-button-disabled-label-text-color: rgba(226, 232, 240, 0.38) !important;
+}
+
+html.shell--tenant-dark .mat-mdc-outlined-button[disabled],
+html.shell--tenant-dark .mat-mdc-outlined-button.mat-mdc-button-disabled {
+  --mdc-outlined-button-disabled-label-text-color: rgba(226, 232, 240, 0.38) !important;
+  --mdc-outlined-button-disabled-outline-color: rgba(148, 163, 184, 0.18) !important;
+}
+html.shell--tenant-dark .mat-mdc-radio-button .mdc-label,
+html.shell--tenant-dark .mat-mdc-checkbox .mdc-label,
+html.shell--tenant-dark .mat-mdc-slide-toggle .mdc-label {
+  color: var(--color-text-primary);
+}
+
+/* ===== 3. Dark pills ===== */
+html.shell--tenant-dark {
+  .dd-pill {
+    box-shadow: none;
+  }
+  .dd-pill--success {
+    --dd-pill-border: rgba(52, 211, 153, 0.35);
+    --dd-pill-bg: rgba(52, 211, 153, 0.12);
+    --dd-pill-color: #6ee7b7;
+  }
+  .dd-pill--danger {
+    --dd-pill-border: rgba(248, 113, 113, 0.35);
+    --dd-pill-bg: rgba(248, 113, 113, 0.12);
+    --dd-pill-color: #fca5a5;
+  }
+  .dd-pill--warning {
+    --dd-pill-border: rgba(251, 191, 36, 0.35);
+    --dd-pill-bg: rgba(251, 191, 36, 0.1);
+    --dd-pill-color: #fcd34d;
+  }
+  .dd-pill--info {
+    --dd-pill-border: rgba(96, 165, 250, 0.35);
+    --dd-pill-bg: rgba(96, 165, 250, 0.1);
+    --dd-pill-color: #93c5fd;
+  }
+  .dd-pill--active {
+    --dd-pill-border: rgba(45, 212, 191, 0.35);
+    --dd-pill-bg: rgba(45, 212, 191, 0.1);
+    --dd-pill-color: #5eead4;
+  }
+  .dd-pill--accent {
+    --dd-pill-border: rgba(167, 139, 250, 0.35);
+    --dd-pill-bg: rgba(167, 139, 250, 0.1);
+    --dd-pill-color: #c4b5fd;
+  }
+  .dd-pill--muted {
+    --dd-pill-border: rgba(148, 163, 184, 0.3);
+    --dd-pill-bg: rgba(148, 163, 184, 0.08);
+    --dd-pill-color: #cbd5e1;
+  }
+  .dd-pill--outline {
+    --dd-pill-border: rgba(148, 163, 184, 0.35);
+    --dd-pill-bg: transparent;
+    --dd-pill-color: #e2e8f0;
+  }
+}
+.dd-pill__dot {
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 9999px;
+  background: currentColor;
+  flex: 0 0 auto;
+}
+.dd-pill__dot--pulse {
+  animation: pv-pulse 1.4s ease-in-out infinite;
+}
+@keyframes pv-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+
+/* ===== 4. Dark grid ===== */
+html.shell--tenant-dark {
+  .dd-ag-grid-shell {
+    background: var(--color-bg-secondary);
+    border-color: var(--color-border);
+  }
+  .dd-ag-grid-theme {
+    --ag-border-color: var(--color-border);
+    --ag-background-color: var(--color-bg-secondary);
+    --ag-foreground-color: var(--color-text-primary);
+    --ag-data-color: var(--color-text-primary);
+    --ag-header-background-color: var(--color-bg-secondary);
+    --ag-header-foreground-color: var(--color-text-tertiary);
+    --ag-odd-row-background-color: var(--color-bg-secondary);
+    --ag-row-hover-color: var(--color-surface-hover);
+    --ag-selected-row-background-color: var(--color-surface-active);
+    --ag-input-border-color: var(--color-border-light);
+    --ag-input-background-color: var(--color-bg-tertiary);
+    --ag-input-focus-border-color: var(--shell-accent);
+    --ag-chrome-background-color: var(--color-bg-secondary);
+    --ag-menu-background-color: #212121;
+    --ag-menu-border-color: var(--color-border-light);
+    --ag-control-panel-background-color: var(--color-bg-secondary);
+    --ag-header-column-resize-handle-color: var(--color-border-light);
+    --ag-checkbox-background-color: var(--color-bg-tertiary);
+    --ag-popup-shadow: 0 24px 48px -18px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.04);
+  }
+  .dd-ag-grid-theme .ag-paging-panel {
+    color: var(--color-text-secondary);
+    border-top-color: var(--color-border);
+  }
+  .dd-ag-grid-theme .ag-paging-panel .ag-paging-button {
+    color: var(--color-text-secondary);
+  }
+  .dd-ag-grid-theme .ag-paging-panel .ag-paging-button[disabled] {
+    color: var(--color-text-disabled);
+  }
+  /* Uply's base hover for ag menus/lists is #f8fafc !important (light); match Uply's dark Material menus. */
+  .dd-ag-grid-theme .ag-menu-option:hover,
+  .dd-ag-grid-theme .ag-menu-option.ag-menu-option-active,
+  .dd-ag-grid-theme .ag-virtual-list-item:hover,
+  .dd-ag-grid-theme .ag-list-item-hovered {
+    background: #2b2b2b !important;
+  }
+  .dd-grid-stack__primary {
+    color: var(--color-text-primary);
+  }
+  .dd-grid-stack__secondary,
+  .dd-grid-muted {
+    color: var(--color-text-secondary);
+  }
+  .dd-grid-action {
+    border-color: var(--color-border-light);
+    background: transparent;
+    color: var(--color-text-primary);
+  }
+  .dd-grid-action:hover {
+    background: var(--color-surface-hover);
+  }
+  .dd-grid-action--danger {
+    border-color: rgba(248, 113, 113, 0.4);
+    color: #fca5a5;
+  }
+  .dd-grid-action--danger:hover {
+    background: rgba(248, 113, 113, 0.08);
+  }
+  .dd-grid-empty-state {
+    border-color: var(--color-border-light);
+  }
+  .dd-grid-menu-trigger.mat-mdc-icon-button {
+    color: var(--color-text-secondary);
+  }
+}
+
+/* ===== 5. Shell additions ===== */
+/* Header icon buttons: a 36px square centred on the same line as the status pill. */
+.app-header__icon-button.mat-mdc-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+}
+.app-header__icon-button.mat-mdc-icon-button .mat-mdc-button-touch-target {
+  width: 36px;
+  height: 36px;
+}
+.app-header__icon-button .mat-icon {
+  display: block;
+  width: 20px;
+  height: 20px;
+  font-size: 20px;
+  line-height: 20px;
+}
+/* Detail page header meta: muted icon + text items separated by dots, wrapping on narrow screens. */
+.pv-header-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0;
+  min-width: 0;
+  font-size: 0.8125rem;
+  line-height: 1.25rem;
+  color: var(--color-text-secondary);
+}
+.pv-header-meta__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  min-width: 0;
+  white-space: nowrap;
+}
+.pv-header-meta__item + .pv-header-meta__item::before {
+  content: "";
+  width: 3px;
+  height: 3px;
+  margin: 0 0.625rem;
+  border-radius: 9999px;
+  background: var(--color-text-tertiary);
+}
+.pv-header-meta__item .mat-icon {
+  width: 16px;
+  height: 16px;
+  font-size: 16px;
+  line-height: 16px;
+  color: var(--color-text-tertiary);
+}
+.pv-header-meta__item.pv-code {
+  font-size: 0.75rem;
+  line-height: 1.25rem;
+}
+.pv-header-meta__arrow {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  color: var(--color-text-tertiary);
+  /* Digits sit above the line box centre (descender space below), so lift the arrow to their middle. */
+  transform: translateY(-1px);
+}
+.pv-header-meta__link {
+  color: var(--color-text-primary);
+  font-weight: 500;
+  text-decoration: none;
+}
+.pv-header-meta__link:hover {
+  color: var(--shell-accent);
+}
+/* Brand eye: on hover it blinks, glances left and right, then spins its pupil. */
+.app-brand__blink,
+.app-brand__pupil {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.app-brand:hover .app-brand__blink,
+.app-brand:focus-visible .app-brand__blink {
+  animation: app-brand-blink 1.4s ease-in-out;
+}
+.app-brand:hover .app-brand__pupil,
+.app-brand:focus-visible .app-brand__pupil {
+  animation: app-brand-look 1.4s ease-in-out;
+}
+@keyframes app-brand-blink {
+  0%,
+  100% {
+    transform: scaleY(1);
+  }
+  8% {
+    transform: scaleY(0.08);
+  }
+  16% {
+    transform: scaleY(1);
+  }
+}
+@keyframes app-brand-look {
+  0%,
+  16% {
+    transform: translateX(0) rotate(0deg);
+  }
+  32% {
+    transform: translateX(-9px) rotate(0deg);
+  }
+  50% {
+    transform: translateX(9px) rotate(0deg);
+  }
+  64% {
+    transform: translateX(0) rotate(0deg);
+  }
+  100% {
+    transform: translateX(0) rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-brand:hover .app-brand__blink,
+  .app-brand:hover .app-brand__pupil,
+  .app-brand:focus-visible .app-brand__blink,
+  .app-brand:focus-visible .app-brand__pupil {
+    animation: none;
+  }
+}
+.app-sidebar__brand-name {
+  color: var(--color-text-primary);
+}
+html.shell--tenant-dark .app-sidebar__brand-name {
+  color: #f8fafc;
+}
+html.shell--tenant-dark .app-sidebar__muted {
+  color: var(--color-text-secondary);
+} /* Uply: .border-b/.border-t .text-slate-500 in dark */
+html.shell--tenant-light .app-sidebar__muted,
+html.shell--tenant-light .app-sidebar__group-label {
+  color: color-mix(in srgb, var(--shell-accent) 22%, #7d888f);
+}
+html.shell--tenant-dark .app-sidebar__group-label {
+  color: var(--color-text-tertiary);
+}
+
+.pv-topbar {
+  border-bottom: 1px solid var(--color-border);
+  background: color-mix(in srgb, var(--color-bg-primary) 82%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.pv-skip-link {
+  position: absolute;
+  left: 1rem;
+  top: -3rem;
+  z-index: 60;
+  border-radius: 0.75rem;
+  background: var(--shell-accent);
+  color: var(--shell-accent-contrast);
+  padding: 0.5rem 0.875rem;
+  font-weight: 700;
+  transition: top var(--transition-fast);
+}
+.pv-skip-link:focus {
+  top: 0.75rem;
+}
+
+/* tabindex="-1" elements (dialog panels, <main>) only take focus programmatically: no ring. */
+:where(a, button, [tabindex]:not([tabindex="-1"]), input, select, textarea, summary):focus-visible {
+  outline: 2px solid var(--shell-accent);
+  outline-offset: 2px;
+}
+
+/* ===== 6. Code, diff, prose, image, console ===== */
+.pv-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  font-size: 0.78rem;
+  line-height: 1.55;
+}
+.pv-code-block {
+  margin: 0;
+  max-height: 32rem;
+  overflow: auto;
+  border-radius: 0.75rem;
+  border: 1px solid #2b2b2a;
+  background: #111111;
+  color: #e2e8f0;
+  padding: 0.875rem 1rem;
+}
+.pv-diff-line {
+  display: grid;
+  grid-template-columns: 3.25rem 3.25rem minmax(0, 1fr);
+  white-space: pre;
+}
+.pv-diff-line__num {
+  color: #64748b;
+  text-align: right;
+  padding-right: 0.75rem;
+  user-select: none;
+}
+.pv-diff-line--add {
+  background: rgba(34, 197, 94, 0.14);
+  color: #bbf7d0;
+}
+.pv-diff-line--del {
+  background: rgba(239, 68, 68, 0.14);
+  color: #fecaca;
+}
+.pv-diff-line--hunk {
+  background: rgba(96, 165, 250, 0.1);
+  color: #93c5fd;
+}
+.pv-diff-line--meta {
+  color: #94a3b8;
+  font-weight: 700;
+}
+
+.pv-prose {
+  color: var(--color-text-primary);
+  font-size: 0.9375rem;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+.pv-prose > :first-child {
+  margin-top: 0;
+}
+.pv-prose > :last-child {
+  margin-bottom: 0;
+}
+.pv-prose h1,
+.pv-prose h2,
+.pv-prose h3,
+.pv-prose h4 {
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin: 1.25em 0 0.5em;
+}
+.pv-prose h1 {
+  font-size: 1.25rem;
+}
+.pv-prose h2 {
+  font-size: 1.125rem;
+}
+.pv-prose h3,
+.pv-prose h4 {
+  font-size: 1rem;
+}
+.pv-prose p {
+  margin: 0.6em 0;
+}
+.pv-prose ul,
+.pv-prose ol {
+  margin: 0.6em 0;
+  padding-left: 1.4em;
+}
+.pv-prose ul {
+  list-style: disc;
+}
+.pv-prose ol {
+  list-style: decimal;
+}
+.pv-prose li {
+  margin: 0.25em 0;
+}
+.pv-prose a {
+  color: var(--shell-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.pv-prose code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.85em;
+  border-radius: 0.375rem;
+  background: var(--color-bg-tertiary);
+  padding: 0.1em 0.35em;
+}
+.pv-prose pre {
+  margin: 0.8em 0;
+  overflow: auto;
+  border-radius: 0.75rem;
+  background: #111111;
+  color: #e2e8f0;
+  padding: 0.75rem 1rem;
+}
+.pv-prose pre code {
+  background: transparent;
+  padding: 0;
+  color: inherit;
+}
+.pv-prose blockquote {
+  margin: 0.8em 0;
+  border-left: 3px solid var(--color-border-light);
+  padding-left: 0.9em;
+  color: var(--color-text-secondary);
+}
+.pv-prose table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.8em 0;
+  font-size: 0.875rem;
+}
+.pv-prose th,
+.pv-prose td {
+  border: 1px solid var(--color-border);
+  padding: 0.35rem 0.6rem;
+  text-align: left;
+}
+.pv-prose hr {
+  border: 0;
+  border-top: 1px solid var(--color-border);
+  margin: 1.2em 0;
+}
+
+.pv-checkerboard {
+  background-color: #ffffff;
+  background-image:
+    linear-gradient(45deg, #eef0f2 25%, transparent 25%), linear-gradient(-45deg, #eef0f2 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #eef0f2 75%), linear-gradient(-45deg, transparent 75%, #eef0f2 75%);
+  background-size: 16px 16px;
+  background-position:
+    0 0,
+    0 8px,
+    8px -8px,
+    -8px 0;
+}
+
+/* Terminal panel (Uply run console: bg-slate-950 text-slate-100, muted slate-400/500, level colours
+   slate-300/amber-300/rose-300). Fixed colours in both themes; named classes so Uply's light-theme
+   `main .text-slate-*` remap (styles.scss) cannot recolour them. */
+.pv-console {
+  background: #111111;
+  color: #f1f5f9;
+}
+.pv-console__subtle {
+  color: #94a3b8;
+} /* slate-400: subtitles, empty text */
+.pv-console__muted {
+  color: #64748b;
+} /* slate-500: timestamps, [stage] */
+.pv-console__level--info {
+  color: #cbd5e1;
+} /* slate-300 */
+.pv-console__level--warn {
+  color: #fcd34d;
+} /* amber-300 */
+.pv-console__level--error {
+  color: #fda4af;
+} /* rose-300 */
+.pv-console__divider {
+  border-color: rgba(255, 255, 255, 0.1);
+}
+.pv-console__row {
+  border-color: rgba(255, 255, 255, 0.05);
+}
+
+/* ===== 7. Motion ===== */
+@media (prefers-reduced-motion: reduce) {
+  .app-sidebar {
+    animation: none !important;
+  }
+  .dd-pill__dot--pulse {
+    animation: none;
+  }
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+.sr-only-focusable:not(:focus):not(:focus-within) {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}

@@ -1,0 +1,221 @@
+@switch (store.loadState()) {
+  @case ('not_found') {
+    <app-not-found-page
+      title="Visualization not found"
+      message="It may have been deleted."
+      backLink="/visualizations"
+      backLabel="Back to visualizations"
+    />
+  }
+  @case ('loading') {
+    <app-loading-spinner label="Loading visualization" />
+  }
+  @case ('error') {
+    <app-inline-alert tone="error" title="Couldn't load this visualization">
+      {{ loadErrorMessage() }}
+      <button inlineAlertAction mat-stroked-button type="button" class="!rounded-xl" (click)="store.refreshNow()">
+        Retry
+      </button>
+    </app-inline-alert>
+  }
+  @case ('ready') {
+    @if (header(); as h) {
+      <app-page-header [title]="h.title" backLink="/visualizations" backLabel="Back to visualizations">
+        <app-status-pill
+          pageHeaderTitleAddon
+          class="shrink-0"
+          kind="visualization"
+          [value]="h.status"
+          ariaPrefix="Status"
+        />
+        <ng-container pageHeaderMeta>
+          <div class="pv-header-meta">
+            @if (h.sourceType === 'github_pr') {
+              <span class="pv-header-meta__item">
+                <mat-icon aria-hidden="true">merge</mat-icon>{{ h.sourceLabel }}
+              </span>
+            }
+            <a class="pv-header-meta__item pv-header-meta__link" [routerLink]="['/repositories', h.repositoryId]">
+              <mat-icon aria-hidden="true">folder_open</mat-icon>{{ h.repositoryName }}
+            </a>
+            <span class="pv-header-meta__item">
+              <mat-icon aria-hidden="true">code</mat-icon><span data-testid="framework">{{ h.frameworkLabel }}</span>
+            </span>
+            <span class="pv-header-meta__item pv-code" data-testid="refs">
+              <mat-icon aria-hidden="true">commit</mat-icon>{{ h.refsBase }}
+              <svg class="pv-header-meta__arrow" viewBox="0 0 16 16" aria-hidden="true">
+                <path d="M2 8h11M9 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+              <span class="sr-only">to</span>{{ h.refsHead }}
+            </span>
+          </div>
+        </ng-container>
+        <ng-container pageHeaderActions>
+          @if (!store.isTerminal()) {
+            <button
+              mat-stroked-button
+              color="warn"
+              type="button"
+              class="!rounded-xl"
+              [disabled]="store.cancelState() !== 'idle'"
+              (click)="confirmCancel()"
+            >
+              @if (store.cancelState() === 'requesting') {
+                <mat-spinner diameter="18" class="!inline-block align-middle mr-2" />
+              } @else {
+                <mat-icon aria-hidden="true">stop_circle</mat-icon>
+              }
+              {{ cancelLabel() }}
+            </button>
+          } @else {
+            <button
+              mat-stroked-button
+              color="warn"
+              type="button"
+              class="!rounded-xl"
+              [disabled]="store.deleting()"
+              (click)="confirmDelete()"
+            >
+              <mat-icon aria-hidden="true">delete</mat-icon> Delete
+            </button>
+          }
+        </ng-container>
+      </app-page-header>
+      @if (h.summaryLine) {
+        <p class="-mt-4 text-sm text-[var(--color-text-tertiary)]" data-testid="summary-line">{{ h.summaryLine }}</p>
+      }
+
+      <mat-card
+        class="!rounded-2xl border border-[color:var(--color-border)] bg-[var(--color-bg-secondary)] px-5 py-4 shadow-[var(--shadow-md)]"
+      >
+        <app-pipeline-stepper [status]="h.status" [stoppedStageIndex]="store.stoppedStageIndex()" />
+      </mat-card>
+
+      @if (store.connectionLost()) {
+        <app-inline-alert tone="warning" title="Connection lost"
+          >Lost connection to the PRVision API. Retrying every 2 seconds…</app-inline-alert
+        >
+      }
+      @if (h.failedTitle; as t) {
+        <app-inline-alert tone="error" [title]="t"
+          ><span class="whitespace-pre-wrap">{{ h.errorMessage }}</span></app-inline-alert
+        >
+      }
+      @if (limitChoice(); as lc) {
+        <app-inline-alert tone="warning" [title]="lc.title" data-testid="limit-choice">
+          {{ lc.message }}
+          <button
+            inlineAlertAction
+            mat-flat-button
+            type="button"
+            class="!rounded-xl"
+            data-testid="render-all"
+            (click)="continueWith(lc.all)"
+          >
+            {{ lc.allLabel }}
+          </button>
+          <button
+            inlineAlertAction
+            mat-stroked-button
+            type="button"
+            class="!rounded-xl"
+            data-testid="render-top"
+            (click)="continueWith(defaultComponentLimit)"
+          >
+            {{ lc.topLabel }}
+          </button>
+          <button inlineAlertAction mat-button type="button" class="!rounded-xl" (click)="confirmCancel()">
+            Cancel run
+          </button>
+        </app-inline-alert>
+      }
+      @if (h.cancelledTitle; as t) {
+        <app-inline-alert tone="warning" [title]="t"
+          >Results that finished before cancellation are kept in Summary and Components.</app-inline-alert
+        >
+      }
+
+      <app-segmented-control
+        mode="tabs"
+        idPrefix="viz-view"
+        ariaLabel="Visualization sections"
+        [options]="viewOptions()"
+        [value]="activeView()"
+        (valueChange)="selectView($event)"
+      />
+
+      <div
+        id="viz-view-panel"
+        role="tabpanel"
+        class="-mt-2 flex flex-col gap-4"
+        [attr.aria-labelledby]="'viz-view-tab-' + activeView()"
+        [attr.data-view]="activeView()"
+      >
+        @switch (activeView()) {
+          @case ('summary') {
+            <div class="grid gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+              <app-summary-card
+                [markdown]="summaryMarkdown()"
+                [status]="h.status"
+                [aiModel]="aiModel()"
+                [byAi]="summaryByAi()"
+              />
+              <div class="grid grid-cols-2 content-start gap-3">
+                @for (t of statTiles(); track t.key) {
+                  <div
+                    class="flex min-h-[6rem] flex-col justify-between rounded-xl border border-[color:var(--color-border)] bg-[var(--color-bg-secondary)] p-4"
+                    [attr.data-tile]="t.key"
+                  >
+                    <div class="flex items-center justify-between gap-3">
+                      <p class="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--color-text-tertiary)]">
+                        {{ t.label }}
+                      </p>
+                      <span
+                        class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--shell-accent-soft)] text-[var(--shell-accent)]"
+                        ><mat-icon class="!h-[18px] !w-[18px] !text-[18px] !leading-[18px]" aria-hidden="true">{{
+                          t.icon
+                        }}</mat-icon></span
+                      >
+                    </div>
+                    <p class="text-2xl font-semibold tracking-tight text-[var(--color-text-primary)]">{{ t.value }}</p>
+                  </div>
+                }
+              </div>
+            </div>
+          }
+          @case ('components') {
+            <h2 class="sr-only">Components</h2>
+            @if (store.components().length) {
+              <app-segmented-control
+                ariaLabel="Filter components"
+                [options]="filterOptions()"
+                [value]="store.filter()"
+                (valueChange)="store.setFilter($event)"
+              />
+            }
+            @if (!store.components().length) {
+              <app-empty-state [title]="h.noComponentsTitle" [message]="h.noComponentsMessage" />
+            } @else if (!store.filteredComponents().length) {
+              <app-empty-state
+                title="Nothing in this filter"
+                message="Choose another filter to see the remaining components."
+              />
+            } @else {
+              @for (c of store.filteredComponents(); track c.id) {
+                <app-component-card [component]="c" [runActive]="!store.isTerminal()" [framework]="h.framework" />
+              }
+            }
+          }
+          @case ('console') {
+            <app-console-panel
+              [events]="store.consoleEvents()"
+              [live]="!store.isTerminal()"
+              [trimmed]="store.consoleTrimmed()"
+              [defaultOpen]="true"
+            />
+          }
+        }
+      </div>
+    }
+  }
+}

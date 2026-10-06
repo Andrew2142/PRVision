@@ -1,0 +1,243 @@
+<article
+  class="rounded-2xl border border-[color:var(--color-border)] bg-[var(--color-bg-secondary)] p-5 shadow-[var(--shadow-sm)]"
+  [attr.aria-labelledby]="headingId()"
+>
+  <header class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+    <div class="min-w-0">
+      <div class="flex flex-wrap items-baseline gap-2">
+        <span class="text-xs font-semibold tabular-nums text-[var(--color-text-tertiary)]">{{ rankLabel() }}</span>
+        <h3 [id]="headingId()" class="truncate text-lg font-semibold text-[var(--color-text-primary)]">
+          {{ title() }}
+        </h3>
+        @if (exportLabel(); as label) {
+          <span class="pv-code text-xs text-[var(--color-text-tertiary)]">{{ label }}</span>
+        }
+      </div>
+      @for (p of paths(); track p.path) {
+        <div class="mt-1 flex min-w-0 items-center gap-1" data-testid="component-path">
+          @if (p.label) {
+            <span class="shrink-0 text-xs font-semibold text-[var(--color-text-tertiary)]">{{ p.label }}</span>
+          }
+          <span class="pv-code truncate text-xs text-[var(--color-text-secondary)]" [title]="p.path">{{ p.path }}</span>
+          <button
+            mat-icon-button
+            type="button"
+            class="!h-7 !w-7 !p-0"
+            [cdkCopyToClipboard]="p.path"
+            [attr.aria-label]="p.label ? 'Copy ' + p.label.toLowerCase() + ' file path' : 'Copy file path'"
+            matTooltip="Copy path"
+          >
+            <mat-icon class="!text-base" aria-hidden="true">content_copy</mat-icon>
+          </button>
+        </div>
+      }
+    </div>
+    <div class="flex flex-wrap items-center gap-2">
+      <app-status-pill kind="change" [value]="component().changeKind" />
+      @if (component().visualChange) {
+        <app-status-pill kind="visual" [value]="component().visualChange" [label]="visualLabel()" />
+      }
+      @if (showRenderPill()) {
+        <app-status-pill kind="render" [value]="component().renderStatus" />
+      }
+      @if (component().risk) {
+        <app-status-pill kind="risk" [value]="component().risk" ariaPrefix="Risk" />
+      }
+    </div>
+  </header>
+
+  @if (whatChanged(); as wc) {
+    <section
+      class="mt-4 rounded-l-md rounded-r-xl border border-l-4 border-[color:color-mix(in_srgb,var(--shell-accent)_22%,var(--color-border))] border-l-[var(--shell-accent)] bg-[color:color-mix(in_srgb,var(--shell-accent)_8%,var(--color-bg-secondary))] px-4 py-3"
+      [attr.aria-labelledby]="headingId() + '-what'"
+      data-testid="what-changed"
+    >
+      <div class="flex items-center gap-2">
+        <h4
+          [id]="headingId() + '-what'"
+          class="text-xs font-bold uppercase tracking-[0.08em] text-[var(--shell-accent)]"
+        >
+          What changed
+        </h4>
+        @if (wc.fromAi) {
+          <span
+            class="dd-pill dd-pill--outline cursor-help !px-1.5 !py-0 text-[0.65rem]"
+            matTooltip="Written by AI, which can make mistakes. Check it against the screenshots."
+            tabindex="0"
+            data-testid="what-changed-ai"
+            >AI</span
+          >
+        }
+      </div>
+      <p
+        class="mt-1 whitespace-pre-line text-[0.95rem] font-medium leading-6 text-[var(--color-text-primary)]"
+        data-testid="what-changed-main"
+      >
+        {{ wc.main }}
+      </p>
+      @if (wc.reason; as reason) {
+        <p class="mt-1.5 break-words text-sm text-[var(--color-text-secondary)]" data-testid="change-reason">
+          <span class="font-semibold">Changed because:</span> {{ reason }}
+        </p>
+      }
+      @if (evidenceLines().length) {
+        <p class="mt-2 text-sm font-semibold text-[var(--color-text-secondary)]">Why this is a replacement:</p>
+        <ul
+          class="mt-1 list-disc space-y-0.5 pl-5 text-sm text-[var(--color-text-secondary)]"
+          data-testid="replaced-evidence"
+        >
+          @for (line of evidenceLines(); track line) {
+            <li>{{ line }}</li>
+          }
+        </ul>
+      }
+    </section>
+  }
+
+  <div class="mt-4">
+    @switch (component().renderStatus) {
+      @case ('pending') {
+        <app-empty-state [title]="pendingText()" [message]="null" />
+      }
+      @case ('skipped') {
+        <app-empty-state title="Skipped" [message]="skipMessage()" />
+      }
+      @default {
+        @if (isUnchanged() && !showUnchangedShots()) {
+          <div
+            class="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-dashed border-[color:var(--color-border)] px-4 py-3"
+            data-testid="unchanged-shots-hidden"
+          >
+            <p class="text-sm text-[var(--color-text-secondary)]">Looks the same before and after.</p>
+            <button
+              mat-stroked-button
+              type="button"
+              class="!rounded-xl"
+              data-testid="show-screenshots"
+              (click)="showUnchangedShots.set(true)"
+            >
+              <mat-icon>image</mat-icon>
+              Show screenshots
+            </button>
+          </div>
+        } @else {
+          @if (isUnchanged()) {
+            <div class="mb-2 flex justify-end">
+              <button
+                mat-button
+                type="button"
+                class="!rounded-xl"
+                data-testid="hide-screenshots"
+                (click)="showUnchangedShots.set(false)"
+              >
+                <mat-icon>visibility_off</mat-icon>
+                Hide screenshots
+              </button>
+            </div>
+          }
+          <app-image-compare
+            [label]="title()"
+            [baseUrl]="component().baseImageUrl"
+            [headUrl]="component().headImageUrl"
+            [diffUrl]="component().diffImageUrl"
+            [width]="component().imageWidth"
+            [height]="component().imageHeight"
+            [diffPixelRatio]="component().diffPixelRatio"
+            [visualChange]="component().visualChange"
+            [baseError]="component().baseError"
+            [headError]="component().headError"
+          />
+        }
+      }
+    }
+  </div>
+
+  <div class="mt-4 flex flex-col gap-3">
+    @if (hasErrors()) {
+      <details
+        class="group overflow-hidden rounded-xl border border-[color:var(--color-border)] bg-[var(--color-bg-secondary)]"
+        open
+        data-section="errors"
+        (toggle)="onToggle('errors', $event)"
+      >
+        <summary class="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4">
+          <div class="min-w-0">
+            <div class="text-base font-semibold text-[var(--color-text-primary)]">Render errors</div>
+            <div class="text-[0.86rem] text-[var(--color-text-tertiary)]">{{ errorsLabel() }}</div>
+          </div>
+          <mat-icon
+            class="!h-4 !w-4 !text-base text-[var(--color-text-tertiary)] transition-transform group-open:rotate-180"
+            aria-hidden="true"
+            >expand_more</mat-icon
+          >
+        </summary>
+        <div class="flex flex-col gap-3 px-5 pb-5">
+          @for (b of errorBlocks(); track b.side) {
+            <div
+              class="rounded-xl border border-[color:color-mix(in_srgb,var(--color-error)_18%,var(--color-border))] p-3"
+            >
+              <p class="text-sm font-semibold text-[var(--color-error)]">{{ b.title }}</p>
+              <pre class="pv-code pv-code-block mt-2 max-h-48 whitespace-pre-wrap break-words">{{ b.text }}</pre>
+            </div>
+          }
+        </div>
+      </details>
+    }
+
+    @if (component().codeDiff; as diff) {
+      <details
+        class="group overflow-hidden rounded-xl border border-[color:var(--color-border)] bg-[var(--color-bg-secondary)]"
+        data-section="code"
+        (toggle)="onToggle('code', $event)"
+      >
+        <summary class="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4">
+          <div class="min-w-0">
+            <div class="text-base font-semibold text-[var(--color-text-primary)]">Code diff</div>
+            <div class="text-[0.86rem] text-[var(--color-text-tertiary)]">{{ diffStatsLabel() }}</div>
+          </div>
+          <mat-icon
+            class="!h-4 !w-4 !text-base text-[var(--color-text-tertiary)] transition-transform group-open:rotate-180"
+            aria-hidden="true"
+            >expand_more</mat-icon
+          >
+        </summary>
+        <div class="px-5 pb-5">
+          @if (codeOpen()) {
+            <app-code-diff [diff]="diff" />
+          }
+        </div>
+      </details>
+    } @else if (showParentNote()) {
+      <p class="text-xs text-[var(--color-text-tertiary)]" data-testid="parent-note">
+        Re-rendered because a component or hook it uses changed. Its own file has no diff.
+      </p>
+    }
+
+    @if (component().structuralDiff; as changes) {
+      @if (changes.length) {
+        <details
+          class="group overflow-hidden rounded-xl border border-[color:var(--color-border)] bg-[var(--color-bg-secondary)]"
+          data-section="structure"
+          (toggle)="onToggle('structure', $event)"
+        >
+          <summary class="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4">
+            <div class="min-w-0">
+              <div class="text-base font-semibold text-[var(--color-text-primary)]">{{ structuralTitle() }}</div>
+              <div class="text-[0.86rem] text-[var(--color-text-tertiary)]">{{ structuralLabel() }}</div>
+            </div>
+            <mat-icon
+              class="!h-4 !w-4 !text-base text-[var(--color-text-tertiary)] transition-transform group-open:rotate-180"
+              aria-hidden="true"
+              >expand_more</mat-icon
+            >
+          </summary>
+          <div class="px-5 pb-5">
+            @if (structureOpen()) {
+              <app-structural-diff-list [changes]="changes" [framework]="framework()" />
+            }
+          </div>
+        </details>
+      }
+    }
+  </div>
+</article>

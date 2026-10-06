@@ -1,0 +1,188 @@
+<app-generic-popup
+  [shouldShow]="true"
+  [config]="popupConfig()"
+  [closeOnBackdrop]="!submitting()"
+  [closeOnEscape]="!submitting()"
+  (primaryAction)="onPrimary()"
+  (secondaryAction)="onSecondary()"
+  (closePopup)="onCloseRequested()"
+>
+  @if (phase() === 'detected') {
+    <div class="flex flex-col gap-4">
+      <dl class="divide-y divide-[color:var(--color-border)]" data-testid="detected">
+        @for (row of detectedRows(); track row.label) {
+          <div class="grid grid-cols-[minmax(0,8rem)_minmax(0,1fr)] gap-4 py-2.5">
+            <dt class="text-sm text-[var(--color-text-tertiary)]">{{ row.label }}</dt>
+            <dd
+              class="min-w-0 whitespace-pre-line break-words text-right text-sm font-medium text-[var(--color-text-primary)]"
+              [class.pv-code]="row.mono"
+              [class.!text-[var(--color-warning)]]="row.warn"
+            >
+              {{ row.value }}
+            </dd>
+          </div>
+        }
+      </dl>
+      @if (noRemote()) {
+        <app-inline-alert tone="info"
+          >Pull requests need a GitHub remote. Local branches and the working tree still work.</app-inline-alert
+        >
+      }
+    </div>
+  } @else if (onAppStep()) {
+    <div class="flex flex-col gap-4" data-testid="app-step">
+      <p class="text-sm leading-6 text-[var(--color-text-secondary)]">
+        <span class="pv-code">{{ discovery()?.rootPath }}</span> contains several apps. Choose the one to add.
+      </p>
+      <mat-radio-group
+        class="flex flex-col gap-2"
+        aria-label="App"
+        [value]="selectedKey()"
+        [disabled]="phase() === 'creatingApp'"
+        (change)="selectApp($event.value)"
+      >
+        @for (option of appOptions(); track option.key) {
+          <div
+            class="rounded-2xl border p-2 transition-colors"
+            [class.border-[color:var(--color-border)]]="option.key !== selectedKey()"
+            [class.border-[color:var(--shell-accent)]]="option.key === selectedKey()"
+            [class.bg-[var(--shell-accent-soft)]]="option.key === selectedKey()"
+            [attr.data-app]="option.key"
+          >
+            <mat-radio-button
+              [value]="option.key"
+              [disabled]="!option.selectable"
+              class="block [&_.mdc-form-field]:!flex [&_.mdc-form-field]:w-full [&_.mdc-form-field]:!items-start [&_label]:flex-1 [&_label]:py-1 [&_label]:pr-2"
+            >
+              <span class="flex flex-wrap items-center gap-2">
+                <span class="font-semibold text-[var(--color-text-primary)]">{{ option.app.suggestedName }}</span>
+                <span
+                  class="rounded-full border border-[color:var(--color-border)] px-2 py-0.5 text-xs text-[var(--color-text-secondary)]"
+                  data-testid="framework-chip"
+                  >{{ option.frameworkLabel }}</span
+                >
+              </span>
+              <span class="mt-1 block text-sm text-[var(--color-text-secondary)]">
+                <span class="pv-code">{{ option.app.appRoot }}</span>
+                @if (option.app.angularProject) {
+                  · project <span class="pv-code">{{ option.app.angularProject }}</span>
+                }
+              </span>
+            </mat-radio-button>
+            @if (option.app.repositoryId; as existingId) {
+              <button
+                type="button"
+                class="ml-12 text-sm font-medium text-[var(--shell-accent)] underline"
+                data-testid="already-added"
+                (click)="openExisting(existingId)"
+              >
+                Already added
+              </button>
+            } @else if (!option.app.supported) {
+              <p class="ml-12 text-sm text-[var(--color-warning)]" data-testid="unsupported-reason">
+                {{ option.app.reason }}
+              </p>
+            }
+          </div>
+        }
+      </mat-radio-group>
+      <mat-form-field class="w-full">
+        <mat-label>Display name</mat-label>
+        <input matInput [formControl]="appName" autocomplete="off" spellcheck="false" />
+        <mat-hint>Optional. Defaults to the suggested name.</mat-hint>
+        @if (appName.hasError('maxlength')) {
+          <mat-error>Name is too long.</mat-error>
+        }
+      </mat-form-field>
+      <mat-form-field class="w-full">
+        <mat-label>Screen size</mat-label>
+        <mat-select [formControl]="viewport" data-testid="add-render-viewport">
+          <mat-option value="auto">Auto-detect (mobile for Capacitor/Ionic apps)</mat-option>
+          <mat-option value="desktop">Desktop · 1280 × 800</mat-option>
+          <mat-option value="tablet">Tablet · 768 × 1024</mat-option>
+          <mat-option value="mobile">Mobile · 390 × 844</mat-option>
+        </mat-select>
+        <mat-hint>Screenshots are taken at this size. You can change it later.</mat-hint>
+      </mat-form-field>
+      @if (errorView(); as err) {
+        <app-inline-alert tone="error" [title]="err.title">
+          {{ err.message }}
+          @if (err.tip) {
+            <p class="mt-1" data-testid="rejection-tip">{{ err.tip }}</p>
+          }
+          @if (err.details.length) {
+            <ul class="mt-1 list-disc pl-5">
+              @for (detail of err.details; track detail) {
+                <li>{{ detail }}</li>
+              }
+            </ul>
+          }
+        </app-inline-alert>
+      }
+    </div>
+  } @else {
+    <form class="flex flex-col gap-4" [formGroup]="form" (ngSubmit)="submit()">
+      <mat-form-field class="w-full">
+        <mat-label>Local path</mat-label>
+        <input
+          matInput
+          formControlName="localPath"
+          required
+          cdkFocusInitial
+          autocomplete="off"
+          spellcheck="false"
+          autocapitalize="off"
+          placeholder="/home/you/dev/my-app"
+          (keydown.enter)="onPathEnter($event)"
+        />
+        <mat-hint>Absolute path to a local git clone, or to an app folder inside it.</mat-hint>
+        @if (form.controls.localPath.hasError('required')) {
+          <mat-error>Enter the folder path.</mat-error>
+        } @else if (form.controls.localPath.hasError('pattern')) {
+          <mat-error>Use an absolute path starting with / or ~/.</mat-error>
+        } @else if (form.controls.localPath.hasError('maxlength')) {
+          <mat-error>Path is too long.</mat-error>
+        }
+      </mat-form-field>
+      <mat-form-field class="w-full">
+        <mat-label>Display name</mat-label>
+        <input matInput formControlName="name" autocomplete="off" spellcheck="false" placeholder="my-app" />
+        <mat-hint>Optional. Defaults to the folder name.</mat-hint>
+        @if (form.controls.name.hasError('maxlength')) {
+          <mat-error>Name is too long.</mat-error>
+        }
+      </mat-form-field>
+      <mat-form-field class="w-full">
+        <mat-label>Screen size</mat-label>
+        <mat-select [formControl]="viewport" data-testid="add-render-viewport">
+          <mat-option value="auto">Auto-detect (mobile for Capacitor/Ionic apps)</mat-option>
+          <mat-option value="desktop">Desktop · 1280 × 800</mat-option>
+          <mat-option value="tablet">Tablet · 768 × 1024</mat-option>
+          <mat-option value="mobile">Mobile · 390 × 844</mat-option>
+        </mat-select>
+        <mat-hint>Screenshots are taken at this size. You can change it later.</mat-hint>
+      </mat-form-field>
+      <div
+        class="rounded-2xl border border-[color:var(--color-border)] bg-[var(--color-bg-tertiary)] px-4 py-3 text-sm leading-6 text-[var(--color-text-secondary)]"
+      >
+        PRVision reads this folder and creates its own git worktrees under ~/.prvision. Your working copy is never
+        modified. node_modules must be installed; it is linked, not copied.
+      </div>
+      @if (errorView(); as err) {
+        <app-inline-alert tone="error" [title]="err.title">
+          {{ err.message }}
+          @if (err.tip) {
+            <p class="mt-1" data-testid="rejection-tip">{{ err.tip }}</p>
+          }
+          @if (err.details.length) {
+            <ul class="mt-1 list-disc pl-5">
+              @for (detail of err.details; track detail) {
+                <li>{{ detail }}</li>
+              }
+            </ul>
+          }
+        </app-inline-alert>
+      }
+    </form>
+  }
+</app-generic-popup>

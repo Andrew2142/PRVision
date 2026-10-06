@@ -1,0 +1,564 @@
+<app-generic-popup
+  [shouldShow]="true"
+  [config]="popupConfig()"
+  [closeOnBackdrop]="!launching()"
+  [closeOnEscape]="!launching()"
+  (primaryAction)="onPrimary()"
+  (secondaryAction)="onSecondary()"
+  (closePopup)="onCloseRequested()"
+>
+  <div class="flex flex-col gap-5">
+    <!-- Step header -->
+    <ol class="flex items-center gap-2" aria-label="Steps" data-testid="stepper">
+      @for (label of stepLabels; track label; let i = $index; let last = $last) {
+        <li class="flex min-w-0 items-center gap-2" [class.flex-1]="!last">
+          <button
+            type="button"
+            class="flex min-w-0 items-center gap-2 rounded-full py-1 pr-2 text-left disabled:cursor-default"
+            [disabled]="i >= step() || launching()"
+            [attr.aria-current]="i === step() ? 'step' : null"
+            (click)="goToStep(i)"
+          >
+            <span
+              class="grid h-7 w-7 shrink-0 place-items-center rounded-full border text-xs font-semibold transition-colors"
+              [class.border-[color:var(--shell-accent)]]="i <= step()"
+              [class.bg-[var(--shell-accent)]]="i < step()"
+              [class.text-[var(--shell-accent-contrast)]]="i < step()"
+              [class.bg-[var(--shell-accent-soft)]]="i === step()"
+              [class.text-[var(--shell-accent)]]="i === step()"
+              [class.border-[color:var(--color-border)]]="i > step()"
+              [class.text-[var(--color-text-tertiary)]]="i > step()"
+            >
+              @if (i < step()) {
+                <mat-icon class="!h-4 !w-4 !text-base !leading-4" aria-hidden="true">check</mat-icon>
+              } @else {
+                {{ i + 1 }}
+              }
+            </span>
+            <span
+              class="truncate text-sm font-medium sm:inline"
+              [class.hidden]="i !== step()"
+              [class.text-[var(--color-text-primary)]]="i <= step()"
+              [class.text-[var(--color-text-tertiary)]]="i > step()"
+              >{{ label }}</span
+            >
+          </button>
+          @if (!last) {
+            <span class="h-px min-w-4 flex-1 bg-[var(--color-border)]" aria-hidden="true"></span>
+          }
+        </li>
+      }
+    </ol>
+
+    @switch (step()) {
+      <!-- 1. Source -->
+      @case (0) {
+        <div class="flex flex-col gap-3" data-testid="step-source">
+          <p class="text-sm text-[var(--color-text-secondary)]">What do you want to compare?</p>
+          @if (branchesError(); as err) {
+            <app-inline-alert tone="warning" title="Couldn't read local branches">
+              {{ err.message }}
+              <button inlineAlertAction mat-stroked-button type="button" class="!rounded-xl" (click)="retryContext()">
+                Retry
+              </button>
+            </app-inline-alert>
+          }
+          <div class="grid grid-cols-1 gap-3 sm:grid-cols-2" role="radiogroup" aria-label="Source">
+            @for (option of sourceOptions(); track option.kind) {
+              @let selected = source() === option.kind;
+              <label
+                class="relative flex gap-3 rounded-2xl border p-4 transition-colors has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-[var(--shell-accent)]"
+                [class.cursor-pointer]="!option.disabledReason"
+                [class.cursor-not-allowed]="!!option.disabledReason"
+                [class.opacity-60]="!!option.disabledReason"
+                [class.border-[color:var(--color-border)]]="!selected"
+                [class.hover:bg-[var(--color-surface-hover)]]="!selected && !option.disabledReason"
+                [class.border-[color:var(--shell-accent)]]="selected"
+                [class.bg-[var(--shell-accent-soft)]]="selected"
+                [attr.data-source]="option.kind"
+              >
+                <input
+                  type="radio"
+                  name="nv-source"
+                  class="sr-only"
+                  [value]="option.kind"
+                  [checked]="selected"
+                  [disabled]="!!option.disabledReason || launching()"
+                  (change)="chooseSource(option.kind)"
+                />
+                <span
+                  class="grid h-10 w-10 shrink-0 place-items-center rounded-xl"
+                  [class.bg-[var(--color-bg-tertiary)]]="!selected"
+                  [class.bg-[var(--shell-accent)]]="selected"
+                  [class.text-[var(--color-text-secondary)]]="!selected"
+                  [class.text-[var(--shell-accent-contrast)]]="selected"
+                >
+                  <mat-icon aria-hidden="true">{{ option.icon }}</mat-icon>
+                </span>
+                <span class="min-w-0">
+                  <span class="block font-semibold text-[var(--color-text-primary)]">{{ option.title }}</span>
+                  <span class="mt-0.5 block text-sm text-[var(--color-text-secondary)]">{{ option.description }}</span>
+                  @if (option.disabledReason) {
+                    <span
+                      class="mt-1.5 block text-xs text-[var(--color-text-tertiary)]"
+                      data-testid="disabled-reason"
+                      >{{ option.disabledReason }}</span
+                    >
+                  }
+                </span>
+              </label>
+            }
+          </div>
+        </div>
+      }
+
+      <!-- 2. Select -->
+      @case (1) {
+        <div class="flex flex-col gap-4" data-testid="step-select">
+          @switch (source()) {
+            @case ('github_pr') {
+              <div class="flex items-center justify-between gap-3">
+                <p class="text-sm text-[var(--color-text-secondary)]">Choose an open pull request.</p>
+                <button
+                  mat-icon-button
+                  type="button"
+                  aria-label="Refresh pull requests"
+                  matTooltip="Refresh pull requests"
+                  [disabled]="prsLoading()"
+                  (click)="loadPullRequests()"
+                >
+                  <mat-icon aria-hidden="true">refresh</mat-icon>
+                </button>
+              </div>
+              @if (prsLoading() && prs() === null) {
+                <app-loading-spinner [inline]="true" [diameter]="28" label="Loading pull requests" />
+              } @else {
+                @if (prErrorView(); as view) {
+                  <app-inline-alert [tone]="view.tone" [title]="view.title">
+                    {{ view.message }}
+                    @if (view.settings) {
+                      <a
+                        mat-stroked-button
+                        inlineAlertAction
+                        class="!rounded-xl"
+                        routerLink="/settings"
+                        (click)="onCloseRequested()"
+                        >Open settings</a
+                      >
+                    } @else {
+                      <button
+                        mat-stroked-button
+                        inlineAlertAction
+                        type="button"
+                        class="!rounded-xl"
+                        (click)="loadPullRequests()"
+                      >
+                        Retry
+                      </button>
+                    }
+                  </app-inline-alert>
+                } @else if (prRows().length === 0) {
+                  <app-empty-state
+                    title="No open pull requests"
+                    message="Open a pull request on GitHub, then refresh."
+                  />
+                } @else {
+                  <div
+                    class="flex max-h-80 flex-col gap-2 overflow-y-auto pr-1"
+                    role="radiogroup"
+                    aria-label="Pull request"
+                  >
+                    @for (row of prRows(); track row.pr.number) {
+                      @let pr = row.pr;
+                      @let selected = selectedPr() === pr.number;
+                      <label
+                        class="flex cursor-pointer items-start gap-3 rounded-2xl border px-4 py-3 transition-colors has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-[var(--shell-accent)]"
+                        [class.border-[color:var(--color-border)]]="!selected"
+                        [class.hover:bg-[var(--color-surface-hover)]]="!selected"
+                        [class.border-[color:var(--shell-accent)]]="selected"
+                        [class.bg-[var(--shell-accent-soft)]]="selected"
+                        [attr.data-pr]="pr.number"
+                      >
+                        <input
+                          type="radio"
+                          name="nv-pr"
+                          class="mt-1 h-4 w-4 shrink-0 accent-[var(--shell-accent)]"
+                          [value]="pr.number"
+                          [checked]="selected"
+                          (change)="selectPr(pr.number)"
+                        />
+                        <span class="min-w-0 flex-1">
+                          <span class="flex flex-wrap items-center gap-2">
+                            <span class="font-semibold tabular-nums text-[var(--color-text-secondary)]"
+                              >#{{ pr.number }}</span
+                            >
+                            <span class="font-semibold text-[var(--color-text-primary)]">{{ pr.title }}</span>
+                            @if (pr.draft) {
+                              <span class="dd-pill dd-pill--muted">Draft</span>
+                            }
+                          </span>
+                          <span class="mt-0.5 block text-xs text-[var(--color-text-tertiary)]">
+                            <span class="pv-code">{{ pr.headRef }} → {{ pr.baseRef }}</span>
+                            · by {{ pr.author }} ·
+                            <span [title]="pr.updatedAt | dateTime">{{ pr.updatedAt | relativeTime }}</span>
+                          </span>
+                        </span>
+                        @if (row.safeUrl; as url) {
+                          <a
+                            mat-icon-button
+                            [href]="url"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            [attr.aria-label]="'Open pull request #' + pr.number + ' on GitHub'"
+                            matTooltip="Open on GitHub"
+                            ><mat-icon aria-hidden="true">open_in_new</mat-icon></a
+                          >
+                        }
+                      </label>
+                    }
+                  </div>
+                }
+              }
+            }
+
+            @case ('local_branch') {
+              <p class="text-sm text-[var(--color-text-secondary)]">
+                Render a local branch against a base. The base side is their merge-base.
+              </p>
+              <form class="grid grid-cols-1 gap-3 sm:grid-cols-2" [formGroup]="branchForm" (ngSubmit)="onPrimary()">
+                <mat-form-field class="w-full">
+                  <mat-label>Head branch</mat-label>
+                  <mat-select formControlName="head" data-testid="head-select">
+                    <mat-select-trigger>{{ branchHeadValue() }}</mat-select-trigger>
+                    @for (option of branchOptions(); track option.name) {
+                      <mat-option [value]="option.name">
+                        {{ option.name }}
+                        @if (option.checkedOut) {
+                          <span class="ml-1 text-xs text-[var(--color-text-tertiary)]">(checked out)</span>
+                        }
+                      </mat-option>
+                    }
+                  </mat-select>
+                  @if (sameBranch()) {
+                    <mat-hint data-testid="same-branch">Choose two different branches.</mat-hint>
+                  }
+                </mat-form-field>
+                <mat-form-field class="w-full">
+                  <mat-label>Base branch</mat-label>
+                  <mat-select formControlName="base" data-testid="base-select">
+                    <mat-select-trigger>{{ branchBaseValue() }}</mat-select-trigger>
+                    @for (option of branchOptions(); track option.name) {
+                      <mat-option [value]="option.name">
+                        {{ option.name }}
+                        @if (option.checkedOut) {
+                          <span class="ml-1 text-xs text-[var(--color-text-tertiary)]">(checked out)</span>
+                        }
+                      </mat-option>
+                    }
+                  </mat-select>
+                </mat-form-field>
+              </form>
+            }
+
+            @case ('commit_range') {
+              <div class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+                <p class="text-sm text-[var(--color-text-secondary)]" data-testid="commit-intro">
+                  @if (commitMode() === 'single') {
+                    Pick a branch, then the commit whose changes you want to see.
+                  } @else {
+                    Pick a branch, then the <strong class="text-[var(--color-text-primary)]">From</strong> (older) and
+                    <strong class="text-[var(--color-text-primary)]">To</strong> (newer) commits to compare.
+                  }
+                </p>
+                <button
+                  type="button"
+                  class="shrink-0 rounded text-sm font-medium text-[var(--shell-accent)] underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--shell-accent)] disabled:opacity-60"
+                  data-testid="commit-mode-toggle"
+                  [disabled]="launching()"
+                  (click)="setCommitMode(commitMode() === 'single' ? 'range' : 'single')"
+                >
+                  {{ commitMode() === 'single' ? 'Compare a range instead' : 'Pick a single commit' }}
+                </button>
+              </div>
+              <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <mat-form-field class="w-full min-w-0" subscriptSizing="dynamic">
+                  <mat-label>Branch</mat-label>
+                  <mat-select [formControl]="commitBranch" data-testid="commit-branch-select">
+                    @for (option of branchOptions(); track option.name) {
+                      <mat-option [value]="option.name">
+                        {{ option.name }}
+                        @if (option.checkedOut) {
+                          <span class="ml-1 text-xs text-[var(--color-text-tertiary)]">(checked out)</span>
+                        }
+                      </mat-option>
+                    }
+                  </mat-select>
+                </mat-form-field>
+                <mat-form-field class="w-full min-w-0" subscriptSizing="dynamic">
+                  <mat-label>Search commits</mat-label>
+                  <mat-icon matPrefix class="!px-2 text-[var(--color-text-tertiary)]">search</mat-icon>
+                  <input
+                    matInput
+                    type="text"
+                    [formControl]="commitSearch"
+                    placeholder="Message, author or SHA"
+                    autocomplete="off"
+                    spellcheck="false"
+                    data-testid="commit-search"
+                  />
+                  @if (commitSearchText()) {
+                    <button
+                      matSuffix
+                      mat-icon-button
+                      type="button"
+                      aria-label="Clear search"
+                      data-testid="commit-search-clear"
+                      (click)="clearCommitSearch()"
+                    >
+                      <mat-icon>close</mat-icon>
+                    </button>
+                  }
+                </mat-form-field>
+              </div>
+
+              @if (commitsError(); as err) {
+                <app-inline-alert tone="error" title="Couldn't load commits">
+                  {{ err.message }}
+                  <button
+                    inlineAlertAction
+                    mat-stroked-button
+                    type="button"
+                    class="!rounded-xl"
+                    (click)="retryCommits()"
+                  >
+                    Retry
+                  </button>
+                </app-inline-alert>
+              }
+
+              @if (commitsLoading() && commits().length === 0) {
+                <app-loading-spinner [inline]="true" [diameter]="28" label="Loading commits" />
+              } @else if (activeSearch() && commits().length === 0 && !commitsError()) {
+                <app-empty-state
+                  title="No matching commits"
+                  [message]="noMatchMessage()"
+                  data-testid="commit-search-empty"
+                />
+              } @else if (commits().length === 1 && !hasMoreCommits() && !activeSearch()) {
+                <app-empty-state
+                  title="Only one commit"
+                  message="This branch has a single commit, so there is nothing to compare."
+                />
+              } @else if (commits().length > 0) {
+                @let single = commitMode() === 'single';
+                <div
+                  class="max-h-[22rem] overflow-y-auto rounded-2xl border border-[color:var(--color-border)]"
+                  data-testid="commit-list"
+                  [attr.data-mode]="commitMode()"
+                >
+                  <table class="w-full table-fixed text-sm">
+                    <caption class="sr-only">
+                      Commits on
+                      {{
+                        commitBranch.value
+                      }}, newest first
+                    </caption>
+                    <thead class="sticky top-0 z-[1] bg-[var(--color-bg-tertiary)]">
+                      <tr
+                        class="text-left text-xs font-semibold uppercase tracking-[0.08em] text-[var(--color-text-tertiary)]"
+                      >
+                        @if (single) {
+                          <th scope="col" class="w-12 py-2 pl-3 text-center"><span class="sr-only">Pick</span></th>
+                        } @else {
+                          <th scope="col" class="w-12 py-2 pl-3 text-center">To</th>
+                          <th scope="col" class="w-14 py-2 text-center">From</th>
+                        }
+                        <th scope="col" class="py-2 pr-3">Commit</th>
+                        <th scope="col" class="hidden w-36 py-2 pr-3 sm:table-cell">Author</th>
+                        <th scope="col" class="hidden w-28 py-2 pr-3 text-right sm:table-cell">When</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      @for (row of commitRows(); track row.commit.sha) {
+                        @let c = row.commit;
+                        <tr
+                          class="border-t border-[color:var(--color-border)]"
+                          [class.bg-[var(--shell-accent-soft)]]="single ? row.isSingle : row.inRange"
+                          [class.opacity-60]="single && row.singleDisabled"
+                          [attr.data-sha]="c.shortSha"
+                        >
+                          @if (single) {
+                            <td
+                              class="py-2 pl-3 text-center"
+                              [matTooltip]="row.singleDisabled ? rootCommitReason : ''"
+                              [matTooltipDisabled]="!row.singleDisabled"
+                              data-testid="single-cell"
+                            >
+                              <input
+                                type="radio"
+                                name="nv-single"
+                                class="h-4 w-4 accent-[var(--shell-accent)] disabled:opacity-30"
+                                [id]="'nv-single-' + c.sha"
+                                [checked]="row.isSingle"
+                                [disabled]="row.singleDisabled || launching()"
+                                [attr.aria-label]="
+                                  c.shortSha + ' ' + c.subject + (row.singleDisabled ? ': ' + rootCommitReason : '')
+                                "
+                                (change)="pickSingle(c.sha)"
+                              />
+                            </td>
+                          } @else {
+                            <td class="py-2 pl-3 text-center">
+                              <input
+                                type="radio"
+                                name="nv-to"
+                                class="h-4 w-4 accent-[var(--shell-accent)] disabled:opacity-30"
+                                [checked]="row.isTo"
+                                [disabled]="row.toDisabled"
+                                [attr.aria-label]="'To: ' + c.shortSha + ' ' + c.subject"
+                                (change)="pickTo(c.sha)"
+                              />
+                            </td>
+                            <td class="py-2 text-center">
+                              <input
+                                type="radio"
+                                name="nv-from"
+                                class="h-4 w-4 accent-[var(--shell-accent)] disabled:opacity-30"
+                                [checked]="row.isFrom"
+                                [disabled]="row.fromDisabled"
+                                [attr.aria-label]="'From: ' + c.shortSha + ' ' + c.subject"
+                                (change)="pickFrom(c.sha)"
+                              />
+                            </td>
+                          }
+                          <td class="py-2 pr-3">
+                            <label
+                              class="flex min-w-0 items-center gap-2"
+                              [class.cursor-pointer]="single && !row.singleDisabled"
+                              [attr.for]="single ? 'nv-single-' + c.sha : null"
+                            >
+                              <span class="pv-code shrink-0 text-xs text-[var(--color-text-secondary)]">{{
+                                c.shortSha
+                              }}</span>
+                              <span class="truncate text-[var(--color-text-primary)]" [title]="c.subject">{{
+                                c.subject
+                              }}</span>
+                              @if (c.isMerge) {
+                                <span class="dd-pill dd-pill--muted shrink-0">Merge</span>
+                              }
+                            </label>
+                          </td>
+                          <td class="hidden truncate py-2 pr-3 text-[var(--color-text-secondary)] sm:table-cell">
+                            {{ c.authorName }}
+                          </td>
+                          <td
+                            class="hidden truncate whitespace-nowrap py-2 pr-3 text-right sm:table-cell text-[var(--color-text-tertiary)]"
+                            [title]="c.committedAt | dateTime"
+                          >
+                            {{ c.committedAt | relativeTime }}
+                          </td>
+                        </tr>
+                      }
+                    </tbody>
+                  </table>
+                  @if (hasMoreCommits()) {
+                    <div class="flex justify-center border-t border-[color:var(--color-border)] p-2">
+                      <button
+                        mat-button
+                        type="button"
+                        class="!rounded-xl"
+                        data-testid="load-more"
+                        [disabled]="commitsLoading()"
+                        (click)="loadMoreCommits()"
+                      >
+                        @if (commitsLoading()) {
+                          <mat-spinner diameter="16" class="!inline-block align-middle mr-2" />
+                        }
+                        Load more
+                      </button>
+                    </div>
+                  }
+                </div>
+                <p class="text-sm text-[var(--color-text-secondary)]" data-testid="range-summary" aria-live="polite">
+                  @if (single) {
+                    @if (singleParentShort(); as parent) {
+                      Shows what this commit changed, compared with its parent <span class="pv-code">{{ parent }}</span
+                      >.
+                    } @else {
+                      Pick a commit.
+                    }
+                  } @else if (rangeSize() > 0) {
+                    Compares {{ rangeSize() }} commit{{ rangeSize() === 1 ? '' : 's' }}. To must be newer than From.
+                  } @else {
+                    Pick a From commit below the To commit.
+                  }
+                </p>
+              }
+            }
+
+            @case ('working_tree') {
+              <div
+                class="flex flex-col gap-3 rounded-2xl border border-[color:var(--color-border)] bg-[var(--color-bg-tertiary)] p-4"
+              >
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <p class="font-semibold text-[var(--color-text-primary)]" data-testid="wt-subtitle">
+                    Uncommitted changes on {{ currentBranchLabel() ?? 'detached HEAD' }}
+                  </p>
+                  <span class="dd-pill dd-pill--warning">Changes detected</span>
+                </div>
+                <p class="text-sm leading-6 text-[var(--color-text-secondary)]">
+                  Compares your uncommitted edits, including untracked files, with the checked-out commit. They are
+                  captured when the run starts.
+                </p>
+              </div>
+            }
+          }
+        </div>
+      }
+
+      <!-- 3. Review & start -->
+      @case (2) {
+        <div class="flex flex-col gap-4" data-testid="step-review">
+          @if (singleReview(); as review) {
+            <div class="flex flex-col gap-1" data-testid="review-headline">
+              <p class="text-base font-semibold text-[var(--color-text-primary)]">
+                Changes made by <span class="pv-code">{{ review.shortSha }}</span> · {{ review.subject }}
+              </p>
+              @if (review.isMerge) {
+                <p class="text-sm text-[var(--color-text-secondary)]" data-testid="merge-note">
+                  Merge commit: compared with its first parent, so everything the merge brought in.
+                </p>
+              }
+            </div>
+          }
+          <dl
+            class="divide-y divide-[color:var(--color-border)] rounded-2xl border border-[color:var(--color-border)] px-4"
+          >
+            @for (row of reviewRows(); track row.label) {
+              <div class="grid grid-cols-[minmax(0,9rem)_minmax(0,1fr)] gap-4 py-2.5">
+                <dt class="text-sm text-[var(--color-text-tertiary)]">{{ row.label }}</dt>
+                <dd
+                  class="min-w-0 break-words text-sm font-medium text-[var(--color-text-primary)]"
+                  [class.pv-code]="row.mono"
+                >
+                  {{ row.value }}
+                </dd>
+              </div>
+            }
+          </dl>
+          <mat-form-field class="w-full" subscriptSizing="dynamic">
+            <mat-label>Screen size</mat-label>
+            <mat-select [formControl]="screenSize" data-testid="run-render-viewport">
+              <mat-option value="desktop">Desktop · 1280 × 800</mat-option>
+              <mat-option value="tablet">Tablet · 768 × 1024</mat-option>
+              <mat-option value="mobile">Mobile · 390 × 844</mat-option>
+            </mat-select>
+            <mat-hint
+              >Screenshots for this run are taken at this size. The repository default is set on its page.</mat-hint
+            >
+          </mat-form-field>
+        </div>
+      }
+    }
+  </div>
+</app-generic-popup>

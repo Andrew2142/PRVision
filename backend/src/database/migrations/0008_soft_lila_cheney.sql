@@ -1,0 +1,2 @@
+ALTER TABLE "visualizations" ADD COLUMN "render_viewport" text;--> statement-breakpoint
+ALTER TABLE "visualizations" ADD CONSTRAINT "visualizations_render_viewport_check" CHECK ("visualizations"."render_viewport" is null or "visualizations"."render_viewport" in ('desktop', 'tablet', 'mobile'));

@@ -1,0 +1,33 @@
+✘ [ERROR] Could not resolve "../../src/app/does-not-exist/missing.component"
+
+    .prvision-harness/components/106.ts:4:24:
+      4 │ ... { Missing } from '../../src/app/does-not-exist/missing.component';
+        ╵                      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+
+✘ [ERROR] NG8008: Required input 'title' from component SignalCardComponent must be specified. [plugin angular-compiler]
+
+    .prvision-harness/components/107.ts:6:83:
+      6 │ ...ardComponent], template: '<signal-card [titel]="x" /><unknown-el...
+        ╵                               ~~~~~~~~~~~
+
+
+✘ [ERROR] NG8002: Can't bind to 'titel' since it isn't a known property of 'signal-card'.
+1. If 'signal-card' is an Angular component and it has 'titel' input, then verify that it is included in the '@Component.imports' of this component.
+2. If 'signal-card' is a Web Component then add 'CUSTOM_ELEMENTS_SCHEMA' to the '@Component.schemas' of this component to suppress this message.
+3. To allow any property add 'NO_ERRORS_SCHEMA' to the '@Component.schemas' of this component. [plugin angular-compiler]
+
+    .prvision-harness/components/107.ts:6:95:
+      6 │ ...], template: '<signal-card [titel]="x" /><unknown-el></unknown-e...
+        ╵                               ~~~~~~~~~~~
+
+
+✘ [ERROR] NG8001: 'unknown-el' is not a known element:
+1. If 'unknown-el' is an Angular component, then verify that it is included in the '@Component.imports' of this component.
+2. If 'unknown-el' is a Web Component then add 'CUSTOM_ELEMENTS_SCHEMA' to the '@Component.schemas' of this component to suppress this message. [plugin angular-compiler]
+
+    .prvision-harness/components/107.ts:6:109:
+      6 │ ...template: '<signal-card [titel]="x" /><unknown-el></unknown-el>' })
+        ╵                                          ~~~~~~~~~~~~
+
+

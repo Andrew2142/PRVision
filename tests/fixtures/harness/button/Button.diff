@@ -1,0 +1,12 @@
+diff --git a/src/components/Button/Button.tsx b/src/components/Button/Button.tsx
+--- a/src/components/Button/Button.tsx
++++ b/src/components/Button/Button.tsx
+@@ -1,16 +1,27 @@
+ import clsx from "clsx";
+-import type { ButtonHTMLAttributes } from "react";
++import type { ButtonHTMLAttributes, ReactNode } from "react";
++import { Spinner } from "../Spinner/Spinner";
+ import styles from "./Button.module.css";
+ 
+-export type ButtonVariant = "primary" | "secondary";
++export type ButtonVariant = "primary" | "secondary" | "danger";

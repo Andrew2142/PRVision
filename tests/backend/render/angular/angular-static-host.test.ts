@@ -1,0 +1,134 @@
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import http from "node:http";
+import path from "node:path";
+import { test, type TestContext } from "node:test";
+import {
+  AngularStaticHost,
+  mimeTypeFor,
+  type AngularStaticHostHandle
+} from "../../../../backend/src/services/visualizations/pipeline/render/angular/angular-static-host";
+import { makeTempDir } from "../../helpers/temp-dir";
+
+interface RawResponse {
+  status: number;
+  headers: http.IncomingHttpHeaders;
+  body: string;
+}
+
+/** Sends the path verbatim (no URL normalization by a client library). */
+function request(origin: string, rawPath: string, method = "GET"): Promise<RawResponse> {
+  const url = new URL(origin);
+  return new Promise((resolve, reject) => {
+    const req = http.request({ host: url.hostname, port: url.port, path: rawPath, method, agent: false }, (res) => {
+      const chunks: Buffer[] = [];
+      res.on("data", (chunk: Buffer) => chunks.push(chunk));
+      res.on("end", () => {
+        resolve({ status: res.statusCode ?? 0, headers: res.headers, body: Buffer.concat(chunks).toString("utf8") });
+      });
+    });
+    req.on("error", reject);
+    req.end();
+  });
+}
+
+async function startHost(t: TestContext): Promise<{ host: AngularStaticHostHandle; root: string; dist: string }> {
+  const temp = makeTempDir("angular-static");
+  const root = temp.path;
+  const dist = path.join(root, "dist");
+  fs.mkdirSync(path.join(dist, "media"), { recursive: true });
+  fs.writeFileSync(path.join(dist, "index.html"), "<!doctype html><prvision-root></prvision-root>");
+  fs.writeFileSync(path.join(dist, "main.js"), "console.log(1);");
+  fs.writeFileSync(path.join(dist, "styles.css"), "body{}");
+  fs.writeFileSync(path.join(dist, "media", "font.woff2"), "w");
+  fs.writeFileSync(path.join(dist, "data.bin"), "b");
+  fs.writeFileSync(path.join(root, "secret.txt"), "outside");
+  fs.symlinkSync(path.join(root, "secret.txt"), path.join(dist, "escape.txt"));
+  const host = await AngularStaticHost.start({
+    side: "head",
+    groupKey: "none",
+    distDir: dist,
+    buildLogs: [{ level: "info", message: "Application bundle generation complete." }],
+    tailwindMajor: 3,
+    warnings: Array.from({ length: 12 }, (_, index) => `warning ${String(index)}`)
+  });
+  t.after(async () => {
+    await host.stop();
+    temp.cleanup();
+  });
+  return { host, root, dist };
+}
+
+test("AngularStaticHost.start binds 127.0.0.1 on an ephemeral port and exposes the host handle", async (t) => {
+  const { host } = await startHost(t);
+  assert.match(host.origin, /^http:\/\/127\.0\.0\.1:\d+$/);
+  assert.equal(host.harnessUrlPath, "/index.html");
+  assert.equal(host.side, "head");
+  assert.equal(host.groupKey, "none");
+  assert.equal(host.tailwindMajor, 3);
+  assert.equal(host.warnings.length, 10);
+  assert.equal(host.isAlive(), true);
+  assert.equal(host.exitReason(), null);
+  assert.equal(host.sawDepsReoptimizeSince(0), false);
+  assert.equal(host.currentSeq(), 1);
+});
+
+test("AngularStaticHost serves files with MIME types, no-store and nosniff; / is the index", async (t) => {
+  const { host } = await startHost(t);
+  const index = await request(host.origin, "/");
+  assert.equal(index.status, 200);
+  assert.match(String(index.headers["content-type"]), /^text\/html/);
+  assert.equal(index.headers["cache-control"], "no-store");
+  assert.equal(index.headers["x-content-type-options"], "nosniff");
+  assert.ok(index.body.includes("prvision-root"));
+  assert.match(String((await request(host.origin, "/main.js?v=1")).headers["content-type"]), /^text\/javascript/);
+  assert.match(String((await request(host.origin, "/styles.css")).headers["content-type"]), /^text\/css/);
+  assert.equal((await request(host.origin, "/media/font.woff2")).headers["content-type"], "font/woff2");
+  assert.equal((await request(host.origin, "/data.bin")).headers["content-type"], "application/octet-stream");
+  const head = await request(host.origin, "/main.js", "HEAD");
+  assert.equal(head.status, 200);
+  assert.equal(head.body, "");
+  assert.equal(mimeTypeFor("a.MJS"), "text/javascript; charset=utf-8");
+  assert.equal(mimeTypeFor("a.svg"), "image/svg+xml");
+});
+
+test("AngularStaticHost answers 404 for traversal, encoded traversal, symlinks out of dist, directories and missing files", async (t) => {
+  const { host } = await startHost(t);
+  const seq = host.currentSeq();
+  for (const rawPath of [
+    "/../secret.txt",
+    "/%2e%2e/secret.txt",
+    "/media/%2E%2E/%2E%2E/secret.txt",
+    "/escape.txt",
+    "/media",
+    "/nope.js",
+    "/a%00b"
+  ]) {
+    const response = await request(host.origin, rawPath);
+    assert.equal(response.status, 404, rawPath);
+    assert.ok(!response.body.includes("outside"), rawPath);
+  }
+  const logged = host.logsSince(seq, "warn");
+  assert.equal(logged.length, 7);
+  assert.ok(logged.every((entry) => entry.level === "warn" && entry.message.endsWith(": HTTP 404")));
+  assert.equal(host.logsSince(seq, "error").length, 0);
+});
+
+test("AngularStaticHost allows GET and HEAD only; stop() closes the server", async (t) => {
+  const { host } = await startHost(t);
+  const post = await request(host.origin, "/index.html", "POST");
+  assert.equal(post.status, 405);
+  assert.equal(post.headers.allow, "GET, HEAD");
+  await host.stop();
+  await host.stop();
+  assert.equal(host.isAlive(), false);
+  assert.equal(host.exitReason(), "stopped");
+  await assert.rejects(request(host.origin, "/"), /ECONNREFUSED/);
+});
+
+test("AngularStaticHost.start rejects a missing build folder", async () => {
+  await assert.rejects(
+    AngularStaticHost.start({ side: "base", groupKey: "none", distDir: "/nonexistent/prvision/dist" }),
+    /ENOENT/
+  );
+});

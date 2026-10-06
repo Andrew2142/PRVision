@@ -1,0 +1,151 @@
+<a class="pv-skip-link" href="#main-content">Skip to content</a>
+
+<div class="app-shell flex h-screen min-h-0 bg-transparent font-sans">
+  @if (!isDesktop() && drawerOpen()) {
+    <button
+      type="button"
+      class="fixed inset-0 z-30 bg-[rgb(0_0_0/0.5)] backdrop-blur-sm"
+      aria-label="Close navigation"
+      (click)="closeDrawer()"
+    ></button>
+  }
+
+  <aside
+    id="app-sidebar"
+    class="app-sidebar flex w-64 shrink-0 flex-col shadow-2xl"
+    [class.!fixed]="!isDesktop()"
+    [class.inset-y-0]="!isDesktop()"
+    [class.left-0]="!isDesktop()"
+    [class.!z-40]="!isDesktop()"
+    [class.transition-transform]="!isDesktop()"
+    [class.-translate-x-full]="sidebarHidden()"
+    [attr.inert]="sidebarHidden() ? '' : null"
+    aria-label="Primary"
+  >
+    <div class="border-b border-[color:var(--shell-sidebar-border)] px-2 py-3">
+      <a routerLink="/repositories" class="app-brand flex min-w-0 items-center gap-3 px-2">
+        <svg
+          class="h-[18px] w-8 shrink-0 overflow-visible text-[color:var(--color-text-primary)]"
+          viewBox="0 0 60 34"
+          aria-hidden="true"
+        >
+          <g class="app-brand__blink">
+            <path d="M3 17C14 4 46 4 57 17C46 30 14 30 3 17Z" fill="none" stroke="currentColor" stroke-width="3.5" />
+            <g class="app-brand__pupil">
+              <circle cx="30" cy="17" r="7" fill="none" stroke="currentColor" stroke-width="3.5" />
+              <path d="M30 10A7 7 0 0 1 30 24Z" fill="currentColor" />
+            </g>
+          </g>
+        </svg>
+        <div class="min-w-0">
+          <div class="app-sidebar__brand-name truncate font-display text-base font-semibold tracking-tight">
+            PRVision
+          </div>
+        </div>
+      </a>
+    </div>
+
+    <nav class="flex flex-1 flex-col gap-0.5 overflow-y-auto overflow-x-hidden p-2" aria-label="Main">
+      @for (group of navGroups; track group.label; let first = $first) {
+        <div [class.pt-2]="first" [class.pt-5]="!first" class="pb-2">
+          <div
+            class="app-sidebar__group-label px-3 font-mono text-[0.6875rem] font-semibold uppercase tracking-[0.12em]"
+          >
+            {{ group.label }}
+          </div>
+        </div>
+        @for (item of group.items; track item.path) {
+          <a
+            #firstNavLink
+            [routerLink]="item.path"
+            routerLinkActive="nav-link-active"
+            ariaCurrentWhenActive="page"
+            class="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors hover:bg-white/[0.06]"
+          >
+            <mat-icon class="!h-[22px] !w-[22px] !shrink-0 !text-[22px]" aria-hidden="true">{{ item.icon }}</mat-icon>
+            <span>{{ item.label }}</span>
+          </a>
+        }
+      }
+    </nav>
+
+    <div class="border-t border-[color:var(--shell-sidebar-border)] p-3">
+      <div class="flex items-center gap-2.5 px-1">
+        <div
+          class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--shell-accent-soft)] text-[var(--shell-accent)]"
+        >
+          <mat-icon class="!h-[18px] !w-[18px] !text-[18px]" aria-hidden="true">computer</mat-icon>
+        </div>
+        <div class="min-w-0">
+          <div class="app-sidebar__brand-name truncate text-sm font-medium leading-tight">Local mode</div>
+          <div class="app-sidebar__muted mt-0.5 text-[11px] leading-tight">{{ apiHost }} · v{{ appVersion }}</div>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <div class="relative flex min-h-0 min-w-0 flex-1 flex-col">
+    <header
+      class="pv-topbar sticky top-0 z-20 flex h-14 shrink-0 items-center justify-between gap-3 px-4 sm:px-6 lg:px-8"
+    >
+      <div class="flex min-w-0 items-center gap-2">
+        @if (!isDesktop()) {
+          <button
+            #menuButton
+            mat-icon-button
+            type="button"
+            aria-controls="app-sidebar"
+            [attr.aria-expanded]="drawerOpen()"
+            aria-label="Open navigation"
+            (click)="openDrawer()"
+          >
+            <mat-icon>menu</mat-icon>
+          </button>
+        }
+        <span class="truncate text-sm font-semibold text-[var(--color-text-secondary)]">{{ sectionTitle() }}</span>
+      </div>
+      <div class="flex items-center gap-2">
+        <span role="status" aria-live="polite" class="contents">
+          @switch (health.status()) {
+            @case ('online') {
+              <span class="dd-pill dd-pill--info"
+                ><span class="dd-pill__dot" aria-hidden="true"></span>API online</span
+              >
+            }
+            @case ('degraded') {
+              <span class="dd-pill dd-pill--warning"
+                ><span class="dd-pill__dot" aria-hidden="true"></span>API degraded</span
+              >
+            }
+            @case ('offline') {
+              <span class="dd-pill dd-pill--danger"
+                ><span class="dd-pill__dot" aria-hidden="true"></span>API offline</span
+              >
+            }
+            @default {
+              <span class="dd-pill dd-pill--muted">Connecting…</span>
+            }
+          }
+        </span>
+        <button
+          mat-icon-button
+          type="button"
+          class="app-header__icon-button"
+          (click)="theme.toggle()"
+          [attr.aria-label]="theme.isDark() ? 'Switch to light theme' : 'Switch to dark theme'"
+          [matTooltip]="theme.isDark() ? 'Light theme' : 'Dark theme'"
+        >
+          <mat-icon>{{ theme.isDark() ? 'light_mode' : 'dark_mode' }}</mat-icon>
+        </button>
+      </div>
+    </header>
+
+    <main id="main-content" tabindex="-1" class="relative flex min-h-0 min-w-0 flex-1 flex-col">
+      <div #scrollContainer class="flex min-h-0 flex-1 flex-col overflow-y-auto p-6 lg:p-8">
+        <div class="mx-auto flex min-h-0 w-full max-w-[1800px] flex-1 flex-col">
+          <router-outlet />
+        </div>
+      </div>
+    </main>
+  </div>
+</div>

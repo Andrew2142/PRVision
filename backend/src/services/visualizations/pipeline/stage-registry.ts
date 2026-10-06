@@ -1,0 +1,76 @@
+/**
+ * Pipeline stage ports and their default factories (07 §5.9.2).
+ *
+ * The orchestrator calls sheets 08–11 only through the port types below, which mirror exactly the methods those
+ * sheets publish (00 §14.7; 08 §5.1, 09 §5.9, 10 §5.13.1, 11 §5.1). Every sheet has landed, so the placeholder
+ * stages are gone.
+ *
+ * SWAP POINTS (docs/build-notes/07.md lists them line by line): when sheet NN lands, it
+ *   1. replaces its port type below with `Pick<RealService, "method">` (or re-exports its own type), and
+ *   2. replaces its placeholder in `defaultPipelineStepFactories()` with the real constructor call.
+ * Nothing else in sheet 07 changes.
+ */
+import type { ComponentSourceQueries, PipelineContext } from "../../../types/visualization-pipeline";
+import { ChangeAnalysisService } from "./change-analysis-service";
+import { HarnessGenerationService } from "./harness-generation-service";
+import { ImageDiffService } from "./image-diff-service";
+import { RenderService, type RepairHarnessFn } from "./render-service";
+import { StructuralDiffService } from "./structural-diff-service";
+import { SummaryService } from "./summary-service";
+
+// ---------------------------------------------------------------------------------------------------------------
+// Port types (exact method signatures of sheets 08–11)
+// ---------------------------------------------------------------------------------------------------------------
+
+/** Sheet 08 `ChangeAnalysisService` (08 §5.1). */
+export type ChangeAnalysisStage = Pick<ChangeAnalysisService, "analyze">;
+
+/** Sheet 09 `HarnessGenerationService` (09 §5.9). */
+export type HarnessGenerationStage = Pick<HarnessGenerationService, "generateAll" | "repairHarness">;
+
+/** Sheet 10 §5.13.1 `RenderComponentInput` and `RepairHarnessFn` (same signature as 09's repairHarness). */
+export type { RenderComponentInput, RepairHarnessFn } from "./render-service";
+
+/** Sheet 10 `RenderService` (10 §5.13.1). */
+export type RenderStage = Pick<RenderService, "renderAll">;
+
+/** Sheet 11 `ImageDiffService` (11 §5.2). */
+export type ImageDiffStage = Pick<ImageDiffService, "diff">;
+
+/** Sheet 11 §5.3 `StructuralDiffInput` / `StructuralDiffOutcome` and §5.4 `SummaryOutcome`. */
+export type { StructuralDiffInput, StructuralDiffOutcome } from "./structural-diff-service";
+export type { SummaryOutcome } from "./summary-service";
+
+/** Sheet 11 `StructuralDiffService` (11 §5.3). */
+export type StructuralDiffStage = Pick<StructuralDiffService, "compare">;
+
+/** Sheet 11 `SummaryService` (11 §5.4). */
+export type SummaryStage = Pick<SummaryService, "summarize">;
+
+/** How the orchestrator obtains each stage (07 §5.9.2). Tests swap in fakes. */
+export interface PipelineStepFactories {
+  /** 08 — default `new ChangeAnalysisService()`; one instance per job. */
+  changeAnalysis(): ChangeAnalysisStage;
+  /** 09 — default `new HarnessGenerationService(ctx, sourceQueries)`; the same instance serves repairs for 10. */
+  harnessGeneration(ctx: PipelineContext, sourceQueries: ComponentSourceQueries): HarnessGenerationStage;
+  /** 10 — default `new RenderService({ repairHarness })` (10 §5.13.1; other deps use 10's defaults). */
+  render(deps: { repairHarness: RepairHarnessFn }): RenderStage;
+  /** 11 — defaults `new ImageDiffService()`, `new StructuralDiffService()`, `new SummaryService()`. */
+  imageDiff(): ImageDiffStage;
+  structuralDiff(): StructuralDiffStage;
+  summary(): SummaryStage;
+}
+
+/**
+ * The orchestrator's default stages. Each line is one swap point (build note 07, "Swap points").
+ */
+export function defaultPipelineStepFactories(): PipelineStepFactories {
+  return {
+    changeAnalysis: () => new ChangeAnalysisService(),
+    harnessGeneration: (ctx, sourceQueries) => new HarnessGenerationService(ctx, sourceQueries),
+    render: (deps) => new RenderService({ repairHarness: deps.repairHarness }),
+    imageDiff: () => new ImageDiffService(),
+    structuralDiff: () => new StructuralDiffService(),
+    summary: () => new SummaryService()
+  };
+}

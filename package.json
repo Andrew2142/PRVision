@@ -1,0 +1,43 @@
+{
+  "name": "prvision",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local-first visual review of UI changes in pull requests, branches and working trees",
+  "engines": {
+    "node": ">=22.12.0",
+    "npm": ">=10.0.0"
+  },
+  "scripts": {
+    "presetup": "node scripts/check-prereqs.mjs",
+    "setup": "npm run setup:install && npm run setup:env && npm run infra:up && npm run db:migrate && npm run setup:browsers && npm run setup:datadir",
+    "setup:install": "npm install && npm install --prefix backend && npm install --prefix frontend",
+    "setup:env": "node backend/scripts/setup-env.mjs",
+    "setup:browsers": "npm run playwright:install --prefix backend",
+    "setup:datadir": "npm run datadir:init --prefix backend",
+    "infra:up": "docker compose up -d --wait",
+    "infra:down": "docker compose down",
+    "infra:reset": "docker compose down -v",
+    "infra:logs": "docker compose logs -f --tail=100",
+    "db:migrate": "npm run db:migrate --prefix backend",
+    "predev": "npm run dev:clean && node backend/scripts/setup-env.mjs --check && npm run infra:up && npm run db:migrate",
+    "dev": "concurrently -k -n backend,worker,frontend -c yellow,magenta,cyan \"npm:dev:backend\" \"npm:dev:worker\" \"npm:dev:frontend\"",
+    "dev:clean": "node scripts/clean-dev-ports.mjs 3100 4210",
+    "dev:backend": "npm run dev --prefix backend",
+    "dev:worker": "npm run dev:worker --prefix backend",
+    "dev:frontend": "npm run start --prefix frontend",
+    "build": "npm run build --prefix backend && npm run build --prefix frontend",
+    "typecheck": "npm run typecheck --prefix backend",
+    "lint": "npm run lint --prefix backend && npm run lint --prefix frontend",
+    "format": "npm run format --prefix backend && npm run format --prefix frontend",
+    "format:check": "npm run format:check --prefix backend && npm run format:check --prefix frontend",
+    "test": "npm run test:backend && npm run test:frontend",
+    "test:backend": "npm run test --prefix backend",
+    "test:frontend": "npm run test --prefix frontend",
+    "verify": "npm run verify --prefix backend && npm run verify --prefix frontend",
+    "fixture:create": "node tools/create-fixture-repo.mjs",
+    "fixture:create:angular": "node tools/create-angular-fixture-repo.mjs"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}

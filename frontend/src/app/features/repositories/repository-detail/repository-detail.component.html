@@ -1,0 +1,96 @@
+@if (repository(); as repo) {
+  <app-page-header
+    [title]="repo.name"
+    [subtitle]="repo.localPath"
+    backLink="/repositories"
+    backLabel="Back to repositories"
+  >
+    @if (githubUrl(); as url) {
+      <a
+        pageHeaderMeta
+        class="dd-pill dd-pill--outline inline-flex items-center gap-1 hover:underline"
+        [href]="url"
+        target="_blank"
+        rel="noopener noreferrer"
+        >{{ githubLabel() }} <mat-icon class="!h-3.5 !w-3.5 !text-sm" aria-hidden="true">open_in_new</mat-icon></a
+      >
+    } @else {
+      <span pageHeaderMeta class="dd-pill dd-pill--muted">No GitHub remote</span>
+    }
+    @for (chip of appChips(); track chip) {
+      <span pageHeaderMeta class="dd-pill dd-pill--outline" data-testid="app-chip">{{ chip }}</span>
+    }
+    <span pageHeaderMeta class="dd-pill dd-pill--outline">{{ repo.packageManager }}</span>
+    <span pageHeaderMeta class="dd-pill dd-pill--outline">{{ defaultBranchLabel() }}</span>
+
+    <button
+      pageHeaderActions
+      mat-stroked-button
+      type="button"
+      class="!rounded-xl"
+      [disabled]="redetecting()"
+      (click)="redetect()"
+    >
+      @if (redetecting()) {
+        <mat-spinner diameter="18" class="!inline-block align-middle mr-2" />
+      } @else {
+        <mat-icon aria-hidden="true">refresh</mat-icon>
+      }
+      {{ redetecting() ? 'Re-detecting…' : 'Re-detect' }}
+    </button>
+    <button
+      pageHeaderActions
+      mat-stroked-button
+      color="warn"
+      type="button"
+      class="!rounded-xl"
+      [disabled]="removing()"
+      (click)="remove()"
+    >
+      @if (removing()) {
+        <mat-spinner diameter="18" class="!inline-block align-middle mr-2" />
+      } @else {
+        <mat-icon aria-hidden="true">delete</mat-icon>
+      }
+      Remove
+    </button>
+    <button
+      pageHeaderActions
+      mat-flat-button
+      color="primary"
+      type="button"
+      class="!rounded-xl"
+      data-testid="new-visualization"
+      (click)="openNewVisualization()"
+    >
+      <mat-icon aria-hidden="true">add</mat-icon>
+      New visualization
+    </button>
+  </app-page-header>
+
+  @if (loadError()) {
+    <app-inline-alert tone="error" title="Couldn't refresh this repository">
+      {{ loadErrorMessage() }}
+      <button inlineAlertAction mat-stroked-button type="button" class="!rounded-xl" (click)="retry()">Retry</button>
+    </app-inline-alert>
+  }
+
+  <div class="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
+    <app-detection-card [repository]="repo" />
+    <app-recent-visualizations [repositoryId]="repo.id" />
+  </div>
+} @else if (notFound()) {
+  <app-not-found-page
+    title="Repository not found"
+    message="It may have been removed."
+    backLink="/repositories"
+    backLabel="Back to repositories"
+  />
+} @else if (loading()) {
+  <app-loading-spinner />
+} @else if (loadError()) {
+  <app-inline-alert tone="error" title="Couldn't load this repository">
+    {{ loadErrorMessage() }}
+    <button inlineAlertAction mat-stroked-button type="button" class="!rounded-xl" (click)="retry()">Retry</button>
+  </app-inline-alert>
+}

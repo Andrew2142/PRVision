@@ -1,0 +1,2 @@
+ALTER TABLE "repositories" ADD COLUMN "render_viewport" text DEFAULT 'desktop' NOT NULL;--> statement-breakpoint
+ALTER TABLE "repositories" ADD CONSTRAINT "repositories_render_viewport_check" CHECK ("repositories"."render_viewport" in ('desktop', 'tablet', 'mobile'));

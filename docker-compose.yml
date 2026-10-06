@@ -1,0 +1,47 @@
+# Local infrastructure for PRVision (00 §4). Started by `npm run infra:up` (and by `npm run dev`).
+# Ports bind to 127.0.0.1 only. Host ports default to 5433/6380 (00 §4); override with PRVISION_PG_PORT /
+# PRVISION_REDIS_PORT in .env when those ports are taken, and update DATABASE_URL / REDIS_URL to match.
+# Data persists in named volumes; `npm run infra:reset` deletes it.
+name: prvision
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: prvision-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: prvision
+      POSTGRES_USER: prvision
+      POSTGRES_PASSWORD: prvision
+      TZ: UTC
+      PGTZ: UTC
+    ports:
+      - "127.0.0.1:${PRVISION_PG_PORT:-5433}:5432"
+    volumes:
+      - prvision-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U prvision -d prvision"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+
+  redis:
+    image: redis:7-alpine
+    container_name: prvision-redis
+    restart: unless-stopped
+    # BullMQ requires noeviction; AOF keeps queued jobs across container restarts.
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    ports:
+      - "127.0.0.1:${PRVISION_REDIS_PORT:-6380}:6379"
+    volumes:
+      - prvision-redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  prvision-pgdata:
+  prvision-redisdata:

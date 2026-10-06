@@ -1,0 +1,8 @@
+ALTER TABLE "visualization_console_events" DROP CONSTRAINT "visualization_console_events_stage_check";--> statement-breakpoint
+ALTER TABLE "visualizations" DROP CONSTRAINT "visualizations_status_check";--> statement-breakpoint
+ALTER TABLE "visualizations" DROP CONSTRAINT "visualizations_failed_stage_check";--> statement-breakpoint
+ALTER TABLE "visualizations" ADD COLUMN "component_limit" integer;--> statement-breakpoint
+ALTER TABLE "visualization_console_events" ADD CONSTRAINT "visualization_console_events_stage_check" CHECK ("visualization_console_events"."stage" in ('queued', 'preparing', 'analyzing', 'awaiting_confirmation', 'generating_harnesses', 'rendering', 'diffing', 'summarizing', 'completed', 'failed', 'cancelled'));--> statement-breakpoint
+ALTER TABLE "visualizations" ADD CONSTRAINT "visualizations_component_limit_check" CHECK ("visualizations"."component_limit" is null or ("visualizations"."component_limit" >= 1 and "visualizations"."component_limit" <= 100));--> statement-breakpoint
+ALTER TABLE "visualizations" ADD CONSTRAINT "visualizations_status_check" CHECK ("visualizations"."status" in ('queued', 'preparing', 'analyzing', 'awaiting_confirmation', 'generating_harnesses', 'rendering', 'diffing', 'summarizing', 'completed', 'failed', 'cancelled'));--> statement-breakpoint
+ALTER TABLE "visualizations" ADD CONSTRAINT "visualizations_failed_stage_check" CHECK ("visualizations"."failed_stage" is null or "visualizations"."failed_stage" in ('queued', 'awaiting_confirmation', 'preparing', 'analyzing', 'generating_harnesses', 'rendering', 'diffing', 'summarizing'));

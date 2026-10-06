@@ -1,0 +1,1807 @@
+// Copied from Uply-v2 tenant-frontend/src/styles.scss and stripped per PRVision sheet 12 §6.8.1.
+// PRVision-only rules and the dark theme live in styles/prvision.scss (loaded after this file).
+@use 'tailwindcss';
+@import 'ag-grid-community/styles/ag-grid.css';
+@import 'ag-grid-community/styles/ag-theme-quartz.css';
+
+@theme {
+  --font-sans: 'Manrope', ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-sans);
+  --font-mono: var(--font-sans);
+}
+
+:root {
+  font-family: var(--font-sans);
+  --dd-app-font-family: var(--font-sans);
+  /* Tailwind-aligned type scale so app text and Material internals share one standard rhythm. */
+  --dd-text-xs: 0.75rem;
+  --dd-leading-xs: 1rem;
+  --dd-text-sm: 0.875rem;
+  --dd-leading-sm: 1.25rem;
+  --dd-text-base: 1rem;
+  --dd-leading-base: 1.5rem;
+  --dd-text-lg: 1.125rem;
+  --dd-leading-lg: 1.75rem;
+  --dd-text-xl: 1.25rem;
+  --dd-leading-xl: 1.75rem;
+  --dd-text-2xl: 1.5rem;
+  --dd-leading-2xl: 2rem;
+  --dd-text-3xl: 1.875rem;
+  --dd-leading-3xl: 2.25rem;
+  --dd-text-4xl: 2.25rem;
+  --dd-leading-4xl: 2.5rem;
+  --dd-text-5xl: 3rem;
+  --dd-leading-5xl: 1;
+  --dd-text-6xl: 3.75rem;
+  --dd-leading-6xl: 1;
+
+  --mat-sys-body-large: 400 var(--dd-text-base) / var(--dd-leading-base) var(--dd-app-font-family);
+  --mat-sys-body-large-font: var(--dd-app-font-family);
+  --mat-sys-body-medium: 400 var(--dd-text-sm) / var(--dd-leading-sm) var(--dd-app-font-family);
+  --mat-sys-body-medium-font: var(--dd-app-font-family);
+  --mat-sys-body-small: 400 var(--dd-text-xs) / var(--dd-leading-xs) var(--dd-app-font-family);
+  --mat-sys-body-small-font: var(--dd-app-font-family);
+  --mat-sys-display-large: 400 var(--dd-text-6xl) / var(--dd-leading-6xl) var(--dd-app-font-family);
+  --mat-sys-display-large-font: var(--dd-app-font-family);
+  --mat-sys-display-medium: 400 var(--dd-text-5xl) / var(--dd-leading-5xl) var(--dd-app-font-family);
+  --mat-sys-display-medium-font: var(--dd-app-font-family);
+  --mat-sys-display-small: 400 var(--dd-text-4xl) / var(--dd-leading-4xl) var(--dd-app-font-family);
+  --mat-sys-display-small-font: var(--dd-app-font-family);
+  --mat-sys-headline-large: 400 var(--dd-text-3xl) / var(--dd-leading-3xl) var(--dd-app-font-family);
+  --mat-sys-headline-large-font: var(--dd-app-font-family);
+  --mat-sys-headline-medium: 400 var(--dd-text-2xl) / var(--dd-leading-2xl) var(--dd-app-font-family);
+  --mat-sys-headline-medium-font: var(--dd-app-font-family);
+  --mat-sys-headline-small: 400 var(--dd-text-xl) / var(--dd-leading-xl) var(--dd-app-font-family);
+  --mat-sys-headline-small-font: var(--dd-app-font-family);
+  --mat-sys-label-large: 500 var(--dd-text-sm) / var(--dd-leading-sm) var(--dd-app-font-family);
+  --mat-sys-label-large-font: var(--dd-app-font-family);
+  --mat-sys-label-medium: 500 var(--dd-text-xs) / var(--dd-leading-xs) var(--dd-app-font-family);
+  --mat-sys-label-medium-font: var(--dd-app-font-family);
+  --mat-sys-label-small: 500 var(--dd-text-xs) / var(--dd-leading-xs) var(--dd-app-font-family);
+  --mat-sys-label-small-font: var(--dd-app-font-family);
+  --mat-sys-title-large: 400 var(--dd-text-lg) / var(--dd-leading-lg) var(--dd-app-font-family);
+  --mat-sys-title-large-font: var(--dd-app-font-family);
+  --mat-sys-title-medium: 500 var(--dd-text-base) / var(--dd-leading-base) var(--dd-app-font-family);
+  --mat-sys-title-medium-font: var(--dd-app-font-family);
+  --mat-sys-title-small: 500 var(--dd-text-sm) / var(--dd-leading-sm) var(--dd-app-font-family);
+  --mat-sys-title-small-font: var(--dd-app-font-family);
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  background-color: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+input,
+textarea,
+select,
+option {
+  font-family: inherit;
+}
+
+.mat-typography,
+.mat-mdc-button,
+.mat-mdc-unelevated-button,
+.mat-mdc-raised-button,
+.mat-mdc-outlined-button,
+.mat-mdc-icon-button,
+.mat-mdc-button-base,
+.mat-mdc-menu-item,
+.mat-mdc-option,
+.mat-mdc-card,
+.mat-mdc-dialog-container,
+.mat-mdc-table,
+.mat-mdc-tab-group,
+.mat-mdc-select-panel,
+.mat-mdc-form-field,
+.mat-mdc-select,
+.mat-mdc-paginator,
+.mat-mdc-tooltip,
+.mat-stepper-horizontal,
+.mat-stepper-vertical,
+.mat-horizontal-stepper-header,
+.mat-vertical-stepper-header,
+.mat-step-label,
+.mat-step-text-label,
+.mat-vertical-content-container,
+.mat-vertical-content,
+.mdc-button__label,
+.mdc-dialog__title,
+.mdc-dialog__content,
+.mdc-floating-label,
+.mdc-text-field__input,
+.mdc-list-item__primary-text,
+.mdc-list-item__secondary-text,
+.mdc-tab__text-label {
+  font-family: var(--font-sans) !important;
+}
+
+.font-display {
+  font-family: var(--font-display);
+}
+
+:root {
+  --color-bg-primary: #f6f4ee;
+  --color-bg-secondary: #fffefb;
+  --color-bg-tertiary: #f7f3ec;
+  --color-bg-quaternary: #efe9df;
+  --color-surface: #ffffff;
+  --color-surface-hover: #fbf8f2;
+  --color-surface-active: #f2ede4;
+  --color-text-primary: #1e2931;
+  --color-text-secondary: #66727b;
+  --color-text-tertiary: #8a949c;
+  --color-text-disabled: #b0b7bc;
+  --color-primary: #466a73;
+  --color-primary-hover: #37555c;
+  --color-primary-light: #8fa698;
+  --color-primary-dark: #2d454b;
+  --color-primary-10: rgba(70, 106, 115, 0.1);
+  --color-primary-15: rgba(70, 106, 115, 0.15);
+  --color-primary-20: rgba(70, 106, 115, 0.2);
+  --color-on-primary: #ffffff;
+  --color-success: #059669;
+  --color-warning: #d97706;
+  --color-error: #dc2626;
+  --color-info: #466a73;
+  --color-border: #e6e1d7;
+  --color-border-light: #d7d0c3;
+  --color-border-accent: #466a73;
+  --color-neutral-300: #6b7280;
+  --shadow-xs: 0 1px 2px rgba(30, 41, 49, 0.05), 0 1px 1px rgba(30, 41, 49, 0.03);
+  --shadow-sm: 0 12px 28px -22px rgba(30, 41, 49, 0.22), 0 4px 10px -6px rgba(30, 41, 49, 0.07);
+  --shadow-md: 0 20px 48px -28px rgba(30, 41, 49, 0.12), 0 10px 20px -16px rgba(30, 41, 49, 0.08);
+  --shadow-lg: 0 28px 68px -34px rgba(30, 41, 49, 0.14), 0 16px 30px -20px rgba(30, 41, 49, 0.1);
+  --shadow-xl: 0 40px 96px -42px rgba(30, 41, 49, 0.16), 0 22px 42px -24px rgba(30, 41, 49, 0.12);
+  --shadow-float: 0 30px 72px -34px rgba(30, 41, 49, 0.18), 0 18px 34px -22px rgba(30, 41, 49, 0.1);
+  --shadow-glow: 0 0 0 1px rgba(70, 106, 115, 0.08), 0 18px 40px rgba(70, 106, 115, 0.08);
+  --transition-fast: 150ms ease-in-out;
+  --transition-normal: 250ms ease-in-out;
+  --transition-slow: 350ms ease-in-out;
+  --radius-sm: 0.5rem;
+  --radius-md: 0.75rem;
+  --radius-lg: 1rem;
+  --radius-xl: 1.5rem;
+  --shell-accent: var(--color-primary);
+  --shell-accent-soft: rgba(70, 106, 115, 0.1);
+  --shell-accent-contrast: var(--color-on-primary);
+  --shell-sidebar-border: rgba(70, 106, 115, 0.12);
+  --primary-color: var(--color-primary);
+  --secondary-color: var(--color-bg-tertiary);
+  --accent-color: var(--color-primary-dark);
+  --color-dd-canvas: var(--color-bg-primary);
+  --color-dd-sidebar: var(--color-bg-secondary);
+  --color-dd-elevated: var(--color-bg-secondary);
+  --color-dd-border: var(--color-border);
+  --color-dd-muted: var(--color-text-tertiary);
+  --color-dd-accent: var(--color-primary);
+  --color-dd-accent-hover: var(--color-primary-hover);
+}
+
+.dd-app-root {
+  position: relative;
+  min-height: 100%;
+}
+
+.dd-glow-layer {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at top left, rgba(143, 166, 152, 0.08), transparent 34%),
+    radial-gradient(circle at bottom right, rgba(198, 168, 117, 0.08), transparent 28%), var(--color-bg-primary);
+}
+
+.shell--tenant-dark,
+.shell--tenant-light {
+  background-color: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  --mat-sys-primary: var(--shell-accent);
+  --mat-sys-on-primary: var(--shell-accent-contrast);
+  --mat-sys-primary-container: color-mix(in srgb, var(--shell-accent) 16%, var(--color-bg-secondary));
+  --mat-sys-on-primary-container: var(--color-text-primary);
+  --shell-button-bg: color-mix(in srgb, var(--shell-accent) 68%, var(--accent-color, var(--shell-accent)));
+  --shell-button-bg-hover: color-mix(in srgb, var(--shell-button-bg) 86%, var(--color-text-primary));
+  --shell-button-text: color-mix(in srgb, var(--shell-accent) 64%, var(--color-text-primary));
+  --shell-button-text-hover: color-mix(in srgb, var(--shell-accent) 44%, var(--color-text-primary));
+  --shell-button-border: color-mix(in srgb, var(--shell-accent) 18%, var(--color-border));
+  --shell-button-surface: color-mix(in srgb, var(--shell-accent) 5%, transparent);
+  --mat-option-selected-state-label-text-color: var(--shell-accent);
+  --mat-full-pseudo-checkbox-selected-icon-color: var(--shell-accent);
+  --mat-minimal-pseudo-checkbox-selected-checkmark-color: var(--shell-accent);
+  --mat-form-field-focus-select-arrow-color: var(--shell-accent);
+  --mdc-filled-button-container-color: var(--shell-button-bg);
+  --mdc-filled-button-label-text-color: var(--shell-accent-contrast);
+  --mdc-outlined-button-label-text-color: var(--shell-button-text);
+  --mdc-outlined-button-outline-color: var(--shell-button-border);
+  --mdc-text-button-label-text-color: var(--shell-button-text);
+  --mdc-protected-button-container-color: var(--shell-button-bg);
+  --mdc-protected-button-label-text-color: var(--shell-accent-contrast);
+  --mdc-tab-indicator-active-indicator-color: var(--shell-accent);
+  --mat-tab-header-active-label-text-color: var(--shell-accent);
+  --mat-tab-header-active-focus-label-text-color: var(--shell-accent);
+  --mat-tab-header-active-hover-label-text-color: var(--shell-accent);
+  --mat-tab-header-active-focus-indicator-color: var(--shell-accent);
+  --mat-tab-header-active-hover-indicator-color: var(--shell-accent);
+  --mat-tab-header-inactive-ripple-color: color-mix(in srgb, var(--shell-accent) 18%, transparent);
+  --mat-tab-header-active-ripple-color: color-mix(in srgb, var(--shell-accent) 24%, transparent);
+  --mdc-circular-progress-active-indicator-color: var(--shell-accent);
+  --mdc-linear-progress-active-indicator-color: var(--shell-accent);
+  --mdc-linear-progress-track-color: color-mix(in srgb, var(--shell-accent) 22%, transparent);
+  --mdc-switch-selected-track-color: var(--shell-accent);
+  --mdc-switch-selected-hover-track-color: var(--shell-accent);
+  --mdc-switch-selected-focus-track-color: var(--shell-accent);
+  --mdc-switch-selected-pressed-track-color: var(--shell-accent);
+  --mdc-switch-selected-handle-color: var(--shell-accent-contrast);
+  --mdc-switch-selected-hover-handle-color: var(--shell-accent-contrast);
+  --mdc-switch-selected-focus-handle-color: var(--shell-accent-contrast);
+  --mdc-switch-selected-pressed-handle-color: var(--shell-accent-contrast);
+  --mdc-switch-selected-icon-color: var(--shell-accent);
+  --mdc-switch-selected-hover-state-layer-color: color-mix(in srgb, var(--shell-accent) 30%, transparent);
+  --mdc-switch-selected-focus-state-layer-color: color-mix(in srgb, var(--shell-accent) 32%, transparent);
+  --mdc-switch-selected-pressed-state-layer-color: color-mix(in srgb, var(--shell-accent) 36%, transparent);
+  --mat-stepper-line-color: color-mix(in srgb, var(--shell-accent) 16%, var(--color-border));
+  --mat-stepper-header-label-text-color: var(--color-text-secondary);
+  --mat-stepper-header-optional-label-text-color: var(--color-text-tertiary);
+  --mat-stepper-header-selected-state-label-text-color: var(--shell-accent);
+  --mat-stepper-header-icon-background-color: color-mix(in srgb, var(--shell-accent) 16%, var(--color-bg-tertiary));
+  --mat-stepper-header-icon-foreground-color: var(--shell-accent);
+  --mat-stepper-header-selected-state-icon-background-color: var(--shell-accent);
+  --mat-stepper-header-selected-state-icon-foreground-color: var(--shell-accent-contrast);
+  --mat-stepper-header-done-state-icon-background-color: var(--shell-accent);
+  --mat-stepper-header-done-state-icon-foreground-color: var(--shell-accent-contrast);
+  --mat-stepper-header-edit-state-icon-background-color: var(--shell-accent);
+  --mat-stepper-header-edit-state-icon-foreground-color: var(--shell-accent-contrast);
+}
+
+.app-shell {
+  color: var(--color-text-primary);
+}
+
+.shell--tenant-dark main .mat-mdc-card,
+.shell--tenant-light main .mat-mdc-card {
+  --mdc-elevated-card-container-color: #fbfcfe;
+  color: var(--color-text-primary);
+  border-color: color-mix(in srgb, var(--shell-accent) 10%, var(--color-border)) !important;
+  box-shadow: var(--shadow-md) !important;
+}
+
+.shell--tenant-dark main .mat-mdc-card .settings-page-title,
+.shell--tenant-dark main .mat-mdc-card .settings-section-title,
+.shell--tenant-light main .mat-mdc-card .settings-page-title,
+.shell--tenant-light main .mat-mdc-card .settings-section-title {
+  color: var(--color-text-primary) !important;
+}
+
+.shell--tenant-dark main .mat-mdc-card .settings-page-sub,
+.shell--tenant-light main .mat-mdc-card .settings-page-sub {
+  color: var(--color-text-secondary) !important;
+}
+
+.shell--tenant-dark main .mat-mdc-form-field .mdc-text-field__input,
+.shell--tenant-dark main .mat-mdc-form-field textarea.mat-mdc-input-element,
+.shell--tenant-light main .mat-mdc-form-field .mdc-text-field__input,
+.shell--tenant-light main .mat-mdc-form-field textarea.mat-mdc-input-element {
+  color: var(--color-text-primary) !important;
+}
+
+.shell--tenant-dark main .mat-mdc-form-field .mat-mdc-floating-label,
+.shell--tenant-light main .mat-mdc-form-field .mat-mdc-floating-label {
+  color: var(--color-text-secondary) !important;
+}
+
+.shell--tenant-dark main .mat-mdc-form-field.mat-form-field-appearance-fill .mat-mdc-text-field-wrapper,
+.shell--tenant-light main .mat-mdc-form-field.mat-form-field-appearance-fill .mat-mdc-text-field-wrapper {
+  border-color: color-mix(in srgb, var(--shell-accent) 12%, var(--color-border)) !important;
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--secondary-color) 10%, var(--color-surface)) 0%,
+    var(--color-bg-secondary) 100%
+  ) !important;
+}
+
+.shell--tenant-dark main .mat-mdc-form-field.mat-form-field-appearance-fill.mat-focused .mat-mdc-text-field-wrapper,
+.shell--tenant-light main .mat-mdc-form-field.mat-form-field-appearance-fill.mat-focused .mat-mdc-text-field-wrapper {
+  border-color: color-mix(in srgb, var(--shell-accent) 45%, rgba(36, 20, 60, 0.2)) !important;
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--secondary-color) 14%, white) 0%,
+    var(--color-surface) 100%
+  ) !important;
+}
+
+.shell--tenant-dark main h1,
+.shell--tenant-light main h1 {
+  color: var(--color-text-primary) !important;
+}
+
+.shell--tenant-dark main p.text-slate-600,
+.shell--tenant-light main p.text-slate-600 {
+  color: var(--color-text-secondary) !important;
+}
+
+@keyframes sidebarGradientShift {
+  0% {
+    background-position: 0% 50%;
+  }
+  25% {
+    background-position: 50% 80%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  75% {
+    background-position: 50% 20%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+.app-sidebar {
+  position: relative;
+  z-index: 2;
+  border-color: var(--shell-sidebar-border) !important;
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--secondary-color, #f7f3ec) 14%, #1f2f35) 0%,
+    color-mix(in srgb, var(--shell-accent, #466a73) 18%, #24353b) 38%,
+    color-mix(in srgb, var(--accent-color, #2d454b) 16%, #26383d) 100%
+  );
+  background-size: 400% 400%;
+  animation: sidebarGradientShift 20s ease-in-out infinite;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.035),
+    0 18px 48px -30px rgba(30, 41, 49, 0.42);
+}
+
+.shell--tenant-dark .app-sidebar {
+  background: linear-gradient(135deg, #24343a 0%, #2c4046 42%, #203037 100%);
+  background-size: 400% 400%;
+  animation: sidebarGradientShift 20s ease-in-out infinite;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.04),
+    0 20px 56px -30px rgba(30, 41, 49, 0.44);
+}
+
+.shell--tenant-light .app-sidebar {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--color-bg-primary) 92%, var(--secondary-color)) 0%,
+    color-mix(in srgb, var(--color-dd-canvas) 88%, var(--color-bg-secondary)) 58%,
+    color-mix(in srgb, var(--color-bg-primary) 96%, var(--color-bg-tertiary)) 100%
+  );
+  box-shadow:
+    inset -1px 0 0 color-mix(in srgb, var(--shell-accent) 12%, var(--color-border)),
+    0 18px 44px -34px color-mix(in srgb, var(--shell-accent) 18%, rgb(30 41 49 / 0.16));
+}
+
+.shell--tenant-light .app-sidebar nav a,
+.shell--tenant-light .app-sidebar nav button {
+  color: #5b6872 !important;
+}
+
+.shell--tenant-light .app-sidebar nav a:hover,
+.shell--tenant-light .app-sidebar nav button:hover {
+  color: color-mix(in srgb, var(--shell-accent) 30%, #2f3a43) !important;
+  background-color: color-mix(in srgb, var(--shell-accent) 6%, transparent) !important;
+}
+
+.shell--tenant-light .app-sidebar .border-b .text-white,
+.shell--tenant-light .app-sidebar .border-t .text-slate-200 {
+  color: #0f172a !important;
+}
+
+.shell--tenant-light .app-sidebar .text-slate-500 {
+  color: color-mix(in srgb, var(--shell-accent) 22%, #7d888f) !important;
+}
+
+.app-sidebar .nav-link-active {
+  background: color-mix(in srgb, var(--shell-accent) 8%, transparent) !important;
+  color: color-mix(in srgb, var(--shell-accent) 62%, #36424a) !important;
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--shell-accent) 10%, transparent),
+    0 8px 20px -20px rgba(30, 41, 49, 0.16);
+}
+
+.app-sidebar nav a,
+.app-sidebar nav button {
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.25rem;
+}
+
+.app-sidebar nav button {
+  border: 0;
+  background: transparent;
+  font-family: inherit;
+}
+
+.app-sidebar .nav-group-chevron.mat-icon {
+  align-self: center;
+  display: inline-flex;
+  flex: 0 0 1rem;
+  height: 1rem !important;
+  width: 1rem !important;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem !important;
+  line-height: 1 !important;
+  margin-top: 0;
+}
+
+.app-sidebar .nav-group-current {
+  color: color-mix(in srgb, var(--shell-accent) 28%, #52616b) !important;
+  background: transparent !important;
+}
+
+.app-sidebar nav a .mat-icon,
+.app-sidebar nav button .mat-icon {
+  color: currentColor !important;
+  font-family: 'Material Symbols Rounded' !important;
+  font-variation-settings:
+    'FILL' 0,
+    'wght' 400,
+    'GRAD' -25,
+    'opsz' 24;
+  font-weight: normal;
+  line-height: 1;
+  opacity: 0.7;
+}
+
+.app-sidebar .nav-link-active .mat-icon,
+.app-sidebar .nav-group-current .mat-icon {
+  color: var(--shell-accent) !important;
+  font-variation-settings:
+    'FILL' 0,
+    'wght' 500,
+    'GRAD' -25,
+    'opsz' 24;
+  opacity: 0.9;
+}
+
+/* Dark shell: sidebar always high-contrast (inactive nav was too dim; active was blue-on-blue) */
+.shell--tenant-dark .app-sidebar nav a:not(.nav-link-active),
+.shell--tenant-dark .app-sidebar nav button:not(.nav-link-active) {
+  color: #dbe2f0 !important;
+}
+
+.shell--tenant-dark .app-sidebar nav a:not(.nav-link-active):hover,
+.shell--tenant-dark .app-sidebar nav button:not(.nav-link-active):hover {
+  color: #ffffff !important;
+}
+
+.shell--tenant-dark .app-sidebar .nav-link-active {
+  color: #f8fafc !important;
+  background: color-mix(in srgb, var(--shell-accent) 18%, rgba(255, 255, 255, 0.07)) !important;
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--shell-accent) 16%, transparent),
+    0 10px 22px -20px rgba(30, 41, 49, 0.3) !important;
+}
+
+.shell--tenant-dark .app-sidebar .nav-group-current {
+  color: #f1f5f9 !important;
+  background: transparent !important;
+}
+
+.shell--tenant-dark .app-sidebar nav a .mat-icon,
+.shell--tenant-dark .app-sidebar nav button .mat-icon {
+  color: currentColor !important;
+}
+
+.shell--tenant-dark .app-sidebar .border-b .text-slate-500,
+.shell--tenant-dark .app-sidebar .border-t .text-slate-500 {
+  color: #a8b8d0 !important;
+}
+
+.shell--tenant-dark .app-sidebar .border-t button.mat-mdc-button {
+  color: #f1f5f9 !important;
+}
+
+.shell--tenant-dark .app-sidebar .border-t button.mat-mdc-button .mat-icon.text-slate-500,
+.shell--tenant-dark .app-sidebar .border-t button.mat-mdc-button .mat-icon.text-slate-600 {
+  color: #94a3b8 !important;
+}
+
+/* Material: calmer surfaces, match app shell */
+.mat-mdc-card {
+  --mdc-elevated-card-container-color: var(--color-bg-secondary);
+  border-radius: 1.35rem !important;
+  border: 1px solid var(--color-border) !important;
+  box-shadow: var(--shadow-md) !important;
+  transition:
+    box-shadow var(--transition-normal),
+    border-color var(--transition-fast),
+    background-color var(--transition-fast);
+}
+
+/* Dialog backdrops: blur page behind centered dialogs (NotificationService.promptAction, ConfirmDialogService). */
+.cdk-overlay-backdrop.dd-dialog-backdrop-blur {
+  background: rgba(15, 23, 42, 0.55) !important;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.mat-mdc-dialog-panel.dd-action-message-dialog,
+.mat-mdc-dialog-panel.dd-confirm-dialog {
+  border-radius: 1.25rem !important;
+  box-shadow:
+    0 24px 48px -12px rgb(30 41 49 / 0.24),
+    0 0 0 1px rgb(255 255 255 / 0.4) !important;
+}
+
+.mat-mdc-dialog-panel.dd-generic-popup-dialog {
+  max-width: 100vw !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  box-shadow: none !important;
+}
+
+.mat-mdc-dialog-panel.dd-generic-popup-dialog .mat-mdc-dialog-container {
+  padding: 0 !important;
+}
+
+.mat-mdc-dialog-panel.dd-generic-popup-dialog .mdc-dialog__surface {
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+/* App toasts: bottom-right only; themed feedback cards for NotificationService. */
+.mat-mdc-snack-bar-container.dd-app-toast {
+  --toast-accent: var(--shell-accent, var(--color-dd-accent));
+  --toast-bg: color-mix(in srgb, var(--toast-accent) 5%, var(--color-surface));
+  --toast-border: color-mix(in srgb, var(--toast-accent) 12%, var(--color-border));
+  --toast-text: var(--color-text-primary);
+  --mdc-snackbar-container-shape: 0.75rem;
+  --mdc-snackbar-container-color: var(--toast-bg);
+  --mdc-snackbar-supporting-text-color: var(--toast-text);
+}
+
+.mat-mdc-snack-bar-container.dd-app-toast .mdc-snackbar__surface {
+  overflow: hidden;
+  border: 1px solid var(--toast-border) !important;
+  background: var(--toast-bg) !important;
+  color: var(--toast-text) !important;
+  box-shadow:
+    0 16px 38px -24px color-mix(in srgb, var(--toast-accent) 10%, rgb(15 23 42)),
+    0 0 0 1px rgb(255 255 255 / 0.5) !important;
+}
+
+.mat-mdc-snack-bar-container.dd-app-toast .mat-mdc-snack-bar-label {
+  font-family: var(--font-sans) !important;
+  font-weight: 650 !important;
+  color: var(--toast-text) !important;
+}
+
+.mat-mdc-snack-bar-container.snackbar-default,
+.mat-mdc-snack-bar-container.snackbar-run-started {
+  --toast-accent: var(--shell-accent, var(--color-dd-accent));
+}
+
+.mat-mdc-snack-bar-container.snackbar-info {
+  --toast-accent: var(--color-info);
+  --toast-bg: color-mix(in srgb, var(--color-info) 6%, var(--color-surface));
+  --toast-border: color-mix(in srgb, var(--color-info) 12%, var(--color-border));
+}
+
+.mat-mdc-snack-bar-container.snackbar-success {
+  --toast-accent: var(--color-success);
+  --toast-bg: color-mix(in srgb, var(--color-success) 7%, var(--color-surface));
+  --toast-border: color-mix(in srgb, var(--color-success) 14%, var(--color-border));
+}
+
+.mat-mdc-snack-bar-container.snackbar-warn {
+  --toast-accent: var(--color-warning);
+  --toast-bg: color-mix(in srgb, var(--color-warning) 8%, var(--color-surface));
+  --toast-border: color-mix(in srgb, var(--color-warning) 15%, var(--color-border));
+}
+
+.mat-mdc-snack-bar-container.snackbar-error {
+  --toast-accent: var(--color-error);
+  --toast-bg: color-mix(in srgb, var(--color-error) 7%, var(--color-surface));
+  --toast-border: color-mix(in srgb, var(--color-error) 14%, var(--color-border));
+}
+
+.mat-mdc-snack-bar-container.snackbar-run-started .mdc-snackbar__surface {
+  max-width: min(520px, 92vw) !important;
+}
+
+.mat-mdc-snack-bar-container.snackbar-run-started .mat-mdc-snack-bar-label {
+  white-space: pre-wrap !important;
+  line-height: 1.45 !important;
+}
+
+/* mat-flat-button → mat-mdc-unelevated-button. M3 button CSS loads from lazy chunks after globals and can win the cascade without !important. */
+.shell--tenant-dark .mat-mdc-raised-button.mat-primary,
+.shell--tenant-dark .mat-mdc-flat-button.mat-primary,
+.shell--tenant-dark .mat-mdc-unelevated-button.mat-primary,
+.shell--tenant-light .mat-mdc-raised-button.mat-primary,
+.shell--tenant-light .mat-mdc-flat-button.mat-primary,
+.shell--tenant-light .mat-mdc-unelevated-button.mat-primary {
+  --mdc-filled-button-container-color: var(--shell-button-bg, var(--shell-accent, var(--color-dd-accent))) !important;
+  --mdc-filled-button-label-text-color: var(--shell-accent-contrast, #ffffff) !important;
+}
+
+.shell--tenant-dark .mat-mdc-raised-button.mat-primary:hover:not(:disabled),
+.shell--tenant-dark .mat-mdc-flat-button.mat-primary:hover:not(:disabled),
+.shell--tenant-dark .mat-mdc-unelevated-button.mat-primary:hover:not(:disabled),
+.shell--tenant-light .mat-mdc-raised-button.mat-primary:hover:not(:disabled),
+.shell--tenant-light .mat-mdc-flat-button.mat-primary:hover:not(:disabled),
+.shell--tenant-light .mat-mdc-unelevated-button.mat-primary:hover:not(:disabled) {
+  --mdc-filled-button-container-color: var(--shell-button-bg-hover, var(--shell-button-bg)) !important;
+}
+
+/* Prebuilt cyan-orange is a dark palette on html; disabled filled buttons mix --mat-sys-on-surface → illegible on light surfaces (login card, tenant-light main). */
+.shell--tenant-light .mat-mdc-unelevated-button[disabled],
+.shell--tenant-light .mat-mdc-unelevated-button.mat-mdc-button-disabled:not(.mat-mdc-button-disabled-interactive),
+.shell--tenant-light .mat-mdc-raised-button[disabled],
+.shell--tenant-light .mat-mdc-raised-button.mat-mdc-button-disabled:not(.mat-mdc-button-disabled-interactive) {
+  --mdc-filled-button-disabled-container-color: rgba(15, 23, 42, 0.12) !important;
+  --mdc-filled-button-disabled-label-text-color: rgba(15, 23, 42, 0.38) !important;
+}
+
+.shell--tenant-dark .mat-mdc-outlined-button:not(.mat-warn),
+.shell--tenant-light .mat-mdc-outlined-button:not(.mat-warn) {
+  --mdc-outlined-button-label-text-color: var(--shell-button-text, var(--shell-accent, var(--color-dd-accent)));
+  --mdc-outlined-button-outline-color: var(
+    --shell-button-border,
+    color-mix(in srgb, var(--shell-accent) 18%, var(--color-border))
+  );
+  background-color: var(--shell-button-surface, transparent);
+}
+
+.mat-mdc-outlined-button.mat-primary {
+  --mdc-outlined-button-label-text-color: var(--shell-button-text, var(--shell-accent, var(--color-dd-accent)));
+}
+
+.shell--tenant-dark main .mat-mdc-tab-group .mat-mdc-tab .mdc-tab__text-label,
+.shell--tenant-light main .mat-mdc-tab-group .mat-mdc-tab .mdc-tab__text-label {
+  color: var(--color-text-secondary) !important;
+}
+
+.shell--tenant-dark main .mat-mdc-tab-group .mat-mdc-tab.mdc-tab--active .mdc-tab__text-label,
+.shell--tenant-light main .mat-mdc-tab-group .mat-mdc-tab.mdc-tab--active .mdc-tab__text-label {
+  color: var(--shell-accent) !important;
+}
+
+.shell--tenant-dark main .mat-mdc-tab-group .mdc-tab-indicator__content--underline,
+.shell--tenant-light main .mat-mdc-tab-group .mdc-tab-indicator__content--underline {
+  border-color: var(--shell-accent) !important;
+}
+
+/* Fill appearance (default): no notched-outline “prefix” rail */
+.mat-mdc-form-field.mat-form-field-appearance-fill {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  --mdc-filled-text-field-active-indicator-color: transparent;
+  --mdc-filled-text-field-focus-active-indicator-color: transparent;
+  --mdc-filled-text-field-hover-active-indicator-color: transparent;
+  --mdc-filled-text-field-container-shape: 0.75rem;
+  --mdc-filled-text-field-label-text-color: var(--color-text-secondary);
+  --mdc-filled-text-field-focus-label-text-color: var(--shell-accent);
+  --mdc-filled-text-field-input-text-color: var(--color-text-primary);
+  --mdc-filled-text-field-input-text-placeholder-color: var(--color-text-tertiary);
+  --mat-select-enabled-trigger-text-color: var(--color-text-primary);
+  --mat-select-enabled-arrow-color: var(--color-text-secondary);
+  --mat-select-focused-arrow-color: var(--shell-accent);
+  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+}
+.mat-mdc-form-field.mat-form-field-appearance-fill .mat-mdc-text-field-wrapper {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  border-radius: 0.75rem !important;
+  border: 1px solid color-mix(in srgb, var(--shell-accent) 12%, var(--color-border)) !important;
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--secondary-color) 10%, var(--color-surface)) 0%,
+    var(--color-bg-secondary) 100%
+  ) !important;
+  padding-bottom: 0;
+  box-shadow: var(--shadow-xs);
+  transition:
+    border-color var(--transition-fast),
+    background-color var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+.mat-mdc-form-field.mat-form-field-appearance-fill.mat-focused .mat-mdc-text-field-wrapper {
+  border-color: var(--shell-accent, var(--color-primary)) !important;
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--secondary-color) 14%, white) 0%,
+    var(--color-surface) 100%
+  ) !important;
+  box-shadow:
+    var(--shadow-sm),
+    0 0 0 3px color-mix(in srgb, var(--shell-accent, var(--color-primary)) 12%, transparent);
+}
+.mat-mdc-form-field.mat-form-field-appearance-fill .mdc-text-field--filled:not(.mdc-text-field--disabled) {
+  background-color: transparent !important;
+}
+.mat-mdc-form-field.mat-form-field-appearance-fill .mdc-line-ripple,
+.mat-mdc-form-field.mat-form-field-appearance-fill .mdc-line-ripple::before,
+.mat-mdc-form-field.mat-form-field-appearance-fill .mdc-line-ripple::after {
+  display: none !important;
+  border-bottom-width: 0 !important;
+}
+.mat-mdc-form-field.mat-form-field-appearance-fill .mat-mdc-select-arrow {
+  color: var(--mat-select-enabled-arrow-color) !important;
+}
+.mat-mdc-form-field.mat-form-field-appearance-fill.mat-focused .mat-mdc-select-arrow {
+  color: var(--shell-accent) !important;
+}
+.mat-mdc-form-field.mat-form-field-appearance-fill .mat-mdc-form-field-flex {
+  width: 100%;
+  min-width: 0;
+}
+.mat-mdc-form-field.mat-form-field-appearance-fill .mat-mdc-text-field-input-container {
+  flex: 1 1 auto;
+  min-width: 0 !important;
+  width: 100%;
+  max-width: 100%;
+}
+.mat-mdc-form-field.mat-form-field-appearance-fill .mat-mdc-form-field-infix {
+  flex: 1 1 auto;
+  min-width: 0 !important;
+  width: 100% !important;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.mat-mdc-form-field.mat-form-field-appearance-fill .mat-mdc-form-field-input-control,
+.mat-mdc-form-field.mat-form-field-appearance-fill .mdc-text-field__input,
+.mat-mdc-form-field.mat-form-field-appearance-fill textarea.mat-mdc-input-element {
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.mat-mdc-form-field.mat-form-field-appearance-fill .mat-mdc-select {
+  width: 100%;
+  max-width: 100%;
+}
+.mat-mdc-form-field.mat-form-field-appearance-fill .mat-mdc-select-trigger {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.mat-mdc-form-field.mat-form-field-appearance-fill .mdc-floating-label,
+.mat-mdc-form-field.mat-form-field-appearance-fill .mat-mdc-floating-label {
+  font-family: inherit;
+}
+.mat-mdc-form-field.mat-form-field-appearance-fill .mat-mdc-form-field-focus-overlay {
+  opacity: 0 !important;
+}
+
+/* Optional outline fields (if any template forces outline): same width fixes */
+.mat-mdc-form-field.mat-form-field-appearance-outline {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+}
+.mat-mdc-form-field.mat-form-field-appearance-outline .mat-mdc-text-field-wrapper {
+  border-radius: 0.75rem !important;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+.mat-mdc-form-field.mat-form-field-appearance-outline .mdc-notched-outline__leading,
+.mat-mdc-form-field.mat-form-field-appearance-outline .mdc-notched-outline__notch,
+.mat-mdc-form-field.mat-form-field-appearance-outline .mdc-notched-outline__trailing {
+  border-color: var(--color-border) !important;
+}
+.mat-mdc-form-field.mat-focused.mat-form-field-appearance-outline .mdc-notched-outline__leading,
+.mat-mdc-form-field.mat-focused.mat-form-field-appearance-outline .mdc-notched-outline__notch,
+.mat-mdc-form-field.mat-focused.mat-form-field-appearance-outline .mdc-notched-outline__trailing {
+  border-color: var(--shell-accent, var(--color-dd-accent)) !important;
+}
+.mat-mdc-form-field.mat-form-field-appearance-outline .mat-mdc-form-field-flex {
+  width: 100%;
+  min-width: 0;
+}
+.mat-mdc-form-field.mat-form-field-appearance-outline .mat-mdc-text-field-input-container {
+  flex: 1 1 auto;
+  min-width: 0 !important;
+  width: 100%;
+  max-width: 100%;
+}
+.mat-mdc-form-field.mat-form-field-appearance-outline .mat-mdc-form-field-infix {
+  flex: 1 1 auto;
+  min-width: 0 !important;
+  width: 100% !important;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.mat-mdc-form-field.mat-form-field-appearance-outline .mat-mdc-form-field-input-control,
+.mat-mdc-form-field.mat-form-field-appearance-outline .mdc-text-field__input,
+.mat-mdc-form-field.mat-form-field-appearance-outline textarea.mat-mdc-input-element {
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.mat-mdc-form-field.mat-form-field-appearance-outline .mat-mdc-select {
+  width: 100%;
+  max-width: 100%;
+}
+.mat-mdc-form-field.mat-form-field-appearance-outline .mat-mdc-select-trigger {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.mat-mdc-form-field.mat-form-field-appearance-outline .mdc-floating-label,
+.mat-mdc-form-field.mat-form-field-appearance-outline .mat-mdc-floating-label {
+  font-family: inherit;
+}
+
+/*
+ * MDC form tokens default to Roboto. We use the app sans stack globally, so inner
+ * inputs/selects need an explicit app sans override to avoid browser fallback fonts.
+ */
+.mat-mdc-form-field .mdc-text-field__input,
+.mat-mdc-form-field textarea.mat-mdc-input-element {
+  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif !important;
+  font-size: var(--dd-text-base);
+  line-height: var(--dd-leading-base);
+}
+.mat-mdc-form-field .mat-mdc-select-trigger,
+.mat-mdc-form-field .mat-mdc-select-value,
+.mat-mdc-form-field .mat-mdc-select-value-text,
+.mat-mdc-form-field .mat-mdc-select-min-line {
+  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif !important;
+  font-size: var(--dd-text-base);
+  line-height: var(--dd-leading-base);
+}
+.mat-mdc-select-panel .mat-mdc-option .mdc-list-item__primary-text {
+  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif !important;
+  font-size: var(--dd-text-sm);
+  line-height: var(--dd-leading-sm);
+}
+
+.mat-mdc-form-field .mdc-floating-label,
+.mat-mdc-form-field .mat-mdc-floating-label,
+.mat-mdc-form-field .mat-mdc-form-field-label,
+.mat-step-text-label,
+.mat-step-label,
+.mdc-button__label,
+.mat-mdc-button .mdc-button__label,
+.mat-mdc-outlined-button .mdc-button__label,
+.mat-mdc-unelevated-button .mdc-button__label,
+.mat-mdc-raised-button .mdc-button__label {
+  font-size: var(--dd-text-sm);
+  line-height: var(--dd-leading-sm);
+}
+
+.mat-mdc-form-field .mat-mdc-form-field-subscript-wrapper {
+  margin-top: 0.125rem;
+}
+.mat-mdc-form-field .mat-mdc-form-field-hint-wrapper,
+.mat-mdc-form-field .mat-mdc-form-field-error-wrapper,
+.mat-mdc-form-field .mat-mdc-form-field-hint,
+.mat-mdc-form-field .mat-mdc-form-field-error,
+.mat-mdc-form-field .mat-mdc-form-field-bottom-align::before {
+  padding: 0;
+  font-size: var(--dd-text-xs);
+  line-height: var(--dd-leading-xs);
+  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif !important;
+}
+
+.mat-mdc-slide-toggle .mdc-label,
+.mat-mdc-slide-toggle label.mdc-label {
+  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif !important;
+}
+
+/* Icon prefix/suffix inside Material fields */
+.mat-mdc-form-field.mat-form-field-appearance-fill .mat-mdc-form-field-icon-prefix,
+.mat-mdc-form-field.mat-form-field-appearance-fill .mat-mdc-form-field-icon-suffix,
+.mat-mdc-form-field.mat-form-field-appearance-outline .mat-mdc-form-field-icon-prefix,
+.mat-mdc-form-field.mat-form-field-appearance-outline .mat-mdc-form-field-icon-suffix {
+  padding: 0 0.25rem;
+}
+.mat-mdc-form-field.mat-form-field-appearance-fill .mat-mdc-form-field-icon-prefix .mat-icon,
+.mat-mdc-form-field.mat-form-field-appearance-fill .mat-mdc-form-field-icon-suffix .mat-icon,
+.mat-mdc-form-field.mat-form-field-appearance-outline .mat-mdc-form-field-icon-prefix .mat-icon,
+.mat-mdc-form-field.mat-form-field-appearance-outline .mat-mdc-form-field-icon-suffix .mat-icon {
+  padding: 0 0.25rem;
+  color: #94a3b8;
+}
+.mat-mdc-form-field.mat-form-field-appearance-fill.mat-form-field-has-icon-prefix .mat-mdc-text-field-input-container,
+.mat-mdc-form-field.mat-form-field-appearance-outline.mat-form-field-has-icon-prefix
+  .mat-mdc-text-field-input-container {
+  padding-left: 0 !important;
+}
+
+.status-success {
+  color: var(--color-success);
+}
+.status-failure {
+  color: var(--color-error);
+}
+.status-timeout {
+  color: var(--color-warning);
+}
+.status-error {
+  color: #e11d48;
+}
+
+.dd-pill {
+  --dd-pill-bg: #ffffff;
+  --dd-pill-border: #cbd5e1;
+  --dd-pill-color: #334155;
+
+  box-sizing: border-box;
+  display: inline-flex;
+  min-height: 1.5rem;
+  max-width: 100%;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  border: 1px solid var(--dd-pill-border);
+  border-radius: 9999px;
+  background: var(--dd-pill-bg);
+  box-shadow:
+    inset 0 0 0 1px rgb(255 255 255 / 0.55),
+    0 1px 1px rgb(15 23 42 / 0.04);
+  color: var(--dd-pill-color);
+  padding: 0.1875rem 0.625rem;
+  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  font-size: var(--dd-text-xs);
+  font-weight: 800;
+  line-height: var(--dd-leading-xs);
+  letter-spacing: 0;
+  text-align: center;
+  text-decoration: none;
+  text-transform: none;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.dd-pill strong {
+  color: inherit;
+  font-weight: 800;
+}
+
+.dd-pill--success {
+  --dd-pill-border: #c7e7d5;
+  --dd-pill-bg: #f1faf5;
+  --dd-pill-color: #35745a;
+}
+
+.dd-pill--danger {
+  --dd-pill-border: #ecc8cf;
+  --dd-pill-bg: #fff5f6;
+  --dd-pill-color: #985365;
+}
+
+.dd-pill--warning {
+  --dd-pill-border: #ead8a8;
+  --dd-pill-bg: #fffaf0;
+  --dd-pill-color: #8b6a30;
+}
+
+.dd-pill--info {
+  --dd-pill-border: #c9d8ee;
+  --dd-pill-bg: #f4f8fd;
+  --dd-pill-color: #4b668f;
+}
+
+.dd-pill--active {
+  --dd-pill-border: #bddfd9;
+  --dd-pill-bg: #f2faf8;
+  --dd-pill-color: #3f746c;
+}
+
+.dd-pill--accent {
+  --dd-pill-border: #d9d2e8;
+  --dd-pill-bg: #f8f6fc;
+  --dd-pill-color: #6f5b8e;
+}
+
+.dd-pill--muted {
+  --dd-pill-border: #d8dee6;
+  --dd-pill-bg: #fafbfc;
+  --dd-pill-color: #667085;
+}
+
+.dd-pill--outline {
+  --dd-pill-border: #cbd5e1;
+  --dd-pill-bg: #ffffff;
+  --dd-pill-color: #334155;
+}
+
+.dd-grid-menu-trigger.mat-mdc-icon-button {
+  --mdc-icon-button-state-layer-size: 2.25rem;
+  --mat-icon-button-state-layer-size: 2.25rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  padding: 0;
+  color: #64748b;
+  line-height: 1;
+  vertical-align: middle;
+}
+
+.dd-grid-menu-trigger.mat-mdc-icon-button:hover {
+  background: color-mix(in srgb, var(--shell-accent) 8%, transparent);
+  color: var(--shell-accent);
+}
+
+.dd-grid-menu-trigger.mat-mdc-icon-button .mat-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  margin: 0;
+  font-size: 1.25rem;
+  line-height: 1.25rem;
+}
+
+.dd-grid-menu-trigger.mat-mdc-icon-button .mat-mdc-button-touch-target {
+  width: 2.25rem;
+  height: 2.25rem;
+}
+
+.mat-mdc-menu-item.dd-menu-danger,
+.mat-mdc-menu-item.dd-menu-danger .mat-icon,
+.mat-mdc-menu-item.dd-menu-danger .mdc-list-item__primary-text {
+  color: var(--color-error) !important;
+}
+
+.shell--tenant-dark .mat-mdc-card {
+  --mdc-elevated-card-container-color: rgba(15, 23, 42, 0.82);
+  border-color: rgba(186, 198, 220, 0.22) !important;
+  box-shadow:
+    0 4px 24px rgb(0 0 0 / 0.32),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04) !important;
+}
+
+.shell--tenant-dark .settings-page-title,
+.shell--tenant-dark .settings-section-title {
+  color: #f8fafc;
+}
+
+.shell--tenant-dark .settings-page-sub {
+  color: #94a3b8;
+}
+
+.shell--tenant-dark .mat-mdc-form-field.mat-form-field-appearance-fill .mat-mdc-text-field-wrapper {
+  border-color: rgba(148, 163, 184, 0.22) !important;
+  background-color: rgba(15, 23, 42, 0.45) !important;
+}
+
+.shell--tenant-dark .mat-mdc-form-field.mat-form-field-appearance-fill.mat-focused .mat-mdc-text-field-wrapper {
+  border-color: color-mix(in srgb, var(--shell-accent) 55%, transparent) !important;
+  background-color: rgba(30, 41, 59, 0.9) !important;
+}
+
+.shell--tenant-dark .mat-mdc-form-field .mdc-text-field__input,
+.shell--tenant-dark .mat-mdc-form-field textarea.mat-mdc-input-element {
+  color: #e2e8f0 !important;
+}
+
+.shell--tenant-dark .mat-mdc-form-field .mat-mdc-floating-label {
+  color: #94a3b8 !important;
+}
+
+/* ── grid pager (replaces mat-paginator) ── */
+.dd-grid-pager {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  height: 48px;
+  padding: 0 1rem;
+  font-size: var(--dd-text-sm);
+  color: var(--color-text-secondary, #64748b);
+  border-top: 1px solid var(--color-dd-border, rgba(0, 0, 0, 0.12));
+}
+
+.dd-grid-pager__label {
+  white-space: nowrap;
+}
+
+.dd-grid-pager__select {
+  appearance: none;
+  background: transparent;
+  border: 1px solid var(--color-dd-border, rgba(0, 0, 0, 0.2));
+  border-radius: 6px;
+  padding: 0.25rem 1.75rem 0.25rem 0.5rem;
+  font-size: var(--dd-text-sm);
+  color: inherit;
+  cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.4rem center;
+}
+
+.dd-grid-pager__range {
+  white-space: nowrap;
+}
+
+.dd-grid-pager__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.dd-grid-pager__btn:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.dd-grid-pager__btn:disabled {
+  opacity: 0.38;
+  cursor: default;
+}
+
+.dd-grid-pager__btn .mat-icon {
+  font-size: 20px;
+  width: 20px;
+  height: 20px;
+}
+
+/* ── grid pager dark themes ── */
+.shell--tenant-dark .dd-grid-pager {
+  color: #cbd5e1;
+  border-top-color: rgba(148, 163, 184, 0.22);
+}
+
+.shell--tenant-dark .dd-grid-pager__select {
+  border-color: rgba(148, 163, 184, 0.3);
+  color: #cbd5e1;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23cbd5e1' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+}
+
+.shell--tenant-dark .dd-grid-pager__btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.shell--tenant-dark .settings-theme-toggle.mat-button-toggle-group {
+  border-color: rgba(148, 163, 184, 0.25);
+}
+
+.shell--tenant-dark .settings-theme-toggle .mat-button-toggle-button {
+  color: #cbd5e1;
+}
+
+.shell--tenant-dark .settings-theme-toggle .mat-button-toggle-checked {
+  background: color-mix(in srgb, var(--shell-accent) 22%, transparent);
+  color: var(--shell-accent-contrast, #fff);
+}
+
+/* Dark shell: main canvas — page titles, Material cards, tables, empty states */
+.shell--tenant-dark main h1 {
+  color: #f8fafc !important;
+}
+
+.shell--tenant-dark main h2.font-display.text-slate-900,
+.shell--tenant-dark main h3.font-display.text-slate-900,
+.shell--tenant-dark main h3.text-lg.font-semibold.text-slate-900 {
+  color: #f8fafc !important;
+}
+
+.shell--tenant-dark main p.text-slate-600 {
+  color: #cbd5e1 !important;
+}
+
+.shell--tenant-dark main .mat-mdc-card {
+  color: #e2e8f0;
+}
+
+.shell--tenant-dark main .mat-mdc-card .text-slate-900 {
+  color: #f8fafc !important;
+}
+
+.shell--tenant-dark main .mat-mdc-card .text-slate-800 {
+  color: #e2e8f0 !important;
+}
+
+.shell--tenant-dark main .mat-mdc-card .text-slate-600 {
+  color: #cbd5e1 !important;
+}
+
+.shell--tenant-dark main .mat-mdc-card .text-slate-500 {
+  color: #94a3b8 !important;
+}
+
+.shell--tenant-dark main .mat-mdc-card .text-gray-900 {
+  color: #f8fafc !important;
+}
+
+.shell--tenant-dark main .mat-mdc-card .text-gray-600 {
+  color: #cbd5e1 !important;
+}
+
+.shell--tenant-dark main .mat-mdc-card .text-gray-500 {
+  color: #94a3b8 !important;
+}
+
+.shell--tenant-dark main .mat-mdc-card .text-gray-400 {
+  color: #94a3b8 !important;
+}
+
+.shell--tenant-dark main .mat-mdc-card .text-green-600 {
+  color: #4ade80 !important;
+}
+
+.shell--tenant-dark main .mat-mdc-card .text-red-600 {
+  color: #f87171 !important;
+}
+
+.shell--tenant-dark main .mat-mdc-card .text-red-700 {
+  color: #fca5a5 !important;
+}
+
+.shell--tenant-dark main .mat-mdc-card .text-emerald-600 {
+  color: #34d399 !important;
+}
+
+.shell--tenant-dark main .mat-mdc-card table thead tr {
+  border-color: rgba(148, 163, 184, 0.28) !important;
+  color: #94a3b8 !important;
+}
+
+.shell--tenant-dark main .mat-mdc-card table tbody tr {
+  border-color: rgba(148, 163, 184, 0.14) !important;
+}
+
+.shell--tenant-dark main .mat-mdc-card table tbody tr:hover {
+  background-color: rgba(255, 255, 255, 0.05) !important;
+}
+
+.shell--tenant-dark main .mat-mdc-card .flex.h-11.w-11.rounded-xl.bg-slate-100 {
+  background-color: rgba(30, 41, 59, 0.9) !important;
+  color: #cbd5e1 !important;
+}
+
+.shell--tenant-dark main .mat-mdc-icon-button.text-slate-400 {
+  color: #cbd5e1 !important;
+}
+
+.shell--tenant-dark .mat-mdc-outlined-button.mat-primary {
+  --mdc-outlined-button-label-text-color: color-mix(in srgb, var(--shell-button-text) 72%, #f8fafc);
+  --mdc-outlined-button-outline-color: color-mix(in srgb, var(--shell-accent) 16%, rgba(186, 198, 220, 0.42));
+}
+
+.shell--tenant-dark .mat-mdc-outlined-button.mat-primary .mat-icon {
+  color: color-mix(in srgb, var(--shell-button-text) 72%, #fff) !important;
+}
+
+.shell--tenant-dark
+  .mat-mdc-button.mat-primary:not(.mat-mdc-raised-button):not(.mat-mdc-unelevated-button):not(.mat-mdc-filled-button) {
+  --mdc-text-button-label-text-color: color-mix(in srgb, var(--shell-button-text) 72%, #f8fafc);
+}
+
+/* Dark accent hues (e.g. violet-900) must not sit on dark card bodies — shell retints to light ink */
+.shell--tenant-dark main .mat-mdc-card .text-violet-900 {
+  color: #d5e6f7 !important;
+}
+
+.dd-ag-grid-panel {
+  display: flex;
+  min-height: 0;
+  width: 100%;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--color-border, #e2e8f0);
+  border-radius: 1.35rem;
+  background: var(--color-bg-secondary, #ffffff);
+  box-shadow: none;
+}
+
+.dd-grid-empty-state {
+  display: flex;
+  min-height: 5.25rem;
+  width: 100%;
+  box-sizing: border-box;
+  align-items: center;
+  border: 1px dotted #cbd5e1;
+  border-color: color-mix(in srgb, var(--color-border, #e2e8f0) 78%, #94a3b8);
+  border-radius: 1rem;
+  background: color-mix(in srgb, var(--color-bg-secondary, #ffffff) 70%, transparent);
+  padding: 1.75rem 1.25rem;
+  color: var(--color-text-secondary, #64748b);
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.dd-ag-grid-shell {
+  display: block;
+  min-height: 0;
+  overflow: hidden;
+  box-sizing: border-box;
+  border: 1px solid #e2e8f0;
+  border-radius: 1rem;
+  background: #ffffff;
+  box-shadow: none;
+}
+
+.dd-ag-grid-shell--empty {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.dd-ag-grid-frame,
+.dd-ag-grid-placeholder {
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  background: inherit;
+  box-shadow: none;
+}
+
+.dd-ag-grid-placeholder {
+  min-height: 18rem;
+}
+
+.dd-ag-grid-theme {
+  width: 100%;
+  --ag-font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  --ag-border-color: #e2e8f0;
+  --ag-background-color: #ffffff;
+  --ag-foreground-color: #0f172a;
+  --ag-data-color: #0f172a;
+  --ag-header-background-color: #ffffff;
+  --ag-header-foreground-color: #64748b;
+  --ag-odd-row-background-color: #ffffff;
+  --ag-row-hover-color: #f8fafc;
+  --ag-selected-row-background-color: #f1f5f9;
+  --ag-modal-overlay-background-color: rgb(15 23 42 / 0.25);
+  --ag-input-border-color: #cbd5e1;
+  --ag-input-background-color: #ffffff;
+  --ag-input-focus-border-color: #64748b;
+  --ag-input-focus-box-shadow: 0 0 0 3px rgb(100 116 139 / 0.12);
+  --ag-range-selection-border-color: #64748b;
+  --ag-range-selection-background-color: rgb(100 116 139 / 0.1);
+  --ag-checkbox-background-color: #ffffff;
+  --ag-checkbox-checked-color: #334155;
+  --ag-checkbox-unchecked-color: #94a3b8;
+  --ag-accent-color: #475569;
+  --ag-menu-background-color: #ffffff;
+  --ag-menu-border-color: #e2e8f0;
+  --ag-control-panel-background-color: #ffffff;
+  --ag-popup-shadow: 0 24px 48px -24px rgba(30, 41, 49, 0.24), 0 0 0 1px rgba(255, 255, 255, 0.6);
+  --ag-selected-tab-underline-color: #475569;
+  --ag-side-button-selected-background-color: #f1f5f9;
+  --ag-wrapper-border-radius: 1rem;
+  --ag-header-column-resize-handle-color: #cbd5e1;
+  --ag-cell-horizontal-padding: 1rem;
+  --ag-grid-size: 8px;
+}
+
+.dd-ag-grid-theme .ag-root-wrapper {
+  border: 0;
+  border-radius: 1rem;
+  box-shadow: none;
+  height: 100%;
+}
+
+.dd-ag-grid-theme .ag-paging-panel {
+  padding: 0 1rem;
+  gap: 1rem;
+  align-items: center;
+}
+
+.dd-ag-grid-theme .ag-header-cell,
+.dd-ag-grid-theme .ag-cell {
+  align-content: center;
+}
+
+.dd-ag-grid-theme .ag-cell {
+  line-height: 1.35;
+}
+
+.dd-grid-stack {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.dd-grid-stack__primary {
+  overflow: hidden;
+  color: var(--color-text-primary);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dd-grid-stack__secondary,
+.dd-grid-muted {
+  overflow: hidden;
+  color: var(--color-text-secondary);
+  font-size: 0.75rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dd-grid-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  font-size: 0.75rem;
+}
+
+.dd-grid-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.dd-grid-action {
+  display: inline-flex;
+  min-height: 1.375rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 9999px;
+  padding: 0.125rem 0.625rem;
+  background: #ffffff;
+  color: #334155;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0;
+  text-decoration: none;
+  white-space: nowrap;
+  vertical-align: middle;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+
+.dd-grid-action:hover {
+  background: #f8fafc;
+}
+
+.dd-grid-action--primary {
+  border-color: #cbd5e1;
+  color: #334155;
+}
+
+.dd-grid-action--primary:hover {
+  background: #f8fafc;
+}
+
+.dd-grid-action--danger {
+  border-color: #fecdd3;
+  color: #be123c;
+}
+
+.dd-grid-action--danger:hover {
+  background: #fff1f2;
+}
+
+.dd-grid-detail-panel {
+  border: 1px solid var(--color-dd-border, var(--color-border));
+  border-radius: 1rem;
+  background: var(--color-bg-secondary);
+  padding: 1rem 1.25rem;
+}
+
+.dd-ag-grid-theme .ag-row.dd-grid-row-clickable,
+.dd-ag-grid-theme .ag-row.dd-grid-row-clickable .ag-cell {
+  cursor: pointer;
+}
+
+.dd-ag-grid-theme .ag-picker-field-wrapper,
+.dd-ag-grid-theme .ag-input-field-input,
+.dd-ag-grid-theme .ag-text-field-input,
+.dd-ag-grid-theme .ag-number-field-input {
+  background: var(--ag-input-background-color) !important;
+  border-color: var(--ag-input-border-color) !important;
+  color: var(--ag-foreground-color) !important;
+}
+
+.dd-ag-grid-theme .ag-input-field-input:focus,
+.dd-ag-grid-theme .ag-text-field-input:focus,
+.dd-ag-grid-theme .ag-number-field-input:focus,
+.dd-ag-grid-theme .ag-picker-field-wrapper:focus-within {
+  border-color: var(--ag-input-focus-border-color) !important;
+  box-shadow: var(--ag-input-focus-box-shadow) !important;
+}
+
+.dd-ag-grid-theme .ag-menu,
+.dd-ag-grid-theme .ag-popup-child,
+.dd-ag-grid-theme .ag-advanced-filter-builder,
+.dd-ag-grid-theme .ag-chart-menu,
+.dd-ag-grid-theme .ag-panel {
+  background: var(--ag-menu-background-color) !important;
+  border-color: var(--ag-menu-border-color) !important;
+  color: var(--ag-foreground-color) !important;
+  box-shadow: var(--ag-popup-shadow) !important;
+}
+
+.dd-ag-grid-theme .ag-menu-header,
+.dd-ag-grid-theme .ag-tabs-header,
+.dd-ag-grid-theme .ag-filter-toolpanel-header,
+.dd-ag-grid-theme .ag-filter-toolpanel-search,
+.dd-ag-grid-theme .ag-advanced-filter-builder-button-panel {
+  background: color-mix(in srgb, var(--ag-menu-background-color) 94%, var(--ag-background-color)) !important;
+  border-color: var(--ag-menu-border-color) !important;
+}
+
+.dd-ag-grid-theme .ag-menu-option,
+.dd-ag-grid-theme .ag-tab,
+.dd-ag-grid-theme .ag-set-filter-item,
+.dd-ag-grid-theme .ag-virtual-list-item,
+.dd-ag-grid-theme .ag-select-list .ag-list-item,
+.dd-ag-grid-theme .ag-rich-select-list .ag-rich-select-row,
+.dd-ag-grid-theme .ag-side-button-button,
+.dd-ag-grid-theme .ag-picker-field-display {
+  color: var(--ag-foreground-color) !important;
+}
+
+.dd-ag-grid-theme .ag-menu-option:hover,
+.dd-ag-grid-theme .ag-menu-option.ag-menu-option-active,
+.dd-ag-grid-theme .ag-tab.ag-tab-selected,
+.dd-ag-grid-theme .ag-side-button.ag-selected,
+.dd-ag-grid-theme .ag-virtual-list-item:hover,
+.dd-ag-grid-theme .ag-list-item-hovered,
+.dd-ag-grid-theme .ag-set-filter-item:hover {
+  background: #f8fafc !important;
+}
+
+.dd-ag-grid-theme .ag-tab.ag-tab-selected::after {
+  background: var(--ag-selected-tab-underline-color) !important;
+}
+
+.dd-ag-grid-theme .ag-menu-option-icon,
+.dd-ag-grid-theme .ag-menu-option-popup-pointer,
+.dd-ag-grid-theme .ag-set-filter-group-icons,
+.dd-ag-grid-theme .ag-filter-toolpanel-expand,
+.dd-ag-grid-theme .ag-side-button-label,
+.dd-ag-grid-theme .ag-side-button-button .ag-icon,
+.dd-ag-grid-theme .ag-picker-field-icon .ag-icon {
+  color: inherit !important;
+}
+
+/* ── Dropdown / select panel: explicit dark + light overrides ──────────────
+   The CDK overlay renders in <body> so html.shell--* ancestors still apply.
+   We set both background AND every text node Material can render text into.  */
+html.shell--tenant-dark {
+  .mat-mdc-menu-panel {
+    background: #1a1c23 !important;
+    border: 1px solid #2c3340 !important;
+    box-shadow:
+      0 24px 48px -18px rgba(15, 23, 42, 0.55),
+      0 0 0 1px rgba(148, 163, 184, 0.12) !important;
+  }
+
+  .mat-mdc-menu-content {
+    padding-block: 0.35rem !important;
+  }
+
+  .mat-mdc-menu-item,
+  .mat-mdc-menu-item .mat-icon {
+    color: #f5f7fa !important;
+  }
+
+  .mat-mdc-menu-item:hover,
+  .mat-mdc-menu-item.cdk-program-focused,
+  .mat-mdc-menu-item.cdk-keyboard-focused,
+  .mat-mdc-menu-item.mat-mdc-menu-item-highlighted {
+    background: #323a4b !important;
+  }
+
+  .mat-mdc-tooltip .mdc-tooltip__surface {
+    background: #1f2937 !important;
+    color: #f8fafc !important;
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    box-shadow: 0 16px 32px -16px rgba(15, 23, 42, 0.48);
+  }
+}
+
+html.shell--tenant-light {
+  .mat-mdc-menu-panel {
+    background: var(--color-surface) !important;
+    border: 1px solid color-mix(in srgb, var(--shell-accent) 12%, var(--color-border)) !important;
+    box-shadow:
+      0 22px 44px -22px rgba(30, 41, 49, 0.22),
+      0 0 0 1px rgba(255, 255, 255, 0.6) !important;
+  }
+
+  .mat-mdc-menu-content {
+    padding-block: 0.35rem !important;
+  }
+
+  .mat-mdc-menu-item,
+  .mat-mdc-menu-item .mat-icon {
+    color: var(--color-text-primary) !important;
+  }
+
+  .mat-mdc-menu-item:hover,
+  .mat-mdc-menu-item.cdk-program-focused,
+  .mat-mdc-menu-item.cdk-keyboard-focused,
+  .mat-mdc-menu-item.mat-mdc-menu-item-highlighted {
+    background: color-mix(in srgb, var(--shell-accent) 10%, var(--color-bg-tertiary)) !important;
+  }
+
+  .mat-mdc-tooltip .mdc-tooltip__surface {
+    background: #24353b !important;
+    color: #f8fafc !important;
+    border: 1px solid rgba(70, 106, 115, 0.16);
+    box-shadow: 0 16px 32px -18px rgba(30, 41, 49, 0.24);
+  }
+}
+
+html.shell--tenant-dark {
+  .mat-mdc-select-panel,
+  div.mat-mdc-select-panel {
+    background: #1a1c23 !important;
+    border: 1px solid #2c3340 !important;
+  }
+
+  .mat-mdc-option {
+    color: #f5f7fa !important;
+  }
+
+  .mat-mdc-option .mdc-list-item__primary-text,
+  .mat-mdc-option .mat-mdc-option-text,
+  .mat-mdc-option span {
+    color: #f5f7fa !important;
+  }
+
+  .mat-mdc-option:hover,
+  .mat-mdc-option.mat-mdc-option-active,
+  .mat-mdc-option.mdc-list-item--selected {
+    background: #323a4b !important;
+  }
+}
+
+html.shell--tenant-light {
+  .mat-mdc-select-panel,
+  div.mat-mdc-select-panel {
+    border-radius: 0.75rem !important;
+    background: var(--color-bg-secondary) !important;
+    border: 1px solid color-mix(in srgb, var(--shell-accent) 14%, var(--color-border)) !important;
+    box-shadow:
+      0 18px 42px -24px color-mix(in srgb, var(--shell-accent) 26%, rgb(15 23 42)),
+      0 0 0 1px rgb(255 255 255 / 0.55) !important;
+    padding: 0.35rem !important;
+  }
+
+  .mat-mdc-option,
+  .mat-mdc-option .mdc-list-item__primary-text,
+  .mat-mdc-option .mat-mdc-option-text,
+  .mat-mdc-option span {
+    color: var(--color-text-primary) !important;
+  }
+
+  .mat-mdc-option {
+    border-radius: 0.55rem !important;
+    min-height: 2.6rem !important;
+  }
+
+  .mat-mdc-option:hover,
+  .mat-mdc-option.mat-mdc-option-active,
+  .mat-mdc-option.mdc-list-item--selected {
+    background: color-mix(in srgb, var(--shell-accent) 10%, var(--color-bg-tertiary)) !important;
+    color: var(--color-text-primary) !important;
+  }
+}
+
+/* Warm utility remap for legacy product templates that still use cool slate/sky tokens. */
+html.shell--tenant-light {
+  main {
+    .text-slate-900,
+    .text-slate-800 {
+      color: var(--color-text-primary) !important;
+    }
+
+    .text-slate-700,
+    .text-slate-600 {
+      color: var(--color-text-secondary) !important;
+    }
+
+    .text-slate-500,
+    .text-slate-400 {
+      color: var(--color-text-tertiary) !important;
+    }
+
+    .border-slate-200,
+    .border-gray-100 {
+      border-color: var(--color-border) !important;
+    }
+
+    .bg-slate-50,
+    .bg-slate-50\/60,
+    .bg-slate-50\/70,
+    .bg-slate-50\/80,
+    .bg-slate-50\/90,
+    .bg-slate-100 {
+      background-color: var(--color-bg-tertiary) !important;
+    }
+
+    .bg-white\/70,
+    .bg-white\/80,
+    .bg-white\/85,
+    .bg-white\/90 {
+      background-color: color-mix(in srgb, white 88%, var(--color-bg-secondary)) !important;
+    }
+
+    .bg-sky-50,
+    .bg-sky-50\/70,
+    .bg-sky-100,
+    .bg-\[\#ebf3fd\],
+    .bg-\[\#f4f9ff\],
+    .bg-\[\#f6faff\] {
+      background-color: color-mix(in srgb, var(--shell-accent-soft) 58%, var(--color-bg-tertiary)) !important;
+    }
+
+    .border-sky-100,
+    .border-sky-200 {
+      border-color: color-mix(in srgb, var(--shell-accent) 16%, var(--color-border)) !important;
+    }
+
+    .text-sky-950,
+    .text-sky-900,
+    .text-blue-600,
+    .hover\:text-blue-600:hover {
+      color: var(--shell-accent) !important;
+    }
+
+    .bg-emerald-50,
+    .bg-emerald-100 {
+      background-color: color-mix(in srgb, var(--color-success) 14%, var(--color-bg-secondary)) !important;
+    }
+
+    .border-emerald-200 {
+      border-color: color-mix(in srgb, var(--color-success) 20%, var(--color-border)) !important;
+    }
+
+    .text-emerald-950,
+    .text-emerald-800,
+    .text-emerald-600 {
+      color: var(--color-success) !important;
+    }
+
+    .border-red-200 {
+      border-color: color-mix(in srgb, var(--color-error) 20%, var(--color-border)) !important;
+    }
+
+    .bg-red-50 {
+      background-color: color-mix(in srgb, var(--color-error) 10%, var(--color-bg-secondary)) !important;
+    }
+
+    .text-red-800,
+    .text-red-700,
+    .text-red-500 {
+      color: var(--color-error) !important;
+    }
+
+    .border-green-500 {
+      border-color: var(--color-success) !important;
+    }
+
+    .border-red-500 {
+      border-color: var(--color-error) !important;
+    }
+  }
+}

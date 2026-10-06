@@ -1,0 +1,343 @@
+<app-page-header title="Settings" subtitle="Connect GitHub and choose how PRVision talks to Claude." />
+
+@if (loading()) {
+  <app-loading-spinner />
+} @else if (loadError()) {
+  <app-inline-alert tone="error" title="Couldn't load settings">
+    {{ loadErrorMessage() }}
+    <button inlineAlertAction mat-stroked-button type="button" class="!rounded-xl" (click)="load()">Retry</button>
+  </app-inline-alert>
+} @else {
+  <form class="flex flex-col gap-6" [formGroup]="form" (ngSubmit)="onSaveClick()">
+    <!-- GitHub -->
+    <mat-card
+      class="!rounded-2xl border border-[color:var(--color-border)] bg-[var(--color-bg-secondary)] p-5 shadow-[var(--shadow-md)]"
+    >
+      <div class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h3 class="text-lg font-semibold text-[var(--color-text-primary)]">GitHub</h3>
+          <p class="mt-1 max-w-2xl text-sm leading-6 text-[var(--color-text-secondary)]">
+            PRVision uses a fine-grained personal access token to list pull requests and fetch their branches. Give it
+            read-only access to <strong>Contents</strong>, <strong>Metadata</strong> and
+            <strong>Pull requests</strong> for the repositories you visualize. It is encrypted on this machine and never
+            shown again.
+          </p>
+        </div>
+        <a
+          mat-stroked-button
+          class="!rounded-xl shrink-0"
+          href="https://github.com/settings/personal-access-tokens/new"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          <mat-icon aria-hidden="true">open_in_new</mat-icon> Create a token
+        </a>
+      </div>
+
+      <div class="mb-2 flex items-center justify-between gap-3">
+        <label for="prvision-github-token" class="text-sm font-semibold text-[var(--color-text-primary)]"
+          >Personal access token</label
+        >
+        @if (githubSaved()) {
+          <span class="dd-pill dd-pill--success">Saved</span>
+        }
+      </div>
+      <div class="flex items-start gap-2">
+        <mat-form-field class="w-full">
+          <input
+            matInput
+            id="prvision-github-token"
+            formControlName="githubToken"
+            [type]="showGithubToken() ? 'text' : 'password'"
+            name="prvision-github-token"
+            autocomplete="new-password"
+            spellcheck="false"
+            autocapitalize="off"
+            [placeholder]="githubPlaceholder()"
+          />
+          <button
+            matSuffix
+            mat-icon-button
+            type="button"
+            [attr.aria-pressed]="showGithubToken()"
+            [attr.aria-label]="showGithubToken() ? 'Hide token' : 'Show token'"
+            [matTooltip]="showGithubToken() ? 'Hide token' : 'Show token'"
+            (click)="toggleGithubToken()"
+          >
+            <mat-icon aria-hidden="true">{{ showGithubToken() ? 'visibility_off' : 'visibility' }}</mat-icon>
+          </button>
+          <mat-hint>{{ githubHint() }}</mat-hint>
+          @if (form.controls.githubToken.hasError('pattern')) {
+            <mat-error>Remove spaces from the token.</mat-error>
+          } @else if (form.controls.githubToken.hasError('maxlength')) {
+            <mat-error>The token is too long.</mat-error>
+          }
+        </mat-form-field>
+        @if (clearFlags().githubToken) {
+          <button mat-button type="button" class="!mt-2 !rounded-xl" (click)="undoClear('githubToken')">Undo</button>
+        } @else if (showGithubRemove()) {
+          <button
+            mat-stroked-button
+            color="warn"
+            type="button"
+            class="!mt-2 !rounded-xl"
+            (click)="markClear('githubToken')"
+          >
+            Remove
+          </button>
+        }
+      </div>
+
+      <div class="mt-4 flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <span [class]="githubStatusClass()" data-testid="github-status">{{ githubStatus().label }}</span>
+        <button
+          mat-stroked-button
+          type="button"
+          class="!rounded-xl"
+          data-testid="github-test"
+          [disabled]="githubTestDisabled()"
+          (click)="testGithub()"
+        >
+          @if (githubTest().state === 'running') {
+            <mat-spinner diameter="18" class="!inline-block align-middle mr-2" />
+          } @else {
+            <mat-icon aria-hidden="true">wifi_tethering</mat-icon>
+          }
+          {{ githubTestLabel() }}
+        </button>
+      </div>
+      @if (githubTest().state === 'ok') {
+        <app-inline-alert class="mt-3 block" tone="success" title="Connected"
+          >{{ githubStatus().label }}.</app-inline-alert
+        >
+      }
+      @if (githubTestError(); as err) {
+        <app-inline-alert class="mt-3 block" tone="error" [title]="err.title">{{ err.message }}</app-inline-alert>
+      }
+    </mat-card>
+
+    <!-- AI provider -->
+    <mat-card
+      class="!rounded-2xl border border-[color:var(--color-border)] bg-[var(--color-bg-secondary)] p-5 shadow-[var(--shadow-md)]"
+    >
+      <div class="mb-4">
+        <h3 class="text-lg font-semibold text-[var(--color-text-primary)]">AI provider</h3>
+        <p class="mt-1 max-w-2xl text-sm leading-6 text-[var(--color-text-secondary)]">
+          Claude writes the render harnesses and the review summary. Choose how PRVision reaches it.
+        </p>
+      </div>
+
+      <mat-radio-group formControlName="aiProvider" aria-label="AI provider" class="grid gap-3 md:grid-cols-2">
+        @for (option of providerCards(); track option.value) {
+          <!-- The whole card is the radio's label, so clicking anywhere on it selects (13 §5.4.4). -->
+          <mat-radio-button
+            [value]="option.value"
+            class="block rounded-2xl border p-2 transition-colors [&_.mdc-form-field]:!flex [&_.mdc-form-field]:w-full [&_.mdc-form-field]:!items-start [&_label]:flex-1 [&_label]:cursor-pointer [&_label]:py-2 [&_label]:pr-2"
+            [class.border-[color:var(--color-border)]]="!option.selected"
+            [class.border-[color:var(--shell-accent)]]="option.selected"
+            [class.bg-[var(--shell-accent-soft)]]="option.selected"
+            [attr.data-provider]="option.value"
+          >
+            <span class="block font-semibold text-[var(--color-text-primary)]">{{ option.title }}</span>
+            <span class="mt-1 block text-sm leading-6 text-[var(--color-text-secondary)]">{{
+              option.description
+            }}</span>
+          </mat-radio-button>
+        }
+      </mat-radio-group>
+
+      @if (provider() === 'claude_code') {
+        <app-inline-alert class="mt-4 block" tone="warning" title="Subscription login">
+          {{ policyNote }}
+          @if (showSavedKeyKeptNote()) {
+            <p class="mt-2">Your saved API key is kept but not used while Claude Code is selected.</p>
+          }
+        </app-inline-alert>
+      } @else {
+        <div class="mt-5 mb-2 flex items-center justify-between gap-3">
+          <label for="prvision-anthropic-key" class="text-sm font-semibold text-[var(--color-text-primary)]"
+            >Anthropic API key</label
+          >
+          @if (anthropicSaved()) {
+            <span class="dd-pill dd-pill--success">Saved</span>
+          }
+        </div>
+        <div class="flex items-start gap-2">
+          <mat-form-field class="w-full">
+            <input
+              matInput
+              id="prvision-anthropic-key"
+              formControlName="anthropicApiKey"
+              [type]="showAnthropicKey() ? 'text' : 'password'"
+              name="prvision-anthropic-key"
+              autocomplete="new-password"
+              spellcheck="false"
+              autocapitalize="off"
+              [placeholder]="anthropicPlaceholder()"
+              (blur)="onAnthropicKeyBlur()"
+            />
+            <button
+              matSuffix
+              mat-icon-button
+              type="button"
+              [attr.aria-pressed]="showAnthropicKey()"
+              [attr.aria-label]="showAnthropicKey() ? 'Hide key' : 'Show key'"
+              [matTooltip]="showAnthropicKey() ? 'Hide key' : 'Show key'"
+              (click)="toggleAnthropicKey()"
+            >
+              <mat-icon aria-hidden="true">{{ showAnthropicKey() ? 'visibility_off' : 'visibility' }}</mat-icon>
+            </button>
+            @if (anthropicHint(); as hint) {
+              <mat-hint>{{ hint }}</mat-hint>
+            }
+            @if (form.controls.anthropicApiKey.hasError('pattern')) {
+              <mat-error>Remove spaces from the key.</mat-error>
+            } @else if (form.controls.anthropicApiKey.hasError('maxlength')) {
+              <mat-error>The key is too long.</mat-error>
+            }
+          </mat-form-field>
+          @if (clearFlags().anthropicApiKey) {
+            <button mat-button type="button" class="!mt-2 !rounded-xl" (click)="undoClear('anthropicApiKey')">
+              Undo
+            </button>
+          } @else if (showAnthropicRemove()) {
+            <button
+              mat-stroked-button
+              color="warn"
+              type="button"
+              class="!mt-2 !rounded-xl"
+              (click)="markClear('anthropicApiKey')"
+            >
+              Remove
+            </button>
+          }
+        </div>
+        @if (anthropicKeyMissing()) {
+          <p class="mt-1 px-4 text-xs text-[var(--color-error)]" role="alert" data-testid="key-required">
+            An API key is required for the Anthropic API provider.
+          </p>
+        }
+      }
+
+      <div class="mt-5 flex items-start gap-2">
+        <mat-form-field class="w-full">
+          <mat-label>Model</mat-label>
+          <input matInput formControlName="aiModel" autocomplete="off" spellcheck="false" autocapitalize="off" />
+          <mat-hint>Default: claude-opus-5-5. Any model ID your provider accepts.</mat-hint>
+          @if (form.controls.aiModel.hasError('required')) {
+            <mat-error>Enter a model ID.</mat-error>
+          } @else if (form.controls.aiModel.hasError('pattern')) {
+            <mat-error
+              >Use a model ID such as claude-opus-5-5 (lowercase letters, digits, dots and dashes; no
+              spaces).</mat-error
+            >
+          } @else if (form.controls.aiModel.hasError('maxlength')) {
+            <mat-error>The model ID is too long.</mat-error>
+          }
+        </mat-form-field>
+        @if (!modelIsDefault()) {
+          <button mat-button type="button" class="!mt-2 !rounded-xl shrink-0" (click)="resetModel()">
+            Reset to default
+          </button>
+        }
+      </div>
+
+      <div class="mt-4 grid gap-4 md:grid-cols-2">
+        <mat-form-field class="w-full">
+          <mat-label>Harness effort</mat-label>
+          <mat-select formControlName="aiHarnessEffort">
+            <mat-select-trigger>{{ harnessEffortLabel() }}</mat-select-trigger>
+            @for (option of effortOptions; track option.value) {
+              <mat-option [value]="option.value">
+                {{ option.label }}
+                <span class="ml-2 text-xs text-[var(--color-text-tertiary)]">{{ option.hint }}</span>
+              </mat-option>
+            }
+          </mat-select>
+          <mat-hint>Used when writing render harnesses.</mat-hint>
+        </mat-form-field>
+        <mat-form-field class="w-full">
+          <mat-label>Summary effort</mat-label>
+          <mat-select formControlName="aiSummaryEffort">
+            <mat-select-trigger>{{ summaryEffortLabel() }}</mat-select-trigger>
+            @for (option of effortOptions; track option.value) {
+              <mat-option [value]="option.value">
+                {{ option.label }}
+                <span class="ml-2 text-xs text-[var(--color-text-tertiary)]">{{ option.hint }}</span>
+              </mat-option>
+            }
+          </mat-select>
+          <mat-hint>Used when writing the AI summary and component notes.</mat-hint>
+        </mat-form-field>
+      </div>
+
+      <div class="mt-4 flex justify-end">
+        <button
+          mat-stroked-button
+          type="button"
+          class="!rounded-xl"
+          data-testid="ai-test"
+          [disabled]="aiTestDisabled()"
+          (click)="testAi()"
+        >
+          @if (aiTest().state === 'running') {
+            <mat-spinner diameter="18" class="!inline-block align-middle mr-2" />
+          } @else {
+            <mat-icon aria-hidden="true">bolt</mat-icon>
+          }
+          {{ aiTestLabel() }}
+        </button>
+      </div>
+      @if (aiTestMessage(); as message) {
+        <app-inline-alert class="mt-3 block" tone="success" title="AI provider answered">{{
+          message
+        }}</app-inline-alert>
+      }
+      @if (aiTestError(); as err) {
+        <app-inline-alert class="mt-3 block" tone="error" [title]="err.title">{{ err.message }}</app-inline-alert>
+      }
+    </mat-card>
+
+    <!-- Appearance -->
+    <mat-card
+      class="!rounded-2xl border border-[color:var(--color-border)] bg-[var(--color-bg-secondary)] p-5 shadow-[var(--shadow-md)]"
+    >
+      <h3 class="mb-4 text-lg font-semibold text-[var(--color-text-primary)]">Appearance</h3>
+      <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <p class="text-sm text-[var(--color-text-secondary)]">Theme</p>
+        <app-segmented-control
+          ariaLabel="Theme"
+          [options]="themeOptions"
+          [value]="theme.mode()"
+          [fullWidthOnMobile]="false"
+          (valueChange)="theme.setMode($event)"
+        />
+      </div>
+    </mat-card>
+
+    @if (saveErrorCopy(); as err) {
+      <app-inline-alert tone="error" [title]="err.title">
+        {{ err.message }}
+        @if (err.details.length) {
+          <ul class="mt-1 list-disc pl-5">
+            @for (detail of err.details; track detail) {
+              <li>{{ detail }}</li>
+            }
+          </ul>
+        }
+      </app-inline-alert>
+    }
+
+    <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
+      <button mat-stroked-button type="button" class="!rounded-xl" [disabled]="!hasChanges()" (click)="discard()">
+        Discard changes
+      </button>
+      <button mat-flat-button color="primary" type="submit" class="!rounded-xl" [disabled]="!canSave()">
+        @if (saving()) {
+          <mat-spinner diameter="18" class="!inline-block align-middle mr-2" />
+        }
+        {{ saving() ? 'Saving…' : 'Save settings' }}
+      </button>
+    </div>
+  </form>
+}

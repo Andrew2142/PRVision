@@ -1,0 +1,31 @@
+# Dependencies
+node_modules/
+
+# Build output and caches
+backend/dist/
+frontend/dist/
+frontend/.angular/
+frontend/out-tsc/
+coverage/
+
+# Environment and secrets (00 §4). .env.example is committed.
+.env
+.env.*
+!.env.example
+
+# Runtime output. The data dir (~/.prvision) lives outside the repo.
+*.log
+logs/
+.prvision-harness/
+
+# OS and editors
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Local agent settings
+.claude/settings.local.json
+
+# Symlink to backend/node_modules for test module resolution (scripts/link-test-modules.mjs)
+tests/node_modules

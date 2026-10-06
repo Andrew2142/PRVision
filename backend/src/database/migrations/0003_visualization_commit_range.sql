@@ -1,0 +1,3 @@
+ALTER TABLE "visualizations" DROP CONSTRAINT "visualizations_source_type_check";--> statement-breakpoint
+ALTER TABLE "visualizations" ADD CONSTRAINT "visualizations_commit_range_shas_check" CHECK ("visualizations"."source_type" <> 'commit_range' or ("visualizations"."base_sha" is not null and "visualizations"."head_sha" is not null));--> statement-breakpoint
+ALTER TABLE "visualizations" ADD CONSTRAINT "visualizations_source_type_check" CHECK ("visualizations"."source_type" in ('github_pr', 'local_branch', 'working_tree', 'commit_range'));
