@@ -16,6 +16,8 @@ x-app: &app
     context: .
     target: app
   image: prvision-app
+  # Rebuild on every `docker compose up` (cached, so quick) so a `git pull` is never run with stale images.
+  pull_policy: build
   restart: unless-stopped
   # `docker compose up` shows only the UI's ready message; `docker compose logs -f` shows everything.
   attach: false
@@ -101,6 +103,7 @@ services:
       context: .
       target: web
     image: prvision-web
+    pull_policy: build
     container_name: prvision-web
     restart: unless-stopped
     ports:
