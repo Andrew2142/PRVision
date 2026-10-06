@@ -74,16 +74,18 @@ PRVision answers the question a reviewer actually has: **what does this change l
 ```bash
 git clone https://github.com/Andrew2142/PRVision.git
 cd PRVision
-./prvision
+docker compose up
 ```
 
-PRVision builds, starts in Docker and opens <http://localhost:4210> in your browser. `Ctrl+C` stops it.
+When the app is ready, the terminal prints `PRVision is ready: http://localhost:4210`. Open that link. `Ctrl+C` stops it.
 
 1. In **Settings**, add an Anthropic API key and, for pull requests, a GitHub fine-grained token.
 2. In **Repositories**, add a local clone that lives under your home folder.
 3. Pick a pull request, branch or commit and press **Start**.
 
-`docker compose up` works too: when the app is ready it prints `PRVision is ready: http://localhost:4210`, a link you can click. Prefer to run it without Docker? `npm run setup && npm run dev` (Node 22.12+, git, Docker for Postgres and Redis). See the [setup reference](docs/SETUP.md).
+To update later, run `git pull` and then `docker compose up` again. The images rebuild automatically.
+
+Prefer to run it without Docker? `npm run setup && npm run dev` (Node 22.12+, git, Docker for Postgres and Redis). See the [setup reference](docs/SETUP.md).
 
 ## How it works
 
