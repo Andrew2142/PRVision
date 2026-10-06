@@ -27,27 +27,6 @@ npm run dev        # backend :3100, worker, frontend :4210
 Open <http://localhost:4210>. In **Settings**, add a GitHub fine-grained token and choose an AI provider. In
 **Repositories**, register a local clone of a Vite + React project.
 
-## Configuration
-
-`npm run setup:env` copies `.env.example` to the repo-root `.env` (git-ignored, mode 0600) and generates
-`PRVISION_SECRET_KEY`. It never overwrites a value you set.
-
-| Key | Required | Default | Purpose |
-|---|---|---|---|
-| `NODE_ENV` | no | `development` | Runtime mode |
-| `PORT` / `HOST` | no | `3100` / `127.0.0.1` | Backend listen address |
-| `FRONTEND_URL` | no | `http://localhost:4210` | CORS and Origin check |
-| `DATABASE_URL` | yes | `postgres://prvision:prvision@127.0.0.1:5433/prvision` | Postgres |
-| `REDIS_URL` | yes | `redis://127.0.0.1:6380` | Redis / BullMQ |
-| `PRVISION_SECRET_KEY` | yes | generated | Encrypts stored secrets |
-| `PRVISION_DATA_DIR` | no | `~/.prvision` | Worktrees, artifacts, fixtures |
-| `LOG_LEVEL` | no | `info` | Logger level |
-| `PRVISION_PG_PORT` / `PRVISION_REDIS_PORT` | no | `5433` / `6380` | Docker host ports (Compose only) |
-
-If 5433 or 6380 is busy and you have not pinned a port, `setup:env` picks the next free one and rewrites
-`DATABASE_URL` / `REDIS_URL` to match. Non-secret tunables (timeouts, limits, names) live in
-`backend/src/config-consts`, not in `.env`.
-
 ## Scripts
 
 | Script | What it does |
@@ -79,23 +58,6 @@ AI writes the harness; real code renders the pixels.
 - The GitHub token and Anthropic API key are encrypted at rest with `PRVISION_SECRET_KEY` and never returned by the API.
 - The backend binds `127.0.0.1` only; Postgres and Redis ports bind to `127.0.0.1` only.
 
-## AI provider policy
-
-Two providers are supported: an Anthropic API key, and a locally installed Claude Code. Anthropic does not allow
-third-party products to route requests through users' Claude.ai subscription logins. Using your own Claude Code
-login is acceptable for this personal prototype only; before any distribution the Claude Code provider must require
-API-key auth or be removed.
-
-## Troubleshooting
-
-- **Port 5433 or 6380 in use:** `npm run setup:env` moves to a free port when the port is not pinned. If you pinned
-  `PRVISION_PG_PORT` / `PRVISION_REDIS_PORT`, stop the other service or change both the port and the URL in `.env`.
-- **Docker not running:** start Docker, then `npm run infra:up`.
-- **`playwright install` behind a proxy:** set `HTTPS_PROXY` and rerun `npm run setup:browsers`.
-- **npm "install scripts not covered by allowScripts":** expected for new dependencies; review with
-  `npm install-scripts ls` and deny with `npm install-scripts deny <pkg>`. Builds work without them.
-- **`missing_node_modules` when registering a repo:** run `npm install` in the target clone first.
-- **Start over:** `npm run infra:reset` deletes all PRVision database and queue data. It cannot be undone.
 
 ## Repository layout and specs
 
