@@ -27,7 +27,7 @@ import { LoadingSpinnerComponent } from '../../../shared/components/loading-spin
 import { PageHeaderComponent } from '../../../shared/components/page-header/page-header.component';
 import { SegmentedControlComponent } from '../../../shared/components/segmented-control/segmented-control.component';
 import { type PillTone } from '../../../shared/components/status-pill/status-pill.config';
-import { DEFAULT_AI_MODEL, EFFORT_OPTIONS, LEGACY_PROVIDER_NOTE, THEME_OPTIONS } from '../settings-copy';
+import { DEFAULT_AI_MODEL, EFFORT_OPTIONS, THEME_OPTIONS } from '../settings-copy';
 import {
   AI_MODEL_PATTERN,
   NO_WHITESPACE,
@@ -78,7 +78,6 @@ export class SettingsPageComponent {
 
   protected readonly themeOptions = THEME_OPTIONS;
   protected readonly effortOptions = EFFORT_OPTIONS;
-  protected readonly legacyProviderNote = LEGACY_PROVIDER_NOTE;
 
   protected readonly loading = signal(true);
   protected readonly loadError = signal<ApiError | null>(null);
@@ -167,8 +166,6 @@ export class SettingsPageComponent {
   });
 
   // AI card
-  /** Saved settings still name the removed Claude Code provider; saving switches them to anthropic_api. */
-  protected readonly legacyProvider = computed(() => this.saved()?.aiProvider === 'claude_code');
   protected readonly anthropicKeyWarning = computed(() => anthropicKeyHint(this.formValue().anthropicApiKey));
   protected readonly anthropicHint = computed(() =>
     this.clearFlags().anthropicApiKey ? 'The saved key will be removed when you save.' : this.anthropicKeyWarning(),

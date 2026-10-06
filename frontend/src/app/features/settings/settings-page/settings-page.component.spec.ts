@@ -292,21 +292,18 @@ describe('SettingsPageComponent', () => {
     load();
     expect(el.querySelector('#prvision-anthropic-key')).not.toBeNull();
     expect(el.querySelector('mat-radio-group')).toBeNull();
-    expect(el.querySelector('[data-testid="legacy-provider"]')).toBeNull();
     expect(text()).not.toContain('Claude Code');
   });
 
-  it('legacy claude_code with a saved key shows the note and saves the switch to anthropic_api', () => {
+  it('legacy claude_code with a saved key mentions nothing and saves the switch to anthropic_api', () => {
     load({ ...SAVED, aiProvider: 'claude_code' });
-    expect(byTestId('legacy-provider').textContent).toContain('Claude Code is no longer supported.');
+    expect(text()).not.toContain('Claude Code');
     expect(el.querySelector('#prvision-anthropic-key')).not.toBeNull();
     expect(el.querySelector('[data-testid="key-required"]')).toBeNull();
     save();
     const req = httpMock.expectOne(`${BASE}/settings`);
     expect(req.request.body).toEqual({ aiProvider: 'anthropic_api' });
     req.flush({ status: 200, data: SAVED });
-    fixture.detectChanges();
-    expect(el.querySelector('[data-testid="legacy-provider"]')).toBeNull();
   });
 
   it('legacy claude_code with no saved key blocks Save with the key-required error', () => {

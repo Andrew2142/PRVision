@@ -4,10 +4,6 @@ import { type SegmentOption } from '../../shared/components/segmented-control/se
 
 export const DEFAULT_AI_MODEL = 'claude-opus-5-5';
 
-/** Shown when the saved settings still name the removed Claude Code provider (legacy `claude_code`). */
-export const LEGACY_PROVIDER_NOTE =
-  'Claude Code is no longer supported. PRVision now uses an Anthropic API key: add one below (or keep the saved key) and save.';
-
 export const THEME_OPTIONS: readonly SegmentOption<ThemeMode>[] = [
   { value: 'dark', label: 'Dark', icon: 'dark_mode' },
   { value: 'light', label: 'Light', icon: 'light_mode' },

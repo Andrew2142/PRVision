@@ -128,12 +128,6 @@
         </p>
       </div>
 
-      @if (legacyProvider()) {
-        <app-inline-alert class="mb-4 block" tone="warning" title="Claude Code removed" data-testid="legacy-provider">
-          {{ legacyProviderNote }}
-        </app-inline-alert>
-      }
-
       <div class="mb-2 flex items-center justify-between gap-3">
         <label for="prvision-anthropic-key" class="text-sm font-semibold text-[var(--color-text-primary)]"
           >Anthropic API key</label
