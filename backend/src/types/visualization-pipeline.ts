@@ -250,7 +250,7 @@ export interface AiStructuredRequest {
   images?: Array<{ mediaType: "image/png"; base64: string; label: string }>;
   jsonSchema: Record<string, unknown>; // JSON Schema draft 2020-12, additionalProperties:false
   effort: (typeof AiEffort)[keyof typeof AiEffort];
-  workingDirectory?: string; // head worktree (Claude Code provider only)
+  workingDirectory?: string; // worktree the request is about (informational; not sent to the API)
   signal?: AbortSignal;
 }
 export interface AiUsage {
@@ -265,7 +265,7 @@ export interface AiStructuredResult<T> {
   model: string;
 }
 export interface AiProvider {
-  readonly kind: "anthropic_api" | "claude_code";
+  readonly kind: "anthropic_api";
   generateStructured<T>(request: AiStructuredRequest): Promise<AiStructuredResult<T>>;
 }
 

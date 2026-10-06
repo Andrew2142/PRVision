@@ -88,12 +88,12 @@ test("transitionVisualization stamps startedAt on preparing and completedAt on t
     from: "queued",
     to: "preparing",
     now: NOW,
-    fields: { aiProvider: "claude_code", aiModel: "m", errorMessage: null }
+    fields: { aiProvider: "anthropic_api", aiModel: "m", errorMessage: null }
   });
   let row = qh.row(Table.VISUALIZATIONS, 1);
   assert.deepEqual(row?.startedAt, NOW);
   assert.equal(row.completedAt, null);
-  assert.equal(row.aiProvider, "claude_code");
+  assert.equal(row.aiProvider, "anthropic_api");
 
   for (const status of ["analyzing", "generating_harnesses", "rendering", "diffing", "summarizing"] as const) {
     const from = row?.status as VisualizationStatus;

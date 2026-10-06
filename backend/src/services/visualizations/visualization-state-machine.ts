@@ -1,4 +1,4 @@
-import { isTerminalVisualizationStatus, Table, VisualizationStatus } from "../../enums";
+import { isTerminalVisualizationStatus, Table, VisualizationStatus, type AiProviderKind } from "../../enums";
 import type { QueryHandler } from "../../utilities";
 
 const S = VisualizationStatus;
@@ -30,7 +30,7 @@ export function canTransition(from: VisualizationStatus, to: VisualizationStatus
  */
 export interface VisualizationTransitionFields {
   errorMessage?: string | null;
-  aiProvider?: "anthropic_api" | "claude_code";
+  aiProvider?: AiProviderKind;
   aiModel?: string;
   baseSha?: string | null;
   headSha?: string | null;

@@ -152,17 +152,8 @@ const EXPECTED_NAMES = [
   "AI_SERVER_SIDE_FALLBACK_BETA",
   "AI_MAX_IMAGE_BASE64_CHARS",
   "AI_CONNECTION_TEST_TIMEOUT_MS",
-  "AI_CLAUDE_CODE_CONNECTION_TEST_TIMEOUT_MS",
-  "AI_CLAUDE_CODE_TIMEOUT_MS",
-  "AI_CLAUDE_CODE_MAX_TURNS",
-  "AI_CLAUDE_CODE_INVALID_OUTPUT_RETRIES",
-  "AI_CLAUDE_CODE_ENV_ALLOWLIST",
-  "AI_CLAUDE_CODE_ENV_PREFIXES",
-  "AI_CLAUDE_CODE_ENV_DENYLIST",
-  "AI_CLAUDE_CODE_PARENT_ENV",
   "HARNESS_PROMPT_TOKEN_BUDGET",
   "HARNESS_CONCURRENCY_ANTHROPIC_API",
-  "HARNESS_CONCURRENCY_CLAUDE_CODE",
   "HARNESS_RETRY_DELAY_MS",
   "HARNESS_MAX_CALLS_PER_COMPONENT",
   "HARNESS_MAX_REPAIRS_PER_COMPONENT",
@@ -211,13 +202,6 @@ test("render.config imports only node:path", () => {
   const source = fs.readFileSync(path.join(__dirname, "../../../backend/src/config-consts/render.config.ts"), "utf8");
   const imports = [...source.matchAll(/^import .* from "([^"]+)";$/gm)].map((match) => match[1]);
   assert.deepEqual(imports, ["node:path"]);
-});
-
-test("AI_CLAUDE_CODE_PARENT_ENV never contains PRVision secrets", () => {
-  for (const name of Object.keys(config.AI_CLAUDE_CODE_PARENT_ENV)) {
-    assert.ok(!name.startsWith("PRVISION_"), name);
-    assert.ok(!["DATABASE_URL", "REDIS_URL", "NODE_OPTIONS"].includes(name), name);
-  }
 });
 
 test("every numeric constant is a finite non-negative number", () => {

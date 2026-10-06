@@ -7,12 +7,11 @@ import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
 import { MatInputModule } from '@angular/material/input';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
-import { MatRadioModule } from '@angular/material/radio';
 import { MatSelectModule } from '@angular/material/select';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { EMPTY, type Observable, catchError, concatMap, finalize, map, of, tap } from 'rxjs';
 import { type ApiError } from '../../../core/models/api-error.model';
-import { type AiProviderKind, type Effort } from '../../../core/models/domain-enums.model';
+import { type Effort, type SelectableAiProviderKind } from '../../../core/models/domain-enums.model';
 import {
   type AiTestResultView,
   type GithubTestResultView,
@@ -28,13 +27,7 @@ import { LoadingSpinnerComponent } from '../../../shared/components/loading-spin
 import { PageHeaderComponent } from '../../../shared/components/page-header/page-header.component';
 import { SegmentedControlComponent } from '../../../shared/components/segmented-control/segmented-control.component';
 import { type PillTone } from '../../../shared/components/status-pill/status-pill.config';
-import {
-  CLAUDE_CODE_POLICY_NOTE,
-  DEFAULT_AI_MODEL,
-  EFFORT_OPTIONS,
-  PROVIDER_OPTIONS,
-  THEME_OPTIONS,
-} from '../settings-copy';
+import { DEFAULT_AI_MODEL, EFFORT_OPTIONS, LEGACY_PROVIDER_NOTE, THEME_OPTIONS } from '../settings-copy';
 import {
   AI_MODEL_PATTERN,
   NO_WHITESPACE,
@@ -54,7 +47,7 @@ const REQUIRED: ValidatorFn = (control) => Validators.required(control);
 
 const AI_FIELDS = ['anthropicApiKey', 'aiProvider', 'aiModel', 'aiHarnessEffort', 'aiSummaryEffort'] as const;
 
-/** Settings screen (13 §5.4): GitHub token, AI provider, appearance. Secrets are write-only. */
+/** Settings screen (13 §5.4): GitHub token, AI (Anthropic API key), appearance. Secrets are write-only. */
 @Component({
   selector: 'app-settings-page',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -64,7 +57,6 @@ const AI_FIELDS = ['anthropicApiKey', 'aiProvider', 'aiModel', 'aiHarnessEffort'
     MatFormFieldModule,
     MatInputModule,
     MatSelectModule,
-    MatRadioModule,
     MatButtonModule,
     MatIconModule,
     MatProgressSpinnerModule,
@@ -86,7 +78,7 @@ export class SettingsPageComponent {
 
   protected readonly themeOptions = THEME_OPTIONS;
   protected readonly effortOptions = EFFORT_OPTIONS;
-  protected readonly policyNote = CLAUDE_CODE_POLICY_NOTE;
+  protected readonly legacyProviderNote = LEGACY_PROVIDER_NOTE;
 
   protected readonly loading = signal(true);
   protected readonly loadError = signal<ApiError | null>(null);
@@ -103,7 +95,8 @@ export class SettingsPageComponent {
   protected readonly form = this.fb.group(
     {
       githubToken: this.fb.control('', [Validators.maxLength(255), NO_WHITESPACE]),
-      aiProvider: this.fb.control<AiProviderKind>('anthropic_api'),
+      // Not shown: anthropic_api is the only provider. Differs from the saved value only for the legacy claude_code.
+      aiProvider: this.fb.control<SelectableAiProviderKind>('anthropic_api'),
       // 05 SettingsUpdateDTO: MaxLength(512)
       anthropicApiKey: this.fb.control('', [Validators.maxLength(512), NO_WHITESPACE]),
       aiModel: this.fb.control(DEFAULT_AI_MODEL, [
@@ -138,7 +131,6 @@ export class SettingsPageComponent {
     const u = this.pendingUpdate();
     return AI_FIELDS.some((k) => k in u);
   });
-  protected readonly provider = computed(() => this.formValue().aiProvider);
 
   // GitHub card
   protected readonly githubTokenWarning = computed(() => githubTokenHint(this.formValue().githubToken));
@@ -175,12 +167,8 @@ export class SettingsPageComponent {
   });
 
   // AI card
-  protected readonly providerCards = computed(() =>
-    PROVIDER_OPTIONS.map((o) => ({ ...o, selected: o.value === this.provider() })),
-  );
-  protected readonly showSavedKeyKeptNote = computed(
-    () => this.provider() === 'claude_code' && !!this.saved()?.hasAnthropicApiKey,
-  );
+  /** Saved settings still name the removed Claude Code provider; saving switches them to anthropic_api. */
+  protected readonly legacyProvider = computed(() => this.saved()?.aiProvider === 'claude_code');
   protected readonly anthropicKeyWarning = computed(() => anthropicKeyHint(this.formValue().anthropicApiKey));
   protected readonly anthropicHint = computed(() =>
     this.clearFlags().anthropicApiKey ? 'The saved key will be removed when you save.' : this.anthropicKeyWarning(),
@@ -264,7 +252,7 @@ export class SettingsPageComponent {
     this.form.controls.anthropicApiKey.enable();
     this.form.reset({
       githubToken: '',
-      aiProvider: v.aiProvider,
+      aiProvider: 'anthropic_api',
       anthropicApiKey: '',
       aiModel: v.aiModel,
       aiHarnessEffort: v.aiHarnessEffort,

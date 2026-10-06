@@ -42,14 +42,14 @@ import {
 
 const NOW = new Date("2026-03-01T12:00:00.000Z");
 const SETTINGS: ResolvedAiSettings = {
-  provider: "claude_code",
+  provider: "anthropic_api",
   model: "claude-opus-5-5",
   harnessEffort: "high",
   summaryEffort: "medium",
-  anthropicApiKey: { state: "absent" }
+  anthropicApiKey: { state: "present", value: `sk-ant-api03-${"w".repeat(40)}` }
 };
 const PROVIDER: AiProvider = {
-  kind: "claude_code",
+  kind: "anthropic_api",
   generateStructured: () => Promise.reject(new Error("not used"))
 };
 
@@ -265,7 +265,7 @@ test("VisualizationWorkerService.run snapshots ai_provider/ai_model and started_
   await h.worker().run(makeJob(1).job);
   const updates = h.store.callsFor("update", Table.VISUALIZATIONS).map((c) => c.args[0] as Record<string, unknown>);
   assert.deepEqual(updates[0], {
-    aiProvider: "claude_code",
+    aiProvider: "anthropic_api",
     aiModel: "claude-opus-5-5",
     errorMessage: null,
     status: "preparing",
@@ -273,7 +273,7 @@ test("VisualizationWorkerService.run snapshots ai_provider/ai_model and started_
   });
   assert.deepEqual(updates[1], { baseSha: "b".repeat(40), headSha: "h".repeat(40), status: "analyzing" });
   const row = h.row();
-  assert.equal(row?.aiProvider, "claude_code");
+  assert.equal(row?.aiProvider, "anthropic_api");
   assert.equal(row.baseSha, "b".repeat(40));
   assert.equal(row.headSha, "h".repeat(40));
   assert.deepEqual(row.startedAt, NOW);
@@ -588,15 +588,12 @@ test("VisualizationWorkerService.run PipelineStepError → failed with userMessa
 test("VisualizationWorkerService.run AiProviderError config from createProvider → queued → failed, with no prepare", async (t) => {
   const h = setup(t);
   h.deps.createProvider = () => {
-    throw new AiProviderError("Add an Anthropic API key, or switch the provider to Claude Code.", "config", false);
+    throw new AiProviderError("Add an Anthropic API key in Settings.", "config", false);
   };
   assert.equal(await h.worker().run(makeJob(1).job), "failed");
   assert.equal(h.row()?.status, "failed");
   assert.equal(h.row()?.failedStage, "queued");
-  assert.equal(
-    h.row()?.errorMessage,
-    "AI is not configured: Add an Anthropic API key, or switch the provider to Claude Code."
-  );
+  assert.equal(h.row()?.errorMessage, "AI is not configured: Add an Anthropic API key in Settings.");
   assert.deepEqual(h.events, []);
   assert.deepEqual(
     classifyRunFailure(new AiProviderError("x", "auth", false), undefined, false, "generating_harnesses").errorMessage,

@@ -1,7 +1,10 @@
 // Enum values from 00 §5, mirrored as `as const` arrays plus union types.
 
+/** `claude_code` is legacy: the provider was removed, but old settings and visualizations may still carry it. */
 export const AI_PROVIDER_KINDS = ['anthropic_api', 'claude_code'] as const;
 export type AiProviderKind = (typeof AI_PROVIDER_KINDS)[number];
+/** The only provider that can be saved. */
+export type SelectableAiProviderKind = 'anthropic_api';
 
 export const AI_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
 export type Effort = (typeof AI_EFFORTS)[number];

@@ -610,3 +610,16 @@ User decision (2026-10-05): harnesses are generated in parallel. The model stays
 - **UI:** the status pill reads "Needs your choice". The stepper shows the run on the Analyzing step.
   - A popup asks once per run: "N components changed", with **Render all N** (or top 100), or "Decide below".
   - An inline alert keeps the same choices: Render all, Render top 12, Cancel run.
+
+## 20. Revision 8 — API-key only (overrides earlier sections)
+
+Decision (2026-10-06): D5 changes. Anthropic does not allow third-party products to use Claude.ai subscription logins through the Agent SDK, so the public build ships with the Anthropic API key provider only.
+
+- The Claude Code provider is removed: `claude-code-provider.ts`, `claude-code-result.ts`, the `@anthropic-ai/claude-agent-sdk` dependency (and its peers `zod` and `@modelcontextprotocol/sdk`), and the `AI_CLAUDE_CODE_*` and `HARNESS_CONCURRENCY_CLAUDE_CODE` constants. Harness concurrency is `HARNESS_CONCURRENCY_ANTHROPIC_API` (4).
+- `AiProviderKind.CLAUDE_CODE` (`claude_code`) stays only as a legacy value, so existing `app_settings` and `visualizations` rows stay valid without a migration. The CHECK constraints and generated models are unchanged.
+- It is not selectable. `PUT /api/settings` accepts only `aiProvider: "anthropic_api"`; `claude_code` fails with `400 validation_failed`.
+- A stored `claude_code` setting means AI is not configured. `AiProviderFactory.create` throws `AiProviderError("config")` with "The Claude Code provider is no longer available. Add an Anthropic API key in Settings and save." `POST /api/visualizations` (readiness) and `POST /api/settings/test-ai` return `ai_not_configured` with that message; a run already queued fails with it. Nothing constructs a Claude Code provider.
+- The key-absent message is now "Add an Anthropic API key in Settings."
+- `AiProvider.kind` is `"anthropic_api"`. `AiStructuredRequest.workingDirectory` is still set by 09 but no provider reads it.
+- Settings screen: the provider choice, the Claude Code copy and the subscription policy note are gone. The AI card is the Anthropic API key, model and efforts. When the saved provider is `claude_code`, the card shows a "Claude Code removed" note, requires a key, and the next save sends `aiProvider: "anthropic_api"`.
+- Visualizations created with `claude_code` keep showing "Claude Code" as their provider label.

@@ -1,10 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { performance } from "node:perf_hooks";
-import {
-  AI_CLAUDE_CODE_CONNECTION_TEST_TIMEOUT_MS,
-  AI_CONNECTION_TEST_TIMEOUT_MS,
-  GITHUB_TEST_TIMEOUT_MS
-} from "../../config-consts";
+import { AI_CONNECTION_TEST_TIMEOUT_MS, GITHUB_TEST_TIMEOUT_MS } from "../../config-consts";
 import type { AiTestResultView, GithubTestResultView, SettingsUpdateDTO, SettingsView } from "../../dtos";
 import { ErrorReason } from "../../enums";
 import type { AppSettingModel } from "../../models";
@@ -12,9 +8,7 @@ import {
   AiProviderError,
   AiProviderFactory,
   AnthropicStatusError,
-  ClaudeCodeProvider,
   GitHubClient,
-  SDK_UNAVAILABLE_MESSAGE,
   buildConnectionTestRequest,
   createLogger,
   redactSecrets,
@@ -42,8 +36,6 @@ export const SETTINGS_MESSAGES = {
     `The AI provider rejected the request for model "${model}": ${sdkMessage}`,
   aiKeyRejected: "Anthropic rejected the API key. Check that it is active and copied correctly.",
   aiModelForbidden: (model: string): string => `The API key is not allowed to use model "${model}".`,
-  aiClaudeCodeUnauthorized:
-    "Claude Code is not signed in or not authorized. Run `claude` in a terminal, sign in, then retry.",
   aiRateLimited: "The AI provider is rate limited or overloaded. Try again shortly.",
   aiTimeout: (seconds: number): string => `The AI provider did not answer within ${seconds} s.`,
   aiNetwork: "Could not reach the AI provider. Check your network connection.",
@@ -174,12 +166,8 @@ export class SettingsService {
       }
       throw error;
     }
-    if (settings.provider === "claude_code" && !(await ClaudeCodeProvider.isSdkAvailable())) {
-      return this.aiFailure(settings, 400, SDK_UNAVAILABLE_MESSAGE, ErrorReason.AI_NOT_CONFIGURED, "config", 0);
-    }
 
-    const timeoutMs =
-      settings.provider === "claude_code" ? AI_CLAUDE_CODE_CONNECTION_TEST_TIMEOUT_MS : AI_CONNECTION_TEST_TIMEOUT_MS;
+    const timeoutMs = AI_CONNECTION_TEST_TIMEOUT_MS;
     const timeout = this.deps.timeoutSignal(timeoutMs);
     const nonce = this.deps.nonce();
     const request = buildConnectionTestRequest({ nonce, signal: timeout });
@@ -335,9 +323,6 @@ export class SettingsService {
           ErrorReason.AI_NOT_CONFIGURED
         ];
       case "auth":
-        if (settings.provider === "claude_code") {
-          return [400, SETTINGS_MESSAGES.aiClaudeCodeUnauthorized, ErrorReason.AI_UNAUTHORIZED];
-        }
         return error instanceof AnthropicStatusError && error.status === 403
           ? [400, SETTINGS_MESSAGES.aiModelForbidden(settings.model), ErrorReason.AI_UNAUTHORIZED]
           : [400, SETTINGS_MESSAGES.aiKeyRejected, ErrorReason.AI_UNAUTHORIZED];

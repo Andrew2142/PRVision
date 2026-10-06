@@ -116,107 +116,86 @@
       }
     </mat-card>
 
-    <!-- AI provider -->
+    <!-- AI -->
     <mat-card
       class="!rounded-2xl border border-[color:var(--color-border)] bg-[var(--color-bg-secondary)] p-5 shadow-[var(--shadow-md)]"
     >
       <div class="mb-4">
-        <h3 class="text-lg font-semibold text-[var(--color-text-primary)]">AI provider</h3>
+        <h3 class="text-lg font-semibold text-[var(--color-text-primary)]">AI</h3>
         <p class="mt-1 max-w-2xl text-sm leading-6 text-[var(--color-text-secondary)]">
-          Claude writes the render harnesses and the review summary. Choose how PRVision reaches it.
+          Claude writes the render harnesses and the review summary through the Anthropic API, using your API key. Usage
+          is billed to the account that owns the key.
         </p>
       </div>
 
-      <mat-radio-group formControlName="aiProvider" aria-label="AI provider" class="grid gap-3 md:grid-cols-2">
-        @for (option of providerCards(); track option.value) {
-          <!-- The whole card is the radio's label, so clicking anywhere on it selects (13 §5.4.4). -->
-          <mat-radio-button
-            [value]="option.value"
-            class="block rounded-2xl border p-2 transition-colors [&_.mdc-form-field]:!flex [&_.mdc-form-field]:w-full [&_.mdc-form-field]:!items-start [&_label]:flex-1 [&_label]:cursor-pointer [&_label]:py-2 [&_label]:pr-2"
-            [class.border-[color:var(--color-border)]]="!option.selected"
-            [class.border-[color:var(--shell-accent)]]="option.selected"
-            [class.bg-[var(--shell-accent-soft)]]="option.selected"
-            [attr.data-provider]="option.value"
-          >
-            <span class="block font-semibold text-[var(--color-text-primary)]">{{ option.title }}</span>
-            <span class="mt-1 block text-sm leading-6 text-[var(--color-text-secondary)]">{{
-              option.description
-            }}</span>
-          </mat-radio-button>
-        }
-      </mat-radio-group>
-
-      @if (provider() === 'claude_code') {
-        <app-inline-alert class="mt-4 block" tone="warning" title="Subscription login">
-          {{ policyNote }}
-          @if (showSavedKeyKeptNote()) {
-            <p class="mt-2">Your saved API key is kept but not used while Claude Code is selected.</p>
-          }
+      @if (legacyProvider()) {
+        <app-inline-alert class="mb-4 block" tone="warning" title="Claude Code removed" data-testid="legacy-provider">
+          {{ legacyProviderNote }}
         </app-inline-alert>
-      } @else {
-        <div class="mt-5 mb-2 flex items-center justify-between gap-3">
-          <label for="prvision-anthropic-key" class="text-sm font-semibold text-[var(--color-text-primary)]"
-            >Anthropic API key</label
-          >
-          @if (anthropicSaved()) {
-            <span class="dd-pill dd-pill--success">Saved</span>
-          }
-        </div>
-        <div class="flex items-start gap-2">
-          <mat-form-field class="w-full">
-            <input
-              matInput
-              id="prvision-anthropic-key"
-              formControlName="anthropicApiKey"
-              [type]="showAnthropicKey() ? 'text' : 'password'"
-              name="prvision-anthropic-key"
-              autocomplete="new-password"
-              spellcheck="false"
-              autocapitalize="off"
-              [placeholder]="anthropicPlaceholder()"
-              (blur)="onAnthropicKeyBlur()"
-            />
-            <button
-              matSuffix
-              mat-icon-button
-              type="button"
-              [attr.aria-pressed]="showAnthropicKey()"
-              [attr.aria-label]="showAnthropicKey() ? 'Hide key' : 'Show key'"
-              [matTooltip]="showAnthropicKey() ? 'Hide key' : 'Show key'"
-              (click)="toggleAnthropicKey()"
-            >
-              <mat-icon aria-hidden="true">{{ showAnthropicKey() ? 'visibility_off' : 'visibility' }}</mat-icon>
-            </button>
-            @if (anthropicHint(); as hint) {
-              <mat-hint>{{ hint }}</mat-hint>
-            }
-            @if (form.controls.anthropicApiKey.hasError('pattern')) {
-              <mat-error>Remove spaces from the key.</mat-error>
-            } @else if (form.controls.anthropicApiKey.hasError('maxlength')) {
-              <mat-error>The key is too long.</mat-error>
-            }
-          </mat-form-field>
-          @if (clearFlags().anthropicApiKey) {
-            <button mat-button type="button" class="!mt-2 !rounded-xl" (click)="undoClear('anthropicApiKey')">
-              Undo
-            </button>
-          } @else if (showAnthropicRemove()) {
-            <button
-              mat-stroked-button
-              color="warn"
-              type="button"
-              class="!mt-2 !rounded-xl"
-              (click)="markClear('anthropicApiKey')"
-            >
-              Remove
-            </button>
-          }
-        </div>
-        @if (anthropicKeyMissing()) {
-          <p class="mt-1 px-4 text-xs text-[var(--color-error)]" role="alert" data-testid="key-required">
-            An API key is required for the Anthropic API provider.
-          </p>
+      }
+
+      <div class="mb-2 flex items-center justify-between gap-3">
+        <label for="prvision-anthropic-key" class="text-sm font-semibold text-[var(--color-text-primary)]"
+          >Anthropic API key</label
+        >
+        @if (anthropicSaved()) {
+          <span class="dd-pill dd-pill--success">Saved</span>
         }
+      </div>
+      <div class="flex items-start gap-2">
+        <mat-form-field class="w-full">
+          <input
+            matInput
+            id="prvision-anthropic-key"
+            formControlName="anthropicApiKey"
+            [type]="showAnthropicKey() ? 'text' : 'password'"
+            name="prvision-anthropic-key"
+            autocomplete="new-password"
+            spellcheck="false"
+            autocapitalize="off"
+            [placeholder]="anthropicPlaceholder()"
+            (blur)="onAnthropicKeyBlur()"
+          />
+          <button
+            matSuffix
+            mat-icon-button
+            type="button"
+            [attr.aria-pressed]="showAnthropicKey()"
+            [attr.aria-label]="showAnthropicKey() ? 'Hide key' : 'Show key'"
+            [matTooltip]="showAnthropicKey() ? 'Hide key' : 'Show key'"
+            (click)="toggleAnthropicKey()"
+          >
+            <mat-icon aria-hidden="true">{{ showAnthropicKey() ? 'visibility_off' : 'visibility' }}</mat-icon>
+          </button>
+          @if (anthropicHint(); as hint) {
+            <mat-hint>{{ hint }}</mat-hint>
+          }
+          @if (form.controls.anthropicApiKey.hasError('pattern')) {
+            <mat-error>Remove spaces from the key.</mat-error>
+          } @else if (form.controls.anthropicApiKey.hasError('maxlength')) {
+            <mat-error>The key is too long.</mat-error>
+          }
+        </mat-form-field>
+        @if (clearFlags().anthropicApiKey) {
+          <button mat-button type="button" class="!mt-2 !rounded-xl" (click)="undoClear('anthropicApiKey')">
+            Undo
+          </button>
+        } @else if (showAnthropicRemove()) {
+          <button
+            mat-stroked-button
+            color="warn"
+            type="button"
+            class="!mt-2 !rounded-xl"
+            (click)="markClear('anthropicApiKey')"
+          >
+            Remove
+          </button>
+        }
+      </div>
+      @if (anthropicKeyMissing()) {
+        <p class="mt-1 px-4 text-xs text-[var(--color-error)]" role="alert" data-testid="key-required">
+          An API key is required for the Anthropic API provider.
+        </p>
       }
 
       <div class="mt-5 flex items-start gap-2">

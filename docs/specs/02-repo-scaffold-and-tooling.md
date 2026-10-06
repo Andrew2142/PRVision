@@ -3302,7 +3302,7 @@ Script behaviour (manual, §6.19 steps 2, 9–13): `check-prereqs` pass/warn; `s
 - [ ] `npm install-scripts ls` reports nothing unreviewed in `backend/` and `frontend/`; `allowScripts` committed.
 - [ ] `npm run verify` exits 0 from the repo root (backend: format, typecheck, lint 0 warnings, architecture, every §10 test passes, build; frontend: format, lint, build, 1 spec passes).
 - [ ] `npm test --prefix backend` runs with `--test-force-exit` and the `tests/backend/helpers/setup.ts` preload (00 §14.10); `npm test --prefix frontend` is a single headless run and `npm run test:watch --prefix frontend` keeps watch mode.
-- [ ] `backend/package.json` dependencies include `typescript`, `diff@^8`, `pixelmatch@^7`, `pngjs`, `ajv`, `@octokit/rest@^22`, `pino`, `@anthropic-ai/sdk`, `@anthropic-ai/claude-agent-sdk` (00 §14.1); every `package.json` has `engines.node` `>=22.12.0`; `.nvmrc` is `24`.
+- [ ] `backend/package.json` dependencies include `typescript`, `diff@^8`, `pixelmatch@^7`, `pngjs`, `ajv`, `@octokit/rest@^22`, `pino`, `@anthropic-ai/sdk` (00 §14.1; no `@anthropic-ai/claude-agent-sdk` since 00 §20); every `package.json` has `engines.node` `>=22.12.0`; `.nvmrc` is `24`.
 - [ ] `backend/harness-templates/**` is outside `tsconfig.json` `include`, in the ESLint `ignores` and in `.prettierignore` (00 §14.1).
 - [ ] With something listening on 127.0.0.1:5433 and no `PRVISION_PG_PORT` in `.env`, `npm run setup:env` writes `PRVISION_PG_PORT=5434` and `DATABASE_URL=…:5434/prvision`; a second run changes nothing.
 - [ ] `check-prereqs.mjs` fails on git < 2.31.

@@ -13,7 +13,6 @@ import { setTimeout as delay } from "node:timers/promises";
 import type { Logger } from "pino";
 import {
   HARNESS_CONCURRENCY_ANTHROPIC_API,
-  HARNESS_CONCURRENCY_CLAUDE_CODE,
   HARNESS_MAX_CALLS_PER_COMPONENT,
   HARNESS_MAX_REPAIRS_PER_COMPONENT,
   HARNESS_RETRY_DELAY_MS
@@ -244,8 +243,7 @@ export class HarnessGenerationService {
       return { results: [], failures: [], usage: ZERO_USAGE, cancelled: false };
     }
     const provider = this.ctx.ai.kind;
-    const concurrency =
-      provider === "claude_code" ? HARNESS_CONCURRENCY_CLAUDE_CODE : HARNESS_CONCURRENCY_ANTHROPIC_API;
+    const concurrency = HARNESS_CONCURRENCY_ANTHROPIC_API;
     const { model, harnessEffort: effort } = this.ctx.aiSettings;
     await this.ctx.console.info(
       STAGE,

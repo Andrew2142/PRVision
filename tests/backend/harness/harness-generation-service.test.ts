@@ -75,7 +75,7 @@ test("runs first component alone then up to four in parallel for anthropic_api",
   const candidates = ["A1", "A2", "A3", "A4", "A5"].map((name, index) =>
     componentCandidate(name, { componentId: index + 1, rank: index })
   );
-  const { service } = setupService(t, {
+  const { service, console } = setupService(t, {
     candidates,
     script: { harness: candidates.map(() => probe.step((request) => okResponse(componentOf(request)), 30)) }
   });
@@ -84,23 +84,7 @@ test("runs first component alone then up to four in parallel for anthropic_api",
   assert.equal(probe.inFlightAtStart[0], 1, "first call alone");
   assert.equal(probe.inFlightAtStart[1], 1, "second call starts after the first finished");
   assert.equal(probe.maxInFlight, 4);
-});
-
-test("runs first component alone then up to four in parallel for claude_code", async (t) => {
-  const probe = new ConcurrencyProbe();
-  const candidates = ["B1", "B2", "B3", "B4", "B5", "B6"].map((name, index) =>
-    componentCandidate(name, { componentId: index + 1, rank: index })
-  );
-  const { service, console } = setupService(t, {
-    kind: "claude_code",
-    candidates,
-    script: { harness: candidates.map(() => probe.step((request) => okResponse(componentOf(request)), 10)) }
-  });
-  await service.generateAll(candidates);
-  assert.equal(probe.inFlightAtStart[0], 1, "first call alone");
-  assert.equal(probe.inFlightAtStart[1], 1, "second call starts after the first finished");
-  assert.equal(probe.maxInFlight, 4);
-  assert.ok(console.has("info", "(claude_code, model claude-opus-5-5, effort high, concurrency 4)."));
+  assert.ok(console.has("info", "(anthropic_api, model claude-opus-5-5, effort high, concurrency 4)."));
 });
 
 test("uses identical system prompt, schema and effort for every call", async (t) => {

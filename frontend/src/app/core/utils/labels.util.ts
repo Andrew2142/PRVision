@@ -61,7 +61,10 @@ export function isSafeGithubUrl(url: string | null | undefined): url is string {
   return typeof url === 'string' && url.startsWith('https://github.com/');
 }
 
-/** Shared by 13's Settings (Test AI result) and visualization detail (summary line). */
+/**
+ * Shared by 13's Settings (Test AI result) and visualization detail (summary line). `claude_code` is legacy: the
+ * provider was removed, but visualizations created with it still show "Claude Code".
+ */
 export function providerLabel(p: string): string {
   return p === 'anthropic_api' ? 'Anthropic API' : p === 'claude_code' ? 'Claude Code' : formatPillLabel(p);
 }

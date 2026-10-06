@@ -22,7 +22,7 @@ x-app: &app
   user: "${PRVISION_UID:-1000}:${PRVISION_GID:-1000}"
   ipc: host
   environment:
-    # Same home as on this machine, so tools PRVision runs (git, Claude Code) see your normal config.
+    # Same home as on this machine, so git inside the container sees your normal config.
     HOME: ${HOME}
     DATABASE_URL: postgres://prvision:prvision@postgres:5432/prvision
     REDIS_URL: redis://redis:6379

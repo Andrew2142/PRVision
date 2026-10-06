@@ -38,13 +38,13 @@ import { FakeQueueStatics, fakeSteps } from "./helpers/fakes";
 
 const NOW = new Date("2026-03-01T12:00:00.000Z");
 const SETTINGS: ResolvedAiSettings = {
-  provider: "claude_code",
+  provider: "anthropic_api",
   model: "claude-opus-5-5",
   harnessEffort: "high",
   summaryEffort: "medium",
-  anthropicApiKey: { state: "absent" }
+  anthropicApiKey: { state: "present", value: `sk-ant-api03-${"w".repeat(40)}` }
 };
-const PROVIDER: AiProvider = { kind: "claude_code", generateStructured: () => Promise.reject(new Error("not used")) };
+const PROVIDER: AiProvider = { kind: "anthropic_api", generateStructured: () => Promise.reject(new Error("not used")) };
 const REPAIR = { repairHarness: () => Promise.reject(new Error("not used")) };
 
 function constructors(steps: PipelineStepFactories): string[] {

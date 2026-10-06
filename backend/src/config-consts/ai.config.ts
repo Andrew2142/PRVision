@@ -2,7 +2,6 @@
  * AI provider, harness-generation and summary configuration (consumed by 03, 05, 09, 11). Defaults match 00 D5.
  * Settings rows override provider/model/effort at runtime; these are the initial values and the limits.
  */
-import { pickEnv } from "../utilities/helpers/env";
 
 // ---- Defaults (must equal 03's column defaults) ----
 
@@ -37,69 +36,11 @@ export const AI_SERVER_SIDE_FALLBACK_BETA = "server-side-fallback-2026-07-01";
 export const AI_MAX_IMAGE_BASE64_CHARS = 6_900_000;
 
 export const AI_CONNECTION_TEST_TIMEOUT_MS = 60_000;
-export const AI_CLAUDE_CODE_CONNECTION_TEST_TIMEOUT_MS = 180_000;
-export const AI_CLAUDE_CODE_TIMEOUT_MS = 900_000;
-export const AI_CLAUDE_CODE_MAX_TURNS = 40;
-/**
- * Turn cap for calls without images. PRVision already packs every source file the model needs into the prompt,
- * so these calls run with no tools; letting the agent browse the repository re-sent the whole conversation on every
- * step and cost ~500k input tokens per harness on a large repo.
- */
-export const AI_CLAUDE_CODE_MAX_TURNS_NO_TOOLS = 3;
-/** Extra turns on top of one Read per attached image (summary calls). */
-export const AI_CLAUDE_CODE_IMAGE_TURN_MARGIN = 4;
-export const AI_CLAUDE_CODE_INVALID_OUTPUT_RETRIES = 1;
-
-/** Parent variables the Claude Code child may inherit (05 §5.12), in addition to the prefixes below. */
-export const AI_CLAUDE_CODE_ENV_ALLOWLIST = [
-  "PATH",
-  "HOME",
-  "USER",
-  "LOGNAME",
-  "SHELL",
-  "LANG",
-  "LC_ALL",
-  "TMPDIR",
-  "TERM",
-  "XDG_CONFIG_HOME",
-  "XDG_DATA_HOME",
-  "XDG_CACHE_HOME",
-  "HTTPS_PROXY",
-  "HTTP_PROXY",
-  "NO_PROXY",
-  "https_proxy",
-  "http_proxy",
-  "no_proxy",
-  "NODE_EXTRA_CA_CERTS",
-  "SSL_CERT_FILE"
-] as const;
-export const AI_CLAUDE_CODE_ENV_PREFIXES = ["ANTHROPIC_", "CLAUDE_"] as const;
-/** Dropped even if an allow rule matches (defence in depth, 00 §14.5). */
-export const AI_CLAUDE_CODE_ENV_DENYLIST = [
-  "PRVISION_SECRET_KEY",
-  "DATABASE_URL",
-  "REDIS_URL",
-  "NODE_OPTIONS"
-] as const;
-
-/**
- * Frozen snapshot of the parent variables the Claude Code child may inherit: allow-list + prefixes, minus the
- * deny-list and every PRVISION_* name. 05's buildClaudeCodeEnv() starts from this (not from
- * CHILD_PROCESS_BASE_ENV, which deliberately excludes ANTHROPIC_* and CLAUDE_*).
- */
-export const AI_CLAUDE_CODE_PARENT_ENV: Readonly<Record<string, string>> = Object.freeze(
-  Object.fromEntries(
-    Object.entries(pickEnv(AI_CLAUDE_CODE_ENV_ALLOWLIST, AI_CLAUDE_CODE_ENV_PREFIXES)).filter(
-      ([name]) => !(AI_CLAUDE_CODE_ENV_DENYLIST as readonly string[]).includes(name) && !name.startsWith("PRVISION_")
-    )
-  )
-);
 
 // ---- Harness generation (09) ----
 
 export const HARNESS_PROMPT_TOKEN_BUDGET = 48_000;
 export const HARNESS_CONCURRENCY_ANTHROPIC_API = 4;
-export const HARNESS_CONCURRENCY_CLAUDE_CODE = 4;
 export const HARNESS_RETRY_DELAY_MS = 10_000;
 export const HARNESS_MAX_CALLS_PER_COMPONENT = 3;
 /** Repair rounds after a failed head render (09 generates, 10 drives the loop). */

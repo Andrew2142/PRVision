@@ -1,16 +1,12 @@
 /**
- * Fakes for sheet 05's SDK injection points (sheet 14 §5.4.9): AnthropicApiProviderOptions.streamFn
- * (AnthropicStreamFn) and ClaudeCodeProvider({ queryFn }) (AgentQueryFn). The message shapes are sheet 05's
- * (claude-code-result.ts); keep these builders in step with them.
+ * Fakes for sheet 05's SDK injection point (sheet 14 §5.4.9): AnthropicApiProviderOptions.streamFn
+ * (AnthropicStreamFn).
  */
 import Anthropic from "@anthropic-ai/sdk";
 
 /*
- * Structural copies of sheet 05's seam types (05 §5.11.1, §5.12). Sheet 05 creates
- * utilities/services/ai/{anthropic-api-provider,claude-code-provider}.ts in wave 3, after this helper (wave 2),
- * so they cannot be imported yet without breaking `npm run typecheck`. TypeScript is structural: passing these
- * fakes to the real providers type-checks them against the real declarations at the call site. Wave 6 replaces
- * these copies with `import type` from the spec paths (14 build notes, deviation 3).
+ * Structural copy of sheet 05's seam type (05 §5.11.1). TypeScript is structural: passing these fakes to the real
+ * provider type-checks them against the real declarations at the call site.
  */
 /** The SDK's BetaMessageStreamParams (not re-exported through the Anthropic.Beta.Messages namespace). */
 type StreamParams = Parameters<Anthropic["beta"]["messages"]["stream"]>[0];
@@ -21,22 +17,6 @@ export type AnthropicStreamFn = (
   params: StreamParams,
   options: { signal: AbortSignal }
 ) => { finalMessage(): Promise<FinalMessage> };
-
-/** = ClaudeCodeQueryOptions (05 §5.12). */
-export interface ClaudeCodeQueryOptions {
-  cwd: string;
-  model: string;
-  systemPrompt: string;
-  allowedTools: readonly ("Read" | "Glob" | "Grep")[];
-  readableRoots: string[];
-  maxTurns: number;
-  env: Record<string, string>;
-  abortController: AbortController;
-  effort: "low" | "medium" | "high" | "xhigh" | "max";
-}
-
-/** = AgentQueryFn (05 §5.12). */
-export type AgentQueryFn = (args: { prompt: string; options: ClaudeCodeQueryOptions }) => AsyncIterable<unknown>;
 
 export type FakeStreamResponse =
   Record<string, unknown> | Error | ((signal: AbortSignal) => Promise<Record<string, unknown>>);
@@ -137,54 +117,3 @@ export const anthropicErrors = {
   timeout: (): Error => new Anthropic.APIConnectionTimeoutError({ message: "timed out" }),
   abort: (): Error => new Anthropic.APIUserAbortError()
 };
-
-/** Fake Agent SDK query(): yields scripted messages, records prompt and options, honours the abort controller. */
-export function fakeAgentQuery(messages: Array<Record<string, unknown> | Error>): {
-  queryFn: AgentQueryFn;
-  calls: Array<{ prompt: string; options: ClaudeCodeQueryOptions }>;
-  wasClosed: () => boolean;
-} {
-  const calls: Array<{ prompt: string; options: ClaudeCodeQueryOptions }> = [];
-  let returned = false;
-  const queryFn: AgentQueryFn = ({ prompt, options }) => {
-    calls.push({ prompt, options });
-    const queue = [...messages];
-    const controller = options.abortController;
-    return {
-      async *[Symbol.asyncIterator]() {
-        try {
-          for (const message of queue) {
-            if (controller.signal.aborted) {
-              throw Object.assign(new Error("aborted"), { name: "AbortError" });
-            }
-            if (message instanceof Error) {
-              throw message;
-            }
-            // Yield control between messages like the real SDK stream, so an abort can land mid-iteration.
-            await Promise.resolve();
-            yield message;
-          }
-        } finally {
-          returned = true; // lets tests assert the iterator was closed
-        }
-      }
-    };
-  };
-  return { queryFn, calls, wasClosed: () => returned };
-}
-
-/** An Agent SDK `result` message (success unless overridden). */
-export function agentResult(text: string, overrides: Record<string, unknown> = {}): Record<string, unknown> {
-  return {
-    type: "result",
-    subtype: "success",
-    is_error: false,
-    duration_ms: 1500,
-    num_turns: 2,
-    result: text,
-    usage: { input_tokens: 900, output_tokens: 250 },
-    total_cost_usd: 0,
-    session_id: "sess_test",
-    ...overrides
-  };
-}

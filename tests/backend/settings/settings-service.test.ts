@@ -15,9 +15,8 @@ import {
 import type { AiProviderError, AiStructuredRequest } from "../../../backend/src/types/visualization-pipeline";
 import { logTestStream } from "../../../backend/src/utilities/loggers/logger";
 import { AnthropicStatusError } from "../../../backend/src/utilities/services/ai/anthropic-api-provider";
-import { ClaudeCodeProvider } from "../../../backend/src/utilities/services/ai/claude-code-provider";
 import { ScriptedAiProvider } from "../helpers/ai-provider-stub";
-import { patchStaticMethod, runWithAuthContext } from "../helpers/test-context";
+import { runWithAuthContext } from "../helpers/test-context";
 
 const GITHUB_TOKEN = `github_pat_${"Q7".repeat(20)}`;
 const API_KEY = `sk-ant-api03-${"s".repeat(40)}`;
@@ -169,7 +168,9 @@ test("SettingsService.update logs field names but never values", async () => {
   const store = new FakeStore();
   const { lines } = await captureLogs(() =>
     runWithAuthContext(() =>
-      serviceWith(store).update(dto({ githubToken: GITHUB_TOKEN, anthropicApiKey: API_KEY, aiProvider: "claude_code" }))
+      serviceWith(store).update(
+        dto({ githubToken: GITHUB_TOKEN, anthropicApiKey: API_KEY, aiProvider: "anthropic_api" })
+      )
     )
   );
   const updated = lines
@@ -303,27 +304,19 @@ test("SettingsService.testAi returns 400 ai_not_configured when key absent", asy
   // Default createProvider: the real factory raises the config error.
   assert.deepEqual(await runWithAuthContext(() => aiService(null, store).testAi()), {
     status: 400,
-    error: "Add an Anthropic API key, or switch the provider to Claude Code.",
+    error: "Add an Anthropic API key in Settings.",
     error_reason: "ai_not_configured"
   });
 });
 
-test("SettingsService.testAi returns 400 ai_not_configured for claude_code when the SDK cannot be loaded", async (t) => {
-  ClaudeCodeProvider.resetSdkForTesting();
-  const restore = patchStaticMethod(ClaudeCodeProvider, "importSdk", () =>
-    Promise.reject(new Error("Cannot find module '@anthropic-ai/claude-agent-sdk'"))
-  );
-  t.after(() => {
-    restore();
-    ClaudeCodeProvider.resetSdkForTesting();
-  });
+test("SettingsService.testAi returns 400 ai_not_configured for the legacy claude_code provider", async () => {
   const store = new FakeStore();
-  store.aiSettings = { ...store.aiSettings, provider: "claude_code", anthropicApiKey: { state: "absent" } };
+  store.aiSettings = { ...store.aiSettings, provider: "claude_code" };
+  // Default createProvider: the real factory refuses the legacy provider even though a key is stored.
   const response = await runWithAuthContext(() => aiService(null, store).testAi());
   assert.deepEqual(response, {
     status: 400,
-    error:
-      "The Claude Code provider is unavailable: @anthropic-ai/claude-agent-sdk could not be loaded. Run npm install in backend/.",
+    error: "The Claude Code provider is no longer available. Add an Anthropic API key in Settings and save.",
     error_reason: "ai_not_configured"
   });
 });
@@ -380,19 +373,6 @@ test("SettingsService.testAi maps auth to 400 ai_unauthorized", async () => {
   );
   assert.equal(model403.error, 'The API key is not allowed to use model "claude-opus-5-5".');
   assert.equal(model403.error_reason, "ai_unauthorized");
-
-  const store = new FakeStore();
-  store.aiSettings = { ...store.aiSettings, provider: "claude_code" };
-  const claude = new ScriptedAiProvider({ connection_test: [{ kind: "error", reason: "auth" }] }, "claude_code");
-  const restore = patchStaticMethod(ClaudeCodeProvider, "isSdkAvailable", () => Promise.resolve(true));
-  try {
-    const response = await runWithAuthContext(() => aiService(claude, store).testAi());
-    assert.equal(response.status, 400);
-    assert.equal(response.error_reason, "ai_unauthorized");
-    assert.match(String(response.error), /^Claude Code is not signed in or not authorized/);
-  } finally {
-    restore();
-  }
 });
 
 test("SettingsService.testAi maps aborted with its own timeout fired to 504 internal_error", async () => {

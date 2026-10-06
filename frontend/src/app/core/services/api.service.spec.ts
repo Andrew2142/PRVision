@@ -139,7 +139,7 @@ describe('ApiService', () => {
     api.getSettings().subscribe((v) => (result = v));
     const req = http.expectOne(`${base}/settings`);
     expect(req.request.method).toBe('GET');
-    const view = { hasGithubToken: false, githubLogin: null, aiProvider: 'claude_code' };
+    const view = { hasGithubToken: false, githubLogin: null, aiProvider: 'anthropic_api' };
     req.flush({ status: 200, data: view });
     expect(result).toEqual(view);
   });

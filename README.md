@@ -112,11 +112,9 @@ AI writes the harness. Real code renders the pixels.
 - Your GitHub token and Anthropic key are encrypted at rest with a key generated on your machine, and the API never sends them back.
 - The only thing that leaves your machine is what the AI needs to write harnesses and the summary: the changed components, the code around them and the diff.
 
-## AI providers
+## AI
 
-**Anthropic API key** is the default. Usage is billed to the account that owns the key. The four-component run in the screenshots used 88K input and 6.2K output tokens.
-
-**Claude Code.** PRVision can also write harnesses through a locally installed Claude Code. Anthropic does not allow third-party tools to use Claude.ai subscription logins, so use it only with Claude Code signed in with an API key.
+PRVision uses your own Anthropic API key, set in **Settings**. Usage is billed to the account that owns the key. The four-component run in the screenshots used 88K input and 6.2K output tokens.
 
 ## FAQ
 

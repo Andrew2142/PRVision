@@ -1,13 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { jobAbortReason } from "../../../backend/src/utilities/services/queue-service";
-import {
-  agentResult,
-  anthropicErrors,
-  anthropicFinalMessage,
-  fakeAgentQuery,
-  fakeAnthropicStream
-} from "../helpers/ai-sdk-fakes";
+import { anthropicErrors, anthropicFinalMessage, fakeAnthropicStream } from "../helpers/ai-sdk-fakes";
 import { ConsoleRecorder, recordLogger } from "../helpers/console-recorder";
 import { createFakeGithubPort, githubHttpError, rawPull } from "../helpers/fake-github-port";
 import { FakeQueue, makeJob } from "../helpers/fake-queue";
@@ -107,25 +101,6 @@ test("fakeAnthropicStream records params and signal", async () => {
   assert.equal(calls.length, 2);
   assert.equal(calls[0]?.params, params);
   assert.equal(calls[0].signal, controller.signal);
-});
-
-test("fakeAgentQuery reports the iterator closed after abort", async () => {
-  const abortController = new AbortController();
-  const { queryFn, calls, wasClosed } = fakeAgentQuery([{ type: "system" }, { type: "assistant" }, agentResult("{}")]);
-  const options = { abortController } as unknown as Parameters<typeof queryFn>[0]["options"];
-  const seen: unknown[] = [];
-  await assert.rejects(
-    (async () => {
-      for await (const message of queryFn({ prompt: "hi", options })) {
-        seen.push(message);
-        abortController.abort();
-      }
-    })(),
-    { name: "AbortError" }
-  );
-  assert.equal(seen.length, 1);
-  assert.equal(wasClosed(), true);
-  assert.equal(calls[0]?.prompt, "hi");
 });
 
 test('ConsoleRecorder.assertStagesAreStatusNames rejects "render:Button"', async () => {

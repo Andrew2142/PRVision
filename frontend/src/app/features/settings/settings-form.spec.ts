@@ -1,5 +1,4 @@
 import { FormControl, FormGroup } from '@angular/forms';
-import { type AiProviderKind } from '../../core/models/domain-enums.model';
 import { type SettingsView } from '../../core/models/settings.model';
 import {
   AI_MODEL_PATTERN,
@@ -72,12 +71,11 @@ describe('buildSettingsUpdate', () => {
     expect(buildSettingsUpdate(SAVED, { ...UNCHANGED, aiModel: ' claude-opus-5-5 ' }, NO_CLEAR)).toEqual({});
   });
 
-  it('changed provider/model/efforts included', () => {
+  it('changed model/efforts included', () => {
     const update = buildSettingsUpdate(
       SAVED,
       {
         ...UNCHANGED,
-        aiProvider: 'claude_code',
         aiModel: 'claude-sonnet-5',
         aiHarnessEffort: 'max',
         aiSummaryEffort: 'low',
@@ -85,10 +83,15 @@ describe('buildSettingsUpdate', () => {
       NO_CLEAR,
     );
     expect(update).toEqual({
-      aiProvider: 'claude_code',
       aiModel: 'claude-sonnet-5',
       aiHarnessEffort: 'max',
       aiSummaryEffort: 'low',
+    });
+  });
+
+  it('a saved legacy claude_code provider is switched to anthropic_api', () => {
+    expect(buildSettingsUpdate({ ...SAVED, aiProvider: 'claude_code' }, UNCHANGED, NO_CLEAR)).toEqual({
+      aiProvider: 'anthropic_api',
     });
   });
 });
@@ -104,21 +107,20 @@ describe('AI_MODEL_PATTERN', () => {
 });
 
 describe('anthropicKeyRequired', () => {
-  function group(provider: AiProviderKind, key: string): FormGroup {
+  function group(key: string): FormGroup {
     return new FormGroup({
-      aiProvider: new FormControl<AiProviderKind>(provider, { nonNullable: true }),
       anthropicApiKey: new FormControl(key, { nonNullable: true }),
     });
   }
 
-  it('error when provider anthropic_api, no saved key, nothing typed', () => {
+  it('error when no saved key and nothing typed', () => {
     const validator = anthropicKeyRequired(
       () => false,
       () => false,
     );
-    expect(validator(group('anthropic_api', ''))).toEqual({ anthropicKeyRequired: true });
-    expect(validator(group('anthropic_api', '   '))).toEqual({ anthropicKeyRequired: true });
-    expect(validator(group('anthropic_api', 'sk-ant-x'))).toBeNull();
+    expect(validator(group(''))).toEqual({ anthropicKeyRequired: true });
+    expect(validator(group('   '))).toEqual({ anthropicKeyRequired: true });
+    expect(validator(group('sk-ant-x'))).toBeNull();
   });
 
   it('no error when saved key exists', () => {
@@ -126,7 +128,7 @@ describe('anthropicKeyRequired', () => {
       () => true,
       () => false,
     );
-    expect(validator(group('anthropic_api', ''))).toBeNull();
+    expect(validator(group(''))).toBeNull();
   });
 
   it('error when saved key being cleared', () => {
@@ -134,15 +136,7 @@ describe('anthropicKeyRequired', () => {
       () => true,
       () => true,
     );
-    expect(validator(group('anthropic_api', ''))).toEqual({ anthropicKeyRequired: true });
-  });
-
-  it('no error for claude_code', () => {
-    const validator = anthropicKeyRequired(
-      () => false,
-      () => false,
-    );
-    expect(validator(group('claude_code', ''))).toBeNull();
+    expect(validator(group(''))).toEqual({ anthropicKeyRequired: true });
   });
 });
 

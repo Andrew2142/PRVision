@@ -1,5 +1,7 @@
 # 05 — Settings and AI Providers
 
+> **Revision 8 (00 §20):** the Claude Code provider was removed from the public build. Only the Anthropic API key provider exists; `claude_code` is a legacy enum value that cannot be selected. Claude Code sections below are historical.
+
 Owner: build agent (wave 3)
 Depends on: 00 (contracts), 03 (schema/models), 04 (core infrastructure). Consumes one narrow method from 06 (`GitHubClient.verifyToken`).
 Consumed by: 06 (GitHub token read), 07 (provider construction, readiness check), 09 (harness generation), 11 (summary), 13 (settings screen).
@@ -662,7 +664,7 @@ The `error` string is the exact user-facing message (sheet 13 shows it in a snac
 | test-github | `network` | 502 | `github_unavailable` | Could not reach GitHub. Check your network connection. |
 | test-github | `unknown` | 502 | `github_unavailable` | GitHub returned an unexpected error (HTTP {status}). |
 | test-github | ok | 200 | — | `{ login }` |
-| test-ai | provider `anthropic_api`, key absent | 400 | `ai_not_configured` | Add an Anthropic API key, or switch the provider to Claude Code. |
+| test-ai | provider `anthropic_api`, key absent | 400 | `ai_not_configured` | Add an Anthropic API key in Settings. |
 | test-ai | key unreadable | 400 | `ai_not_configured` | The stored Anthropic API key can no longer be decrypted (PRVISION_SECRET_KEY changed). Enter the key again. |
 | test-ai | Claude Agent SDK cannot be loaded | 400 | `ai_not_configured` | The Claude Code provider is unavailable: @anthropic-ai/claude-agent-sdk could not be loaded. Run npm install in backend/. |
 | test-ai | `config` from API (400/404/422, e.g. unknown model) | 400 | `ai_not_configured` | The AI provider rejected the request for model "{model}": {sdkMessage} |
@@ -711,7 +713,7 @@ Callers read settings once with `new SettingsStore().readAiSettings()` and pass 
 1. `settings.model.trim() === ""` → throw `AiProviderError("No AI model is configured. Set a model in Settings.", "config", false)`.
 2. `switch (settings.provider)`:
    - `"anthropic_api"`:
-     - `anthropicApiKey.state === "absent"` → throw config: "Add an Anthropic API key, or switch the provider to Claude Code."
+     - `anthropicApiKey.state === "absent"` → throw config: "Add an Anthropic API key in Settings."
      - `"unreadable"` → throw config: "The stored Anthropic API key can no longer be decrypted (PRVISION_SECRET_KEY changed). Enter the key again."
      - return `new AnthropicApiProvider({ apiKey, model })`.
    - `"claude_code"`: return `new ClaudeCodeProvider({ model })`. SDK availability is checked lazily on first call (dynamic import); a load failure is thrown as `AiProviderError(…, "config", false)` from `generateStructured`. `readiness(settings)` additionally attempts the dynamic import once (cached) so 07 can reject a run before queueing.

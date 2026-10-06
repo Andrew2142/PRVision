@@ -167,7 +167,7 @@ describe('SettingsPageComponent', () => {
   });
 
   it('Remove hidden while a value is typed', () => {
-    load({ ...SAVED, hasAnthropicApiKey: false, aiProvider: 'claude_code' });
+    load({ ...SAVED, hasAnthropicApiKey: false });
     expect(maybeButton('Remove')).toBeDefined();
     type('prvision-github-token', 'github_pat_new');
     expect(maybeButton('Remove')).toBeUndefined();
@@ -288,22 +288,29 @@ describe('SettingsPageComponent', () => {
     expect(notifications.error.calls.count()).toBe(0);
   });
 
-  it('claude_code shows policy note and hides key field', () => {
+  it('offers no provider choice: only the Anthropic API key field', () => {
     load();
     expect(el.querySelector('#prvision-anthropic-key')).not.toBeNull();
-    const radio = el.querySelector<HTMLInputElement>('[data-provider="claude_code"] input[type="radio"]');
-    radio?.click();
-    fixture.detectChanges();
-    expect(el.querySelector('#prvision-anthropic-key')).toBeNull();
-    expect(text()).toContain('Subscription login');
-    expect(text()).toContain('Personal prototype only.');
-    expect(text()).toContain('Your saved API key is kept but not used while Claude Code is selected.');
+    expect(el.querySelector('mat-radio-group')).toBeNull();
+    expect(el.querySelector('[data-testid="legacy-provider"]')).toBeNull();
+    expect(text()).not.toContain('Claude Code');
   });
 
-  it('anthropic_api with no saved key blocks Save with the key-required error', () => {
-    load({ ...SAVED, aiProvider: 'claude_code', hasAnthropicApiKey: false });
-    el.querySelector<HTMLInputElement>('[data-provider="anthropic_api"] input[type="radio"]')?.click();
+  it('legacy claude_code with a saved key shows the note and saves the switch to anthropic_api', () => {
+    load({ ...SAVED, aiProvider: 'claude_code' });
+    expect(byTestId('legacy-provider').textContent).toContain('Claude Code is no longer supported.');
+    expect(el.querySelector('#prvision-anthropic-key')).not.toBeNull();
+    expect(el.querySelector('[data-testid="key-required"]')).toBeNull();
+    save();
+    const req = httpMock.expectOne(`${BASE}/settings`);
+    expect(req.request.body).toEqual({ aiProvider: 'anthropic_api' });
+    req.flush({ status: 200, data: SAVED });
     fixture.detectChanges();
+    expect(el.querySelector('[data-testid="legacy-provider"]')).toBeNull();
+  });
+
+  it('legacy claude_code with no saved key blocks Save with the key-required error', () => {
+    load({ ...SAVED, aiProvider: 'claude_code', hasAnthropicApiKey: false });
     expect(byTestId('key-required').textContent).toContain('An API key is required for the Anthropic API provider.');
     expect(button('Save settings').disabled).toBeTrue();
     type('prvision-anthropic-key', 'sk-ant-123');
