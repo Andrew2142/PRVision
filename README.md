@@ -27,19 +27,6 @@ npm run dev        # backend :3100, worker, frontend :4210
 Open <http://localhost:4210>. In **Settings**, add a GitHub fine-grained token and choose an AI provider. In
 **Repositories**, register a local clone of a Vite + React project.
 
-## Scripts
-
-| Script | What it does |
-|---|---|
-| `npm run setup` | Prereq check, install, `.env`, infra up, migrate, Chromium, data dir. Idempotent. |
-| `npm run dev` | Frees 3100/4210, checks `.env`, starts infra, migrates, runs backend + worker + frontend |
-| `npm run infra:up` / `infra:down` | Start / stop Postgres and Redis |
-| `npm run infra:reset` | **Deletes** all Postgres and Redis data |
-| `npm run db:migrate` | Apply Drizzle migrations |
-| `npm run verify` | Format check, typecheck, lint, architecture check, tests and build (backend and frontend) |
-| `npm run build` / `lint` / `format` / `test` | Fan out to `backend/` and `frontend/` |
-| `npm run fixture:create` | Create the sample React fixture repo (sheet 14) |
-
 ## How it works
 
 - **Prepare:** PRVision creates git worktrees for base and head under the data dir and symlinks your `node_modules`.
