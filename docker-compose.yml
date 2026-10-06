@@ -1,8 +1,36 @@
-# Local infrastructure for PRVision (00 §4). Started by `npm run infra:up` (and by `npm run dev`).
-# Ports bind to 127.0.0.1 only. Host ports default to 5433/6380 (00 §4); override with PRVISION_PG_PORT /
-# PRVISION_REDIS_PORT in .env when those ports are taken, and update DATABASE_URL / REDIS_URL to match.
-# Data persists in named volumes; `npm run infra:reset` deletes it.
+# PRVision (00 §4).
+#   docker compose up          The whole app: UI on http://localhost:4210, API on 3100, worker, Postgres, Redis.
+#   npm run dev                Only Postgres and Redis come from here (npm run infra:up); the app runs on the host.
+# Ports bind to 127.0.0.1 only. Host ports for Postgres/Redis default to 5433/6380 (00 §4); override with
+# PRVISION_PG_PORT / PRVISION_REDIS_PORT in .env when those ports are taken, and update DATABASE_URL / REDIS_URL
+# to match. Data persists in named volumes; `npm run infra:reset` deletes it.
+#
+# The app containers mount your home folder at the same path, so a repository you register by its path on this
+# machine resolves inside the container too, and both ways of running share ~/.prvision. Keep your repositories
+# under your home folder, or set PRVISION_REPOS_DIR to the folder that holds them. On Linux the containers run as
+# your user (PRVISION_UID / PRVISION_GID, default 1000) so files PRVision writes in your repos stay yours.
 name: prvision
+
+x-app: &app
+  build:
+    context: .
+    target: app
+  image: prvision-app
+  restart: unless-stopped
+  user: "${PRVISION_UID:-1000}:${PRVISION_GID:-1000}"
+  ipc: host
+  environment:
+    # Same home as on this machine, so tools PRVision runs (git, Claude Code) see your normal config.
+    HOME: ${HOME}
+    DATABASE_URL: postgres://prvision:prvision@postgres:5432/prvision
+    REDIS_URL: redis://redis:6379
+    PRVISION_DATA_DIR: ${PRVISION_DATA_DIR:-${HOME}/.prvision}
+    PRVISION_SECRET_KEY: ${PRVISION_SECRET_KEY:-}
+    FRONTEND_URL: http://localhost:4210
+    LOG_LEVEL: ${LOG_LEVEL:-info}
+  volumes:
+    - ${HOME}:${HOME}
+    - ${PRVISION_REPOS_DIR:-${HOME}}:${PRVISION_REPOS_DIR:-${HOME}}
 
 services:
   postgres:
@@ -41,6 +69,45 @@ services:
       interval: 2s
       timeout: 3s
       retries: 30
+
+  api:
+    <<: *app
+    container_name: prvision-api
+    command: ["sh", "-c", "npm run --silent db:migrate && npm run --silent datadir:init && exec node dist/app.js"]
+    ports:
+      - "127.0.0.1:3100:3100"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3100/api/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+      start_period: 10s
+
+  worker:
+    <<: *app
+    container_name: prvision-worker
+    command: ["node", "dist/worker.js"]
+    depends_on:
+      api:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      target: web
+    image: prvision-web
+    container_name: prvision-web
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:4210:4210"
+    depends_on:
+      api:
+        condition: service_healthy
 
 volumes:
   prvision-pgdata:

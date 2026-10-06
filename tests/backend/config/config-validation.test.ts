@@ -39,6 +39,12 @@ test("collectConfigValidationErrors reports missing DATABASE_URL, REDIS_URL, PRV
   assert.ok(errorsFor({ REDIS_URL: "http://127.0.0.1:6380" }).some((error) => error.startsWith("REDIS_URL must use")));
 });
 
+test("collectConfigValidationErrors allows HOST 0.0.0.0 only inside the container", () => {
+  assert.deepEqual(errorsFor({ IN_CONTAINER: true, APP_HOST: "0.0.0.0" }), []);
+  assert.equal(errorsFor({ IN_CONTAINER: true, APP_HOST: "192.168.1.5" }).length, 1);
+  assert.equal(errorsFor({ IN_CONTAINER: false, APP_HOST: "0.0.0.0" }).length, 1);
+});
+
 test("collectConfigValidationErrors rejects a non-loopback HOST", () => {
   const errors = errorsFor({ APP_HOST: "0.0.0.0" });
   assert.equal(errors.length, 1);

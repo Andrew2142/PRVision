@@ -37,8 +37,14 @@ export const IS_PRODUCTION = NODE_ENV === "production";
 /** `PORT`; default `3100`. NaN when malformed (validateConfig reports it). */
 export const APP_PORT: number = optionalIntegerEnv("PORT") ?? 3100;
 
-/** `HOST`; default `127.0.0.1` (00 D9). validateConfig() rejects non-loopback values. */
+/** `HOST`; default `127.0.0.1` (00 D9). validateConfig() rejects non-loopback values outside the container. */
 export const APP_HOST: string = optionalEnv("HOST") ?? "127.0.0.1";
+
+/**
+ * `PRVISION_CONTAINER=1`, set only by the Docker image. Lets HOST be 0.0.0.0 inside the container, where the
+ * compose file publishes the port to the host's 127.0.0.1 only.
+ */
+export const IN_CONTAINER: boolean = optionalEnv("PRVISION_CONTAINER") === "1";
 
 /** `FRONTEND_URL`; default `http://localhost:4210`. CORS origin and allowed Origin for writes (00 §14.5). */
 export const FRONTEND_URL: string = optionalEnv("FRONTEND_URL") ?? "http://localhost:4210";

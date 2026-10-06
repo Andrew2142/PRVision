@@ -1,63 +1,38 @@
 # PRVision
 
-PRVision is a local-first developer tool. It turns a GitHub pull request, a local branch, or uncommitted
-working-tree changes into a visual review: for every UI component the change touches it shows the component
-rendered **before** (base) and **after** (head). It does not run your app: each changed component is rendered in isolation in headless
-Chromium, through your repo's own Vite, using a render harness written by AI. The same harness renders base and
-head, so differences come only from the component code.
+See what a pull request does to your UI.
 
-> Screenshot placeholder: the visualization detail screen goes here once sheet 13 lands.
+Every component a change touches, rendered before and after, side by side.
+A pixel diff, and a short note on what to check.
 
-## Requirements
-
-- Node 22.12+ (24 recommended; see `.nvmrc`) and npm 10+
-- git 2.36+
-- Docker with Compose v2 (`docker compose`)
-- About 1 GB of disk for Chromium and the container images
-- Linux or macOS
-
-## Quick start
+## Start
 
 ```bash
-nvm use            # Node 24 from .nvmrc
-npm run setup      # install, .env, Postgres + Redis, migrations, Chromium, data dir
-npm run dev        # backend :3100, worker, frontend :4210
+docker compose up
 ```
 
-Open <http://localhost:4210>. In **Settings**, add a GitHub fine-grained token and choose an AI provider. In
-**Repositories**, register a local clone of a Vite + React project.
+Open <http://localhost:4210>. Add a GitHub token and an Anthropic API key in Settings, then add a repository from your home folder.
 
-## How it works
+Needs Docker. To run without it: `npm run setup && npm run dev` (Node 22.12+, git).
 
-- **Prepare:** PRVision creates git worktrees for base and head under the data dir and symlinks your `node_modules`.
-- **Analyze:** it finds the components the change touches, directly or through changed imports.
-- **Generate harnesses:** AI writes a small render harness per component (props, fixtures, providers, mocks).
-- **Render:** real code renders the pixels: both sides go through your repo's own Vite in headless Chromium.
-- **Diff and summarize:** pixel and structural diffs, then an AI summary of what changed and what to check.
+## How
 
-AI writes the harness; real code renders the pixels.
+AI writes a small harness for each component.
+Your own build renders it in headless Chromium, once for base, once for head.
+Same harness on both sides, so every changed pixel came from your code.
 
-## Data and safety
+React on Vite. Angular 17 to 21.
 
-- Data dir (`~/.prvision` by default): `worktrees/<id>/{base,head}`, `artifacts/<id>/<component>/{base,head,diff}.png`,
-  `fixtures/`. Created with mode 0700.
-- Your working copy is never modified. PRVision only creates its own worktrees and `refs/prvision/*` refs.
-- The GitHub token and Anthropic API key are encrypted at rest with `PRVISION_SECRET_KEY` and never returned by the API.
-- The backend binds `127.0.0.1` only; Postgres and Redis ports bind to `127.0.0.1` only.
+## Local
 
+Runs on `127.0.0.1`. Works in its own git worktrees. Never touches your working copy.
 
-## Repository layout and specs
+## Claude Code
 
-```text
-PRVision/
-  package.json  docker-compose.yml  .env.example  README.md  CLAUDE.md
-  scripts/                 check-prereqs.mjs, clean-dev-ports.mjs
-  tools/                   fixture tooling (sheet 14)
-  backend/                 Express API + BullMQ worker (src/, scripts/, harness-templates/)
-  frontend/                Angular 19 app
-  tests/backend/           node:test suites and helpers
-  tests/fixtures/          test fixtures
-  docs/specs/              build specs 00–14
-```
+PRVision can also write harnesses through a locally installed Claude Code.
+Anthropic does not allow third-party tools to use Claude.ai subscription logins,
+so use it only with Claude Code signed in with an API key.
 
-The build specs are in [`docs/specs/`](docs/specs/); start with `00-overview-and-contracts.md`.
+---
+
+[Setup reference](docs/SETUP.md) · [Specs](docs/specs/)

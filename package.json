@@ -14,7 +14,7 @@
     "setup:env": "node backend/scripts/setup-env.mjs",
     "setup:browsers": "npm run playwright:install --prefix backend",
     "setup:datadir": "npm run datadir:init --prefix backend",
-    "infra:up": "docker compose up -d --wait",
+    "infra:up": "docker compose up -d --wait postgres redis",
     "infra:down": "docker compose down",
     "infra:reset": "docker compose down -v",
     "infra:logs": "docker compose logs -f --tail=100",

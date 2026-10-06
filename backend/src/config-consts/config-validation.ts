@@ -38,9 +38,9 @@ export function collectConfigValidationErrors(overrides: ConfigValidationOverrid
 
   assertOneOf(errors, "NODE_ENV", c.NODE_ENV, ["development", "test", "production"]);
   assertPort(errors, "PORT", c.APP_PORT);
-  if (!LOOPBACK_HOSTS.has(c.APP_HOST)) {
+  if (!LOOPBACK_HOSTS.has(c.APP_HOST) && !(c.IN_CONTAINER && c.APP_HOST === "0.0.0.0")) {
     errors.push(
-      `HOST "${c.APP_HOST}" is not a loopback address; HOST must be 127.0.0.1, ::1 or localhost (PRVision has no authentication).`
+      `HOST "${c.APP_HOST}" is not a loopback address; HOST must be 127.0.0.1, ::1 or localhost (PRVision has no authentication). Only the Docker image (PRVISION_CONTAINER=1) may use 0.0.0.0.`
     );
   }
   assertHttpUrl(errors, "FRONTEND_URL", c.FRONTEND_URL);
