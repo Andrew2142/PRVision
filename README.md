@@ -25,7 +25,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/images/hero.png" alt="PRVision showing a Card component before and after a restyle, with an AI note on what changed" width="100%" />
+  <img src="docs/images/demo.gif" alt="PRVision walking through a run: each changed component before and after, then the slider and the pixel diff" width="100%" />
 </p>
 
 ## Why PRVision
