@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# Starts PRVision with Docker and opens it in your browser once it is ready.
+#
+#   ./prvision          Build if needed, start, open http://localhost:4210, show logs. Ctrl+C stops it.
+#   ./prvision down     Stop it.
+#
+# Set PRVISION_NO_OPEN=1 to skip opening the browser.
+set -euo pipefail
+cd "$(dirname "$0")"
+
+URL="http://localhost:4210"
+API_HEALTH="http://localhost:3100/api/health"
+READY_TIMEOUT_S=600
+
+open_browser() {
+  if [ "${PRVISION_NO_OPEN:-}" = "1" ]; then return; fi
+  if command -v xdg-open >/dev/null 2>&1; then
+    xdg-open "$URL" >/dev/null 2>&1 || true
+  elif command -v open >/dev/null 2>&1; then
+    open "$URL" >/dev/null 2>&1 || true
+  fi
+}
+
+wait_then_open() {
+  local waited=0
+  until curl -fsS -o /dev/null "$URL" 2>/dev/null && curl -fsS -o /dev/null "$API_HEALTH" 2>/dev/null; do
+    sleep 1
+    waited=$((waited + 1))
+    if [ "$waited" -ge "$READY_TIMEOUT_S" ]; then
+      echo "PRVision did not answer at $URL within ${READY_TIMEOUT_S}s; check the logs above." >&2
+      return
+    fi
+  done
+  printf '\n  PRVision is ready at %s\n\n' "$URL"
+  open_browser
+}
+
+case "${1:-up}" in
+  up)
+    if ! command -v curl >/dev/null 2>&1; then
+      echo "curl not found; open $URL yourself once the containers are healthy."
+    else
+      wait_then_open &
+    fi
+    exec docker compose up --build
+    ;;
+  down)
+    exec docker compose down
+    ;;
+  *)
+    echo "Usage: ./prvision [up|down]" >&2
+    exit 64
+    ;;
+esac
