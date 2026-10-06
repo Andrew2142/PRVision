@@ -83,7 +83,7 @@ PRVision builds, starts in Docker and opens <http://localhost:4210> in your brow
 2. In **Repositories**, add a local clone that lives under your home folder.
 3. Pick a pull request, branch or commit and press **Start**.
 
-`docker compose up` works too, without opening the browser. Prefer to run it without Docker? `npm run setup && npm run dev` (Node 22.12+, git, Docker for Postgres and Redis). See the [setup reference](docs/SETUP.md).
+`docker compose up` works too: when the app is ready it prints `PRVision is ready: http://localhost:4210`, a link you can click. Prefer to run it without Docker? `npm run setup && npm run dev` (Node 22.12+, git, Docker for Postgres and Redis). See the [setup reference](docs/SETUP.md).
 
 ## How it works
 

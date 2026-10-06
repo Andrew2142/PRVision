@@ -11,7 +11,10 @@ COPY frontend/ ./
 RUN npx ng build --configuration production
 
 FROM nginx:1.27-alpine AS web
+ENV NGINX_ENTRYPOINT_QUIET_LOGS=1
+COPY docker/nginx-main.conf /etc/nginx/nginx.conf
 COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
+COPY --chmod=0755 docker/web-ready.sh /docker-entrypoint.d/99-prvision-ready.sh
 COPY --from=web-build /src/frontend/dist/frontend/browser /usr/share/nginx/html
 EXPOSE 4210
 
