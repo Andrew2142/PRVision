@@ -17,6 +17,8 @@ x-app: &app
     target: app
   image: prvision-app
   restart: unless-stopped
+  # `docker compose up` shows only the UI's ready message; `docker compose logs -f` shows everything.
+  attach: false
   user: "${PRVISION_UID:-1000}:${PRVISION_GID:-1000}"
   ipc: host
   environment:
@@ -37,6 +39,7 @@ services:
     image: postgres:16-alpine
     container_name: prvision-postgres
     restart: unless-stopped
+    attach: false
     environment:
       POSTGRES_DB: prvision
       POSTGRES_USER: prvision
@@ -56,6 +59,7 @@ services:
     image: redis:7-alpine
     container_name: prvision-redis
     restart: unless-stopped
+    attach: false
     # BullMQ requires noeviction; AOF keeps queued jobs across container restarts.
     command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
     volumes:
