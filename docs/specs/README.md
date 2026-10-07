@@ -20,6 +20,7 @@ These sheets describe the full PRVision prototype build. Each sheet is sized to 
 | 5 | 10 Render engine, 11 Diff + structural + summary, 13 (Visualization screens) | yes |
 | 6 | 14 Full test catalogue + manual E2E QA | — |
 | 7 | 15a–15f Angular support (see sheet 15 §0 for the split and dispatch order) | 7a yes, 7b after 7a |
+| 8 | 16a–16l Harness library, states, live mode, export/import (see sheet 16 §0 for the split and dispatch order) | 8a alone; 8b yes; 8c (live) yes after 8b; 8d (export/import) after 8c; 8e (integration tests, QA) last |
 
 Sheet 01 is a reference for every wave, not a build task.
 
@@ -41,3 +42,4 @@ Sheet 01 is a reference for every wave, not a build task.
 | 13 | [Frontend feature screens](13-frontend-feature-screens.md) |
 | 14 | [Testing, fixtures and QA](14-testing-fixtures-and-qa.md) |
 | 15 | [Angular support (app roots, analysis, harness, render, structural diff)](15-angular-support.md) |
+| 16 | [Harness library, states and live mode](16-harness-library.md) |
