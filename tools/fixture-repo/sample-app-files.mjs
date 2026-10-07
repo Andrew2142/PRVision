@@ -760,7 +760,121 @@ const NOTES_PAGE_MODAL = replaceOnce(
   "      <NoteFormModal />\n",
 );
 
-export const FIXTURE_VERSION = 2;
+// ---------------------------------------------------------------------------------------------------------------
+// Sheet 16 §20.10 branches (harness library, states, global style re-check)
+// ---------------------------------------------------------------------------------------------------------------
+
+/** qa/global-style: larger base font size and a rounder card radius (the Tailwind theme variable of rounded-xl). */
+const INDEX_CSS_GLOBAL_STYLE = replaceOnce(
+  replaceOnce(INDEX_CSS, "  --color-brand-700: #4338ca;\n}", "  --color-brand-700: #4338ca;\n  --radius-xl: 1.5rem;\n}"),
+  "body {\n",
+  "html {\n  font-size: 17px;\n}\n\nbody {\n",
+);
+
+/** qa/states: a row with an overdue branch, a click-to-open actions menu and a truncated long customer name. */
+const INVOICE_ROW_TSX = `import { useState } from "react";
+
+export interface Invoice {
+  id: string;
+  customer: string;
+  amountCents: number;
+  dueDate: string;
+  status: "open" | "paid";
+}
+
+export interface InvoiceRowProps {
+  invoice: Invoice;
+  onAction?: (action: "remind" | "void", invoiceId: string) => void;
+}
+
+function formatAmount(cents: number): string {
+  return (cents / 100).toLocaleString("en-US", { style: "currency", currency: "USD" });
+}
+
+export function InvoiceRow({ invoice, onAction }: InvoiceRowProps) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const overdue = invoice.status === "open" && new Date(invoice.dueDate).getTime() < Date.now();
+
+  return (
+    <div
+      className={\`flex items-center gap-3 rounded-lg border bg-white px-4 py-3 \${overdue ? "border-rose-300" : "border-slate-200"}\`}
+    >
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-medium text-slate-900" title={invoice.customer}>
+          {invoice.customer}
+        </p>
+        <p className={\`text-xs \${overdue ? "font-semibold text-rose-600" : "text-slate-500"}\`}>
+          {invoice.status === "paid" ? "Paid" : overdue ? \`Overdue since \${invoice.dueDate}\` : \`Due \${invoice.dueDate}\`}
+        </p>
+      </div>
+      <span className="text-sm tabular-nums text-slate-700">{formatAmount(invoice.amountCents)}</span>
+      <div className="relative">
+        <button
+          type="button"
+          aria-label="More actions"
+          className="rounded-md px-2 py-1 text-slate-500 hover:bg-slate-100"
+          onClick={() => setMenuOpen((open) => !open)}
+        >
+          ⋯
+        </button>
+        {menuOpen ? (
+          <ul role="menu" className="absolute right-0 z-10 mt-1 w-40 rounded-md border border-slate-200 bg-white py-1 shadow-lg">
+            <li role="none">
+              <button
+                type="button"
+                role="menuitem"
+                className="w-full px-3 py-1.5 text-left text-sm hover:bg-slate-50"
+                onClick={() => onAction?.("remind", invoice.id)}
+              >
+                Send reminder
+              </button>
+            </li>
+            <li role="none">
+              <button
+                type="button"
+                role="menuitem"
+                className="w-full px-3 py-1.5 text-left text-sm text-rose-600 hover:bg-rose-50"
+                onClick={() => onAction?.("void", invoice.id)}
+              >
+                Void invoice
+              </button>
+            </li>
+          </ul>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+`;
+
+const DASHBOARD_WITH_INVOICES = replaceOnce(
+  replaceOnce(
+    DASHBOARD_TSX,
+    'import UserMenu from "@/components/UserMenu";\n',
+    'import UserMenu from "@/components/UserMenu";\nimport { InvoiceRow } from "@/components/InvoiceRow";\n\nconst INVOICES = [\n  { id: "inv_1001", customer: "Acme Corp", amountCents: 129900, dueDate: "2099-01-20", status: "open" },\n  { id: "inv_1002", customer: "Northwind Traders International Holdings Limited", amountCents: 48250, dueDate: "2020-01-02", status: "open" },\n] as const;\n',
+  ),
+  "        <ProfileCard name=\"Ada Lovelace\" role=\"Engineer\" stats={{ reviews: 1042, merged: 317 }} />\n",
+  "        <ProfileCard name=\"Ada Lovelace\" role=\"Engineer\" stats={{ reviews: 1042, merged: 317 }} />\n        <section className=\"grid gap-2 sm:col-span-2\">\n          {INVOICES.map((invoice) => (\n            <InvoiceRow key={invoice.id} invoice={invoice} />\n          ))}\n        </section>\n",
+);
+
+/** qa/library-break: Card's `title` becomes a required `heading`; a harness saved on main (title only) throws. */
+const CARD_HEADING = replaceOnce(
+  replaceOnce(
+    replaceOnce(
+      replaceOnce(CARD_MAIN, "  title: string;\n", "  heading: string;\n"),
+      "export default function Card({ title, description, actionLabel, onAction }: CardProps) {\n",
+      "export default function Card({ heading, description, actionLabel, onAction }: CardProps) {\n  const label = heading.toUpperCase();\n",
+    ),
+    "{title}</h3>",
+    "{label}</h3>",
+  ),
+  'className="text-base font-semibold text-slate-900"',
+  'className="text-base font-semibold tracking-wide text-slate-900"',
+);
+
+const DASHBOARD_WITH_HEADINGS = DASHBOARD_TSX.replaceAll("<Card title=", "<Card heading=");
+
+export const FIXTURE_VERSION = 3;
 
 export const MAIN_FILES = {
   ".gitignore": GITIGNORE,
@@ -853,6 +967,40 @@ export const BRANCHES = [
           "src/components/notes/NoteFormModal.tsx": NOTE_FORM_MODAL,
         },
         remove: ["src/components/notes/NoteForm.tsx"],
+      },
+    ],
+  },
+  // Sheet 16 §20.10: appended after every earlier branch so their SHAs stay the same.
+  {
+    name: "qa/global-style",
+    from: "main",
+    commits: [
+      {
+        message: "style(global): larger base font and rounder cards",
+        files: { "src/index.css": INDEX_CSS_GLOBAL_STYLE },
+      },
+    ],
+  },
+  {
+    name: "qa/states",
+    from: "main",
+    commits: [
+      {
+        message: "feat(invoices): invoice rows with overdue state and an actions menu",
+        files: {
+          "src/components/InvoiceRow.tsx": INVOICE_ROW_TSX,
+          "src/pages/Dashboard.tsx": DASHBOARD_WITH_INVOICES,
+        },
+      },
+    ],
+  },
+  {
+    name: "qa/library-break",
+    from: "main",
+    commits: [
+      {
+        message: "refactor(card): rename title to a required heading",
+        files: { "src/components/Card.tsx": CARD_HEADING, "src/pages/Dashboard.tsx": DASHBOARD_WITH_HEADINGS },
       },
     ],
   },

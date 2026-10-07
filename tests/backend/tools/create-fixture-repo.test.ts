@@ -23,7 +23,10 @@ const EXPECTED_BRANCHES = [
   "qa/no-visual-change",
   "qa/css-module-only",
   "qa/dependency-drift",
-  "qa/replaced-component" // 00 §17
+  "qa/replaced-component", // 00 §17
+  "qa/global-style", // 16 §20.10
+  "qa/states",
+  "qa/library-break"
 ];
 const skip = spawnSync("git", ["--version"]).status !== 0 ? "git is not available" : false;
 
@@ -91,7 +94,7 @@ after(() => {
   shared?.cleanup();
 });
 
-test("creates the fixture with all seven branches and a clean tree", { skip }, () => {
+test("creates the fixture with all ten branches and a clean tree", { skip }, () => {
   const root = sharedRoot();
   const branches = git(root, "for-each-ref", "--format=%(refname:short)", "refs/heads").split("\n");
   assert.deepEqual([...branches].sort(), [...EXPECTED_BRANCHES].sort());
@@ -315,4 +318,23 @@ test("the main branch typechecks as TypeScript source", () => {
   for (const file of ["package.json", "tsconfig.json", "tsconfig.app.json", "tsconfig.node.json"]) {
     assert.doesNotThrow(() => JSON.parse(MAIN_FILES[file] ?? ""), file);
   }
+});
+
+test("sheet 16 §20.10 branches: global style, states and library break change exactly their files", { skip }, () => {
+  const root = sharedRoot();
+  const changed = (branch: string): string[] =>
+    git(root, "diff", "--name-status", "main", branch).split("\n").filter(Boolean).sort();
+  assert.deepEqual(changed("qa/global-style"), ["M\tsrc/index.css"]);
+  assert.deepEqual(changed("qa/states"), ["A\tsrc/components/InvoiceRow.tsx", "M\tsrc/pages/Dashboard.tsx"]);
+  assert.deepEqual(changed("qa/library-break"), ["M\tsrc/components/Card.tsx", "M\tsrc/pages/Dashboard.tsx"]);
+  const css = git(root, "show", "qa/global-style:src/index.css");
+  assert.ok(css.includes("font-size: 17px;") && css.includes("--radius-xl: 1.5rem;"));
+  const row = git(root, "show", "qa/states:src/components/InvoiceRow.tsx");
+  for (const needle of ['aria-label="More actions"', "Overdue since", 'className="truncate']) {
+    assert.ok(row.includes(needle), needle);
+  }
+  const card = git(root, "show", "qa/library-break:src/components/Card.tsx");
+  assert.ok(card.includes("heading: string;") && card.includes("heading.toUpperCase()"));
+  assert.ok(!git(root, "show", "qa/library-break:src/pages/Dashboard.tsx").includes("<Card title="));
+  assert.equal(FIXTURE_VERSION, 3);
 });

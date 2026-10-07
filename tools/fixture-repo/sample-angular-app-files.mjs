@@ -265,6 +265,13 @@ const STYLES_CSS_MAIN = `@tailwind base;
 }
 `;
 
+/** qa/tailwind-config (sheet 16 §20.10): the indigo used by buttons and links becomes teal. */
+const TAILWIND_CONFIG_TEAL = replaceOnce(
+  TAILWIND_CONFIG,
+  "    extend: {},\n",
+  '    extend: {\n      colors: {\n        indigo: { 600: "#0d9488" },\n      },\n    },\n',
+);
+
 const STYLES_CSS_ROOMY = replaceOnce(STYLES_CSS_MAIN, "  padding: 1rem;\n", "  padding: 1.75rem;\n");
 
 const TOKENS_TS = `import { InjectionToken } from "@angular/core";
@@ -731,7 +738,7 @@ const ORDER_LIST_WITH_MODAL = orderListWith(
   "app-order-note-form-modal",
 );
 
-export const FIXTURE_VERSION = 2;
+export const FIXTURE_VERSION = 3;
 
 const web = (relative) => `${APP_ROOT}/${relative}`;
 
@@ -878,6 +885,17 @@ export const BRANCHES = [
           web("src/app/orders/order-note-form/order-note-form.component.ts"),
           web("src/app/orders/order-note-form/order-note-form.component.html"),
         ],
+      },
+    ],
+  },
+  // Sheet 16 §20.10 (the existing qa/global-style covers styles.css). Appended so earlier SHAs stay the same.
+  {
+    name: "qa/tailwind-config",
+    from: "main",
+    commits: [
+      {
+        message: "style(theme): teal accent colour in the Tailwind config",
+        files: { [web("tailwind.config.js")]: TAILWIND_CONFIG_TEAL },
       },
     ],
   },

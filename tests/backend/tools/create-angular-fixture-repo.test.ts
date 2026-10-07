@@ -30,7 +30,8 @@ const EXPECTED_BRANCHES = [
   "qa/build-error",
   "qa/render-failure",
   "qa/global-style",
-  "qa/replaced-component" // 00 §17
+  "qa/replaced-component", // 00 §17
+  "qa/tailwind-config" // 16 §20.10
 ];
 const web = (relative: string): string => `${APP_ROOT}/${relative}`;
 /** Files sheet 15 §5.9.2 lists for the app root (app.component.ts and app.routes.ts are the bootstrap additions). */
@@ -144,7 +145,7 @@ after(() => {
   shared?.cleanup();
 });
 
-test("creates the fixture with all ten branches and a clean tree", { skip }, () => {
+test("creates the fixture with all eleven branches and a clean tree", { skip }, () => {
   const root = sharedRoot();
   const branches = git(root, "for-each-ref", "--format=%(refname:short)", "refs/heads").split("\n");
   assert.deepEqual([...branches].sort(), [...EXPECTED_BRANCHES].sort());
@@ -312,6 +313,11 @@ test("branch changes match the sheet 15 §5.9.2 table", { skip }, () => {
     `M\t${web("src/app/orders/order-list/order-list.component.html")}`,
     `M\t${web("src/app/orders/order-list/order-list.component.ts")}`
   ]);
+  assert.deepEqual(changedFiles("qa/tailwind-config"), [`M\t${web("tailwind.config.js")}`]);
+  assert.ok(
+    git(root, "show", `qa/tailwind-config:${web("tailwind.config.js")}`).includes('indigo: { 600: "#0d9488" }')
+  );
+  assert.equal(FIXTURE_VERSION, 3);
   assert.deepEqual(BUILD_FAILURE_BRANCHES, ["qa/build-error"]);
 });
 
