@@ -106,7 +106,7 @@ test("Angular system prompt is the sheet 16 §7.8.2 text verbatim", () => {
 test("Angular system prompt and schema hashes are pinned", () => {
   assert.equal(
     sha256(ANGULAR_HARNESS_SYSTEM_PROMPT),
-    "12244f4629efb88b77744f399ef8127fefe54fb13b4fde048e5b162acfd199ec"
+    "60ae05a861feee74aa1d6f06f289901d341f92e31123cb811dfa60e3dc448bee"
   );
   assert.equal(
     sha256(JSON.stringify(ANGULAR_HARNESS_RESPONSE_SCHEMA)),
