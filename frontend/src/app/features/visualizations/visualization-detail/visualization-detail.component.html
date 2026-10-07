@@ -235,6 +235,7 @@
                   [runActive]="!store.isTerminal()"
                   [framework]="h.framework"
                   [repairRequested]="store.repairRequests().has(c.id)"
+                  [liveAvailable]="liveAvailable()"
                   (repair)="repairComponent($event)"
                 />
               }

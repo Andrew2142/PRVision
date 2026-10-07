@@ -174,6 +174,30 @@ const ROUTES: RouteCase[] = [
     path: 'visualizations/9/repair-broken',
     silent: true,
   },
+  // 16j live block (16 §14.6)
+  { name: 'startLive', call: (a) => a.startLive(9), method: 'POST', path: 'visualizations/9/live', silent: true },
+  { name: 'getLive', call: (a) => a.getLive(9), method: 'GET', path: 'visualizations/9/live', silent: true },
+  {
+    name: 'openLive',
+    call: (a) => a.openLive(9, { componentId: 11, stateName: 'Default' }),
+    method: 'POST',
+    path: 'visualizations/9/live/open',
+    silent: true,
+  },
+  {
+    name: 'heartbeatLive',
+    call: (a) => a.heartbeatLive(9, { active: true }),
+    method: 'POST',
+    path: 'visualizations/9/live/heartbeat',
+    silent: true,
+  },
+  {
+    name: 'stopLive',
+    call: (a) => a.stopLive(9, { reason: 'user' }),
+    method: 'POST',
+    path: 'visualizations/9/live/stop',
+    silent: true,
+  },
 ];
 
 describe('ApiService', () => {
@@ -210,7 +234,7 @@ describe('ApiService', () => {
   });
 
   it('every typed method hits its 00 §9/§14.4 method + path', () => {
-    expect(ROUTES.length).toBe(29);
+    expect(ROUTES.length).toBe(34);
     for (const route of ROUTES) {
       let result: unknown;
       route.call(api).subscribe((v) => (result = v));
@@ -357,5 +381,33 @@ describe('ApiService', () => {
       .expectOne(`${base}/visualizations/5/cancel`)
       .flush({ status: 202, data: { id: 5, status: 'cancel_requested' } }, { status: 202, statusText: 'Accepted' });
     expect(result).toEqual({ id: 5, status: 'cancel_requested' });
+  });
+
+  it('live calls send their bodies unchanged (16 §14.6)', () => {
+    api.startLive(9).subscribe();
+    api.openLive(9, { componentId: 11, stateName: 'Menu open' }).subscribe();
+    api.heartbeatLive(9, { active: false }).subscribe();
+    api.stopLive(9, { reason: 'left' }).subscribe();
+    const bodies = [
+      ['live', {}],
+      ['live/open', { componentId: 11, stateName: 'Menu open' }],
+      ['live/heartbeat', { active: false }],
+      ['live/stop', { reason: 'left' }],
+    ] as const;
+    for (const [path, body] of bodies) {
+      const req = http.expectOne((r) => r.method === 'POST' && r.url === `${base}/visualizations/9/${path}`);
+      expect(req.request.body).withContext(path).toEqual(body);
+      req.flush({ status: 200, data: {} });
+    }
+  });
+
+  it('stopLiveBeacon sends a text/plain "{}" beacon to the stop route', async () => {
+    const beacon = spyOn(navigator, 'sendBeacon').and.returnValue(true);
+    expect(api.stopLiveBeacon(9)).toBeTrue();
+    const [url, data] = beacon.calls.mostRecent().args;
+    expect(url).toBe(`${base}/visualizations/9/live/stop`);
+    expect(data instanceof Blob).toBeTrue();
+    expect((data as Blob).type).toBe('text/plain');
+    expect(await (data as Blob).text()).toBe('{}');
   });
 });

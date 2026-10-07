@@ -9,6 +9,8 @@ export interface SegmentOption<T extends string> {
   disabled?: boolean;
   /** A filled dot after the label (e.g. a changed state, 16 §15.5.2); `label` is its accessible text. */
   marker?: { testId: string; label: string } | null;
+  /** `data-testid` of the option's button (e.g. `mode-live`, 16 §15.6). */
+  testId?: string;
 }
 
 /**
@@ -39,6 +41,7 @@ export interface SegmentOption<T extends string> {
           [attr.id]="isTabs() ? idPrefix() + '-tab-' + option.value : null"
           [attr.aria-controls]="isTabs() ? idPrefix() + '-panel' : null"
           [attr.data-value]="option.value"
+          [attr.data-testid]="option.testId ?? null"
           (click)="select(option)"
           (keydown)="onKeydown($event)"
           class="inline-flex min-h-8 items-center justify-center gap-1.5 rounded-xl px-3 text-[0.8125rem] font-extrabold text-[var(--color-text-secondary)] transition hover:bg-[color:color-mix(in_srgb,var(--shell-accent)_7%,transparent)] hover:text-[var(--color-text-primary)] disabled:cursor-not-allowed disabled:opacity-40 max-sm:flex-1"

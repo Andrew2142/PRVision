@@ -10,6 +10,7 @@ import { errorInterceptor } from '../../../core/interceptors/error.interceptor';
 import { type VisualizationDetailView } from '../../../core/models/visualization.model';
 import { ConfirmDialogService } from '../../../core/services/confirm-dialog.service';
 import { NotificationService } from '../../../core/services/notification.service';
+import { liveSession } from '../testing/live-fixtures';
 import { componentView, detailView, harnessView, repairJobView } from '../testing/visualization-fixtures';
 import { VisualizationDetailComponent } from './visualization-detail.component';
 
@@ -585,6 +586,81 @@ describe('VisualizationDetailComponent', () => {
       confirm.confirm.and.returnValue(of(false));
       load({ status: 'awaiting_confirmation', componentCount: 300, newHarnessCount: 240, reusedHarnessCount: 60 });
       expect(textWithoutIcons(el.querySelector('[data-testid="render-all"]'))).toBe('Write top 100');
+      done();
+    }));
+  });
+
+  describe('live mode (16j)', () => {
+    const liveUrl = `${BASE}/visualizations/7/live`;
+    const liveRow = componentView({ id: 11, harnessSource: 'export default definePrvisionHarness({ states: [] });' });
+    function liveButton(): HTMLButtonElement | null {
+      return el.querySelector<HTMLButtonElement>('app-component-card [data-testid="mode-live"]');
+    }
+    function startLive(): void {
+      liveButton()?.click();
+      fixture.detectChanges();
+      el.querySelector<HTMLButtonElement>('[data-testid="live-start-button"]')?.click();
+      fixture.detectChanges();
+      httpMock
+        .expectOne((r) => r.method === 'POST' && r.url === liveUrl)
+        .flush(
+          { status: 202, data: liveSession({ status: 'starting', readyAt: null }) },
+          { status: 202, statusText: 'x' },
+        );
+      fixture.detectChanges();
+    }
+
+    it('Live is offered on cards of a run that can go live, for rows with a harness', fakeAsync(() => {
+      load({ status: 'completed', liveAvailable: true, components: [liveRow] }, '7', 'components');
+      expect(liveButton()?.disabled).toBeFalse();
+      done();
+    }));
+
+    it('no Live when the run cannot go live or the row has no harness', fakeAsync(() => {
+      load({ status: 'completed', liveAvailable: false, components: [liveRow] }, '7', 'components');
+      expect(liveButton()?.disabled).toBeTrue();
+      done();
+    }));
+
+    it('a row without a harness cannot go live', fakeAsync(() => {
+      load(
+        { status: 'completed', liveAvailable: true, components: [componentView({ harnessSource: null })] },
+        '7',
+        'components',
+      );
+      expect(liveButton()?.disabled).toBeTrue();
+      done();
+    }));
+
+    it('leaving the run stops its live session (reason left)', fakeAsync(() => {
+      load({ status: 'completed', liveAvailable: true, components: [liveRow] }, '7', 'components');
+      startLive();
+      expect(el.querySelector('[data-testid="live-starting"]')).not.toBeNull();
+      fixture.destroy();
+      const stops = httpMock.match(`${liveUrl}/stop`);
+      expect(stops.length).toBe(1);
+      expect(stops[0]?.request.body).toEqual({ reason: 'left' });
+      httpMock.match(() => true);
+      discardPeriodicTasks();
+    }));
+
+    it('leaving a run that never went live sends no stop', fakeAsync(() => {
+      load({ status: 'completed', liveAvailable: true, components: [liveRow] }, '7', 'components');
+      fixture.destroy();
+      expect(httpMock.match(`${liveUrl}/stop`).length).toBe(0);
+      httpMock.match(() => true);
+      discardPeriodicTasks();
+    }));
+
+    it('switching to another run stops the live session of the previous one', fakeAsync(() => {
+      load({ status: 'completed', liveAvailable: true, components: [liveRow] }, '7', 'components');
+      startLive();
+      fixture.componentRef.setInput('id', '8');
+      fixture.detectChanges();
+      tick(0);
+      const stops = httpMock.match(`${liveUrl}/stop`);
+      expect(stops.length).toBe(1);
+      expect(stops[0]?.request.body).toEqual({ reason: 'left' });
       done();
     }));
   });

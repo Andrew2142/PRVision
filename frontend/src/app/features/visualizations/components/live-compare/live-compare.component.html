@@ -1,0 +1,86 @@
+@if (skippedText(); as text) {
+  <app-inline-alert class="mb-3" tone="info" icon="touch_app" data-testid="live-skipped">
+    <span data-testid="live-skipped-text">{{ text }}</span>
+  </app-inline-alert>
+}
+<div class="grid gap-4 md:grid-cols-2">
+  @for (s of sides(); track s.side) {
+    <section class="min-w-0" [attr.data-testid]="'live-side-' + s.side" [attr.aria-label]="s.caption + ', live'">
+      <div class="mb-2 flex items-center justify-between gap-2">
+        <h4 class="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--color-text-tertiary)]">
+          {{ s.caption }}
+        </h4>
+        <button
+          mat-button
+          type="button"
+          class="!rounded-xl"
+          [disabled]="s.kind !== 'ready'"
+          [attr.data-testid]="'live-reload-' + s.side"
+          [attr.aria-label]="'Reload the ' + s.caption.toLowerCase() + ' side'"
+          (click)="reload(s.side)"
+        >
+          <mat-icon aria-hidden="true">refresh</mat-icon>
+          Reload
+        </button>
+      </div>
+      @if (s.thrown; as thrown) {
+        <app-inline-alert class="mb-2" tone="error" [attr.data-testid]="'live-thrown-' + s.side">
+          <span class="break-words" [attr.data-testid]="'live-thrown-text-' + s.side">{{ thrown }}</span>
+        </app-inline-alert>
+      }
+      <div class="overflow-hidden rounded-xl border border-[color:var(--color-border)]">
+        @switch (s.kind) {
+          @case ('ready') {
+            <iframe
+              #frame
+              [attr.data-side]="s.side"
+              [attr.data-testid]="'live-frame-' + s.side"
+              [title]="s.frameTitle"
+              data-prvision-live-frame
+              sandbox="allow-scripts allow-same-origin allow-forms"
+              referrerpolicy="no-referrer"
+            ></iframe>
+          }
+          @case ('starting') {
+            <div
+              class="grid min-h-40 place-content-center justify-items-center gap-2 bg-[var(--color-bg-tertiary)] p-6 text-center text-sm text-[var(--color-text-tertiary)]"
+              role="status"
+              [attr.data-testid]="'live-starting-' + s.side"
+            >
+              <mat-spinner diameter="24" />
+              <span>{{ s.message }}</span>
+            </div>
+          }
+          @case ('absent') {
+            <div
+              class="grid min-h-40 place-content-center justify-items-center gap-2 bg-[var(--color-bg-tertiary)] p-6 text-center text-sm text-[var(--color-text-tertiary)]"
+              [attr.data-testid]="'live-absent-' + s.side"
+            >
+              <mat-icon aria-hidden="true">{{ s.side === 'base' ? 'add_box' : 'delete' }}</mat-icon>
+              <span>{{ s.message }}</span>
+            </div>
+          }
+          @default {
+            <div
+              class="grid min-h-40 place-content-center justify-items-center gap-3 bg-[var(--color-bg-tertiary)] p-6 text-center text-sm text-[var(--color-text-secondary)]"
+              role="alert"
+              [attr.data-testid]="'live-failed-' + s.side"
+            >
+              <mat-icon class="text-[var(--color-error)]" aria-hidden="true">error</mat-icon>
+              <span class="whitespace-pre-line break-words">{{ s.message }}</span>
+              <button
+                mat-stroked-button
+                type="button"
+                class="!rounded-xl"
+                [attr.data-testid]="'live-retry-' + s.side"
+                (click)="retry()"
+              >
+                Try again
+              </button>
+            </div>
+          }
+        }
+      </div>
+    </section>
+  }
+</div>

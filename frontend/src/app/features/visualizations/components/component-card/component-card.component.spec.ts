@@ -1,8 +1,10 @@
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
+import { By } from '@angular/platform-browser';
 import { provideNoopAnimations } from '@angular/platform-browser/animations';
 import { type VisualizationComponentView } from '../../../../core/models/visualization.model';
 import { environment } from '../../../../../environments/environment';
 import { componentView, harnessView, stateView } from '../../testing/visualization-fixtures';
+import { ImageCompareComponent, type LiveTarget } from '../image-compare/image-compare.component';
 import { ComponentCardComponent } from './component-card.component';
 
 const DIFF = ['diff --git a/x b/x', '--- a/x', '+++ b/x', '@@ -1,1 +1,2 @@', '-a', '+b', '+c'].join('\n');
@@ -449,6 +451,50 @@ describe('ComponentCardComponent', () => {
       expect(el.querySelector('[data-testid="what-changed-main"]')?.textContent?.trim()).toBe(
         'Global style changed (src/index.css); re-checked with the saved harness',
       );
+    });
+  });
+
+  describe('live inputs (16j)', () => {
+    function compare(): ImageCompareComponent {
+      const debug = fixture.debugElement.query(By.directive(ImageCompareComponent));
+      return debug.componentInstance as ImageCompareComponent;
+    }
+    function liveInputs(): { enabled: boolean; target: LiveTarget | null; steps: readonly string[] } {
+      const c = compare();
+      return { enabled: c.liveEnabled(), target: c.liveTarget(), steps: c.stepSummary() };
+    }
+    const states = [
+      stateView(0, { visualChange: 'unchanged' }),
+      stateView(1, {
+        name: 'Menu open',
+        visualChange: 'new',
+        onBase: false,
+        baseImageUrl: null,
+        stepSummary: ['Click button "More actions"'],
+      }),
+    ];
+
+    it('Live follows the run, the harness and the open state', () => {
+      fixture.componentRef.setInput('liveAvailable', true);
+      render({ harnessSource: 'x', states, stateCount: 2, changedStateCount: 1 });
+      expect(liveInputs()).toEqual({
+        enabled: true,
+        target: { componentId: 11, stateName: 'Menu open', onBase: false, onHead: true },
+        steps: ['Click button "More actions"'],
+      });
+      el.querySelector<HTMLButtonElement>('app-state-tabs [data-value="0"]')?.click();
+      fixture.detectChanges();
+      expect(liveInputs().target).toEqual({ componentId: 11, stateName: 'Default', onBase: true, onHead: true });
+    });
+
+    it('off when the run cannot go live, the row has no harness, or the run is still active', () => {
+      render({ harnessSource: 'x' });
+      expect(liveInputs().enabled).toBeFalse();
+      fixture.componentRef.setInput('liveAvailable', true);
+      render({ harnessSource: null });
+      expect(liveInputs().enabled).toBeFalse();
+      render({ harnessSource: 'x' }, true);
+      expect(liveInputs().enabled).toBeFalse();
     });
   });
 });
