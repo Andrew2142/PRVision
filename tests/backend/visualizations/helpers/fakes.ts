@@ -434,7 +434,7 @@ export function candidate(componentId: number, overrides: Partial<ComponentCandi
 export function harness(componentId: number): HarnessGenerationResult {
   return {
     componentId,
-    harnessSource: "export default function PRVisionHarness() {}",
+    harnessSource: 'export default definePrvisionHarness({ states: [{ name: "Default", render: () => null }] });',
     mockedModules: [],
     notes: "",
     states: [{ name: "Default", steps: [] }],

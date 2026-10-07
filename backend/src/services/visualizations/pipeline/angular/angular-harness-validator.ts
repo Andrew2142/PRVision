@@ -19,6 +19,7 @@ import {
 } from "@angular/compiler";
 import ts from "typescript";
 import type { AngularComponentMeta, AngularSourceQueriesLike } from "../../../../types/angular-analysis";
+import type { HarnessStateSpec } from "../../../../types/harness-library";
 import type { MockedModule, WorktreeSide } from "../../../../types/visualization-pipeline";
 import { createLogger, getErrorMessage } from "../../../../utilities";
 import { harnessDirRel } from "../harness-prompts";
@@ -31,12 +32,12 @@ import {
   locationOf,
   moduleReferences,
   runtimeExports,
-  singleDefaultState,
   type HarnessIssueCode,
   type HarnessValidationInput,
   type HarnessValidationIssue,
   type HarnessValidationReport
 } from "../harness-validator";
+import { extractHarnessStates } from "../harness-states";
 import { classifySpecifier, packageNameOf, validateMockedModules } from "../mock-rules";
 
 const log = createLogger("pipeline.harness");
@@ -48,7 +49,7 @@ type Metas = Partial<Record<WorktreeSide, AngularComponentMeta | null>>;
 export const ANGULAR_HARNESS_API_SPECIFIER = "../harness-api";
 const DEFINE_HARNESS = "definePrvisionHarness";
 const HOST_SELECTOR = "prvision-host";
-const DESCRIPTOR_KEYS = new Set(["component", "inputs", "providers", "http", "hostStyle", "setup"]);
+const DESCRIPTOR_KEYS = new Set(["component", "inputs", "providers", "http", "hostStyle", "setup", "states"]);
 const SHAPE_HINT = "Default-export definePrvisionHarness({ component, … }) imported from '../harness-api'.";
 
 /** Provider functions and bootstrap APIs the render page owns (15 §5.6.7 step 7). */
@@ -569,8 +570,9 @@ export class AngularHarnessValidator {
     const report: Report = (code, severity, message, location) => {
       issues.push({ code, severity, message, ...(location !== undefined ? { location } : {}) });
     };
+    let states: HarnessStateSpec[] | null = null;
     try {
-      await this.run(input, report);
+      states = await this.run(input, report);
     } catch (error: unknown) {
       report("syntax_error", "error", `The harness could not be checked: ${getErrorMessage(error)}`);
     }
@@ -585,10 +587,12 @@ export class AngularHarnessValidator {
       "Angular harness validated"
     );
     const ok = errors.length === 0;
-    return { ok, errors, warnings, states: ok ? singleDefaultState() : null }; // 16a shim until 16b
+    return { ok, errors, warnings, states: ok ? states : null };
   }
 
-  private async run(input: HarnessValidationInput, report: Report): Promise<void> {
+  /** Runs every check; returns the extracted states, Default first (null when they are unusable). */
+  private async run(input: HarnessValidationInput, report: Report): Promise<HarnessStateSpec[] | null> {
+    let states: HarnessStateSpec[] | null = null;
     const sides = (["base", "head"] as const).filter((side) => input.sidesPresent[side] && input.paths[side] !== null);
     const metas: Metas = {};
     for (const side of sides) {
@@ -604,22 +608,32 @@ export class AngularHarnessValidator {
     if (problems.length === 0) {
       const sf = parseTs(input.harnessSource, "harness.ts");
       const descriptor = checkShape(sf, report);
+      if (descriptor !== null) {
+        states = checkStates(input, report);
+      }
       const targetLocal = this.checkTargetImport(sf, input, report);
       if (descriptor !== null && targetLocal !== null) {
         const mode = this.checkComponent(sf, descriptor, targetLocal, input, sides, metas, report);
         if (mode === "target") {
           checkInputs(descriptor, sides, metas, report, sf);
+          for (const state of stateObjects(descriptor)) {
+            checkInputs({ object: state }, sides, metas, report, sf, { stateInputs: true });
+          }
         }
       }
       scanAngularApis(sf, "harness", report);
       if (descriptor !== null) {
         checkSetup(sf, descriptor, report);
         checkHttp(sf, descriptor, report);
+        for (const state of stateObjects(descriptor)) {
+          checkHttp(sf, { object: state }, report);
+        }
       }
       await this.checkImports(sf, input, sides, report);
     }
     // Step 10: file replacements
     await this.checkMocks(input, sides, report);
+    return states;
   }
 
   private async metaOf(filePath: string, exportName: string, side: WorktreeSide): Promise<AngularComponentMeta | null> {
@@ -796,7 +810,7 @@ export class AngularHarnessValidator {
       if (
         specifier === input.targetImportPath ||
         specifier === ANGULAR_HARNESS_API_SPECIFIER ||
-        reference.typeOnly ||
+        (reference.typeOnly && !isPageFileSpecifier(input, specifier)) ||
         reference.kind === "dynamic"
       ) {
         continue;
@@ -824,6 +838,15 @@ export class AngularHarnessValidator {
       if (classifySpecifier(specifier) === "relative") {
         const repoPath = path.posix.normalize(path.posix.join(harnessDirRel(input.viteRootRel), specifier));
         const segments = repoPath.split("/");
+        if (isPageFileSpecifier(input, specifier)) {
+          report(
+            "forbidden_import",
+            "error",
+            `Do not import "${specifier}": the harness may only import definePrvisionHarness (and its types) from '${ANGULAR_HARNESS_API_SPECIFIER}'; the other files of .prvision-harness belong to the render page.`,
+            location
+          );
+          continue;
+        }
         if (
           repoPath === ".." ||
           repoPath.startsWith("../") ||
@@ -1249,7 +1272,7 @@ function checkShape(sf: ts.SourceFile, report: Report): DescriptorInfo | null {
       report(
         "harness_shape",
         "error",
-        `Unknown key ${name ?? property.getText(sf)} in definePrvisionHarness({...}); allowed keys: component, inputs, providers, http, hostStyle, setup.`,
+        `Unknown key ${name ?? property.getText(sf)} in definePrvisionHarness({...}); allowed keys: component, inputs, providers, http, hostStyle, setup, states.`,
         locationOf("harness", sf, property)
       );
     }
@@ -1263,6 +1286,43 @@ function checkShape(sf: ts.SourceFile, report: Report): DescriptorInfo | null {
     );
   }
   return { object };
+}
+
+/** Step 3b (16 §7.7.3): `states` of the descriptor; reports the `state_*` issues of `extractHarnessStates`. */
+function checkStates(input: HarnessValidationInput, report: Report): HarnessStateSpec[] | null {
+  const extraction = extractHarnessStates(input.harnessSource, "angular", {
+    stateAllowance: input.stateAllowance,
+    allowLegacy: false
+  });
+  if (extraction.ok) {
+    return extraction.states;
+  }
+  for (const issue of extraction.issues) {
+    if (issue.code !== "harness_shape") {
+      report(issue.code, issue.severity, issue.message, issue.location); // the shape itself is checkShape's
+    }
+  }
+  return null;
+}
+
+/** The object literals of the descriptor's `states` array (empty when absent or not a literal). */
+function stateObjects(descriptor: DescriptorInfo): ts.ObjectLiteralExpression[] {
+  const value = initializerOf(findProperty(descriptor.object, "states"));
+  const list = value === undefined ? undefined : unwrap(value);
+  if (list === undefined || !ts.isArrayLiteralExpression(list)) {
+    return [];
+  }
+  return list.elements.map((element) => unwrap(element)).filter((element) => ts.isObjectLiteralExpression(element));
+}
+
+/** True when a relative harness import points into `.prvision-harness` itself (the render page's files). */
+function isPageFileSpecifier(input: HarnessValidationInput, specifier: string): boolean {
+  if (classifySpecifier(specifier) !== "relative") {
+    return false;
+  }
+  const repoPath = path.posix.normalize(path.posix.join(harnessDirRel(input.viteRootRel), specifier));
+  const pageDir = path.posix.normalize(path.posix.join(input.viteRootRel, ".prvision-harness"));
+  return repoPath === pageDir || repoPath.startsWith(`${pageDir}/`);
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -1446,7 +1506,8 @@ function checkInputs(
   sides: readonly WorktreeSide[],
   metas: Metas,
   report: Report,
-  sf: ts.SourceFile
+  sf: ts.SourceFile,
+  options: { stateInputs: boolean } = { stateInputs: false }
 ): void {
   const property = findProperty(descriptor.object, "inputs");
   const value = initializerOf(property);
@@ -1487,6 +1548,9 @@ function checkInputs(
         );
       }
     }
+  }
+  if (options.stateInputs) {
+    return; // a state's inputs are merged over the top-level inputs, which carry the required ones (16 §7.4)
   }
   const given = new Set(keys.map((key) => key.name));
   for (const side of sides) {

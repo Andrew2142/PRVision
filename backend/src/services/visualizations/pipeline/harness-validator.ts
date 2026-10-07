@@ -16,9 +16,10 @@ import type {
   MockedModule,
   WorktreeSide
 } from "../../../types/visualization-pipeline";
-import { DEFAULT_STATE_NAME, type HarnessStateSpec } from "../../../types/harness-library";
+import type { HarnessStateSpec } from "../../../types/harness-library";
 import { getErrorMessage } from "../../../utilities";
 import { harnessDirRel } from "./harness-prompts";
+import { extractHarnessStates, HARNESS_API_SPECIFIER } from "./harness-states";
 import { classifySpecifier, packageNameOf, validateMockedModules } from "./mock-rules";
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -50,8 +51,18 @@ export type HarnessIssueCode =
   | "size_limit"
   // Raised by HarnessGenerationService, not by validate(): status component_defect on a first generation.
   | "invalid_status"
-  // Angular only (15 §5.6.7); React's validate() never emits them. unknown_input and harness_shape can also be warnings.
+  // 16 §7.7.2: multi-state harness rules (both frameworks)
+  | "state_list_not_literal"
+  | "state_default_missing"
+  | "state_name_invalid"
+  | "state_duplicate"
+  | "state_too_many"
+  | "state_default_has_steps"
+  | "state_step_invalid"
+  | "state_render_missing"
+  // Both frameworks since 16b (React: module shape). unknown_input and harness_shape can also be warnings (Angular).
   | "harness_shape"
+  // Angular only (15 §5.6.7); React's validate() never emits them.
   | "component_not_target"
   | "host_template_error"
   | "unknown_input"
@@ -85,7 +96,7 @@ export interface HarnessValidationInput {
   entryFilePath: string | null; // repository.entryFilePath
   /** The statement given to the model (HarnessContextPackage.targetImportStatement), quoted in messages. */
   targetImportStatement?: string;
-  /** 16 §6.12: the repository's state allowance (ctx.library.stateAllowance); unused until 16b's state rules. */
+  /** 16 §7.7.3: the repository's state allowance (1–5, Default included). */
   stateAllowance: number;
 }
 
@@ -95,14 +106,6 @@ export interface HarnessValidationReport {
   warnings: HarnessValidationIssue[];
   /** 16 §6.12: states extracted from a valid harness, Default first; null when not ok. */
   states: HarnessStateSpec[] | null;
-}
-
-/**
- * 16a compile shim (16 §6.12): the states of every valid harness until 16b extracts them (`extractHarnessStates`):
- * one Default state without steps.
- */
-export function singleDefaultState(): HarnessStateSpec[] {
-  return [{ name: DEFAULT_STATE_NAME, steps: [] }];
 }
 
 /** Size limits (09 §5.8), stricter than 10's defensive MOCK_SOURCE_MAX_CHARS. */
@@ -118,7 +121,7 @@ export const HARNESS_MOCK_SPECIFIER_MAX_CHARS = 200;
 const STYLE_IMPORT = /\.(css|scss|sass|less|styl)(\?.*)?$/;
 const SCRIPT_EXTENSIONS = [".tsx", ".ts", ".jsx", ".js"] as const;
 const FORBIDDEN_MOCK_PREFIX = /^(\/|file:|http:|https:|data:)/;
-const HARNESS_NAME = "PRVisionHarness";
+const HARNESS_API_EXPORT = "definePrvisionHarness";
 
 /** A syntax diagnostic with a 1-based position. */
 export interface SyntaxProblem {
@@ -510,8 +513,9 @@ export class HarnessValidator {
     const report: Report = (code, severity, message, location) => {
       issues.push({ code, severity, message, ...(location !== undefined ? { location } : {}) });
     };
+    let states: HarnessStateSpec[] | null = null;
     try {
-      await this.run(input, report);
+      states = await this.run(input, report);
     } catch (error: unknown) {
       report("syntax_error", "error", `The harness could not be checked: ${getErrorMessage(error)}`);
     }
@@ -521,11 +525,13 @@ export class HarnessValidator {
       ok,
       errors,
       warnings: issues.filter((issue) => issue.severity === "warning"),
-      states: ok ? singleDefaultState() : null
+      states: ok ? states : null
     };
   }
 
-  private async run(input: HarnessValidationInput, report: Report): Promise<void> {
+  /** Runs every check; returns the extracted states (null when the module shape or a state is invalid). */
+  private async run(input: HarnessValidationInput, report: Report): Promise<HarnessStateSpec[] | null> {
+    let states: HarnessStateSpec[] | null = null;
     const sides = (["base", "head"] as const).filter((side) => input.sidesPresent[side] && input.paths[side] !== null);
     // Step 1: size
     if (input.harnessSource.length > HARNESS_SOURCE_MAX_CHARS) {
@@ -560,11 +566,12 @@ export class HarnessValidator {
     }
     if (problems.length === 0) {
       const sf = parse(input.harnessSource, "harness.tsx");
-      checkDefaultExport(sf, report);
+      states = checkHarnessShape(input, report);
       await this.checkHarnessImports(sf, input, sides, report);
       scanApis(sf, "harness", true, report);
     }
     await this.checkMocks(input, sides, report);
+    return states;
   }
 
   private statementFor(input: HarnessValidationInput): string {
@@ -631,11 +638,26 @@ export class HarnessValidator {
 
     const reportedTwice = new Set<string>();
     for (const reference of references) {
-      if (reference.specifier === input.targetImportPath || reference.typeOnly || reference.kind === "dynamic") {
+      if (reference.specifier === input.targetImportPath || reference.kind === "dynamic") {
         continue;
       }
       const specifier = reference.specifier;
       const location = locationOf("harness", sf, reference.node);
+      if (isHarnessFileReference(input, specifier)) {
+        // 16 §7.7.3: only `import { definePrvisionHarness } from "../harness-api"` (plus type-only imports of its types).
+        if (specifier !== HARNESS_API_SPECIFIER || !isAllowedHarnessApiImport(reference)) {
+          report(
+            "forbidden_import",
+            "error",
+            `Do not import "${specifier}": the harness may only import definePrvisionHarness (and its types) from "${HARNESS_API_SPECIFIER}"; the other files of .prvision-harness belong to the render page.`,
+            location
+          );
+        }
+        continue;
+      }
+      if (reference.typeOnly) {
+        continue;
+      }
       if (STYLE_IMPORT.test(specifier)) {
         report(
           "style_import",
@@ -948,70 +970,48 @@ export class HarnessValidator {
   }
 }
 
-/** Step 3: exactly one default export, the function component PRVisionHarness. */
-function checkDefaultExport(sf: ts.SourceFile, report: Report): void {
-  const localFunctions = new Set<string>();
-  for (const statement of sf.statements) {
-    if (ts.isFunctionDeclaration(statement) && statement.name) {
-      localFunctions.add(statement.name.text);
-    }
-    if (ts.isVariableStatement(statement)) {
-      for (const declaration of statement.declarationList.declarations) {
-        const initializer = declaration.initializer;
-        if (
-          ts.isIdentifier(declaration.name) &&
-          initializer !== undefined &&
-          (ts.isArrowFunction(initializer) || ts.isFunctionExpression(initializer))
-        ) {
-          localFunctions.add(declaration.name.text);
-        }
-      }
-    }
+/**
+ * Step 3 (16 §7.7.3): the module default-exports `definePrvisionHarness({ wrapper?, states })` with valid states.
+ * Reports every `harness_shape` and `state_*` issue; returns the states, or null when they are unusable.
+ */
+function checkHarnessShape(input: HarnessValidationInput, report: Report): HarnessStateSpec[] | null {
+  const extraction = extractHarnessStates(input.harnessSource, "react_vite", {
+    stateAllowance: input.stateAllowance,
+    allowLegacy: false
+  });
+  if (extraction.ok) {
+    return extraction.states;
   }
-  const defaults: Array<{ ok: boolean; name: string | null; node: ts.Node }> = [];
-  for (const statement of sf.statements) {
-    const modifiers = ts.canHaveModifiers(statement) ? (ts.getModifiers(statement) ?? []) : [];
-    const isDefault =
-      modifiers.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword) &&
-      modifiers.some((modifier) => modifier.kind === ts.SyntaxKind.DefaultKeyword);
-    if ((ts.isFunctionDeclaration(statement) || ts.isClassDeclaration(statement)) && isDefault) {
-      const name = statement.name?.text ?? null;
-      defaults.push({ ok: ts.isFunctionDeclaration(statement) && name === HARNESS_NAME, name, node: statement });
-    } else if (ts.isExportAssignment(statement) && statement.isExportEquals !== true) {
-      const name = ts.isIdentifier(statement.expression) ? statement.expression.text : null;
-      defaults.push({ ok: name === HARNESS_NAME && localFunctions.has(name), name, node: statement });
-    } else if (
-      ts.isExportDeclaration(statement) &&
-      statement.exportClause &&
-      ts.isNamedExports(statement.exportClause)
-    ) {
-      for (const element of statement.exportClause.elements) {
-        if (element.name.text === "default") {
-          const name = (element.propertyName ?? element.name).text;
-          const ok = statement.moduleSpecifier === undefined && name === HARNESS_NAME && localFunctions.has(name);
-          defaults.push({ ok, name, node: statement });
-        }
-      }
-    }
+  for (const issue of extraction.issues) {
+    report(issue.code, issue.severity, issue.message, issue.location);
   }
-  const expected = "export default function PRVisionHarness() { ... }";
-  const first = defaults[0];
-  if (first === undefined) {
-    report("missing_default_export", "error", `Export the harness as the default export: ${expected}`);
-  } else if (defaults.length > 1) {
-    report(
-      "default_export_wrong_name",
-      "error",
-      `Export exactly one default export, the function component PRVisionHarness: ${expected}`,
-      locationOf("harness", sf, first.node)
-    );
-  } else if (!first.ok) {
-    const what = first.name === null ? "is anonymous" : `is ${first.name}`;
-    report(
-      "default_export_wrong_name",
-      "error",
-      `The default export ${what}; it must be the function component named PRVisionHarness: ${expected}`,
-      locationOf("harness", sf, first.node)
-    );
+  return null;
+}
+
+/** True when a harness import points into `.prvision-harness` itself (the page's own files). */
+function isHarnessFileReference(input: HarnessValidationInput, specifier: string): boolean {
+  if (classifySpecifier(specifier) !== "relative") {
+    return false;
   }
+  const repoPath = path.posix.normalize(path.posix.join(harnessDirRel(input.viteRootRel), specifier));
+  const pageDir = path.posix.normalize(path.posix.join(input.viteRootRel, ".prvision-harness"));
+  return repoPath === pageDir || repoPath.startsWith(`${pageDir}/`);
+}
+
+/** `import { definePrvisionHarness } from "../harness-api"`, optionally with type-only imports of its types. */
+function isAllowedHarnessApiImport(reference: ModuleReference): boolean {
+  if (reference.kind !== "import") {
+    return reference.typeOnly;
+  }
+  if (reference.typeOnly) {
+    return true;
+  }
+  const clause = reference.importClause;
+  const bindings = clause?.namedBindings;
+  if (clause === undefined || clause.name !== undefined || bindings === undefined || !ts.isNamedImports(bindings)) {
+    return false;
+  }
+  return bindings.elements.every(
+    (element) => element.isTypeOnly || (element.propertyName ?? element.name).text === HARNESS_API_EXPORT
+  );
 }

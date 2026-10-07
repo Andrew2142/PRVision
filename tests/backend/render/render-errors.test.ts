@@ -4,6 +4,7 @@ import { RENDER_ERROR_MAX_CHARS } from "../../../backend/src/config-consts";
 import {
   extractViteErrorFromBody,
   formatRenderError,
+  headlineFor,
   isOptimizeDepsChurn,
   isRepairableFailure,
   rewriteMockIds,
@@ -159,6 +160,37 @@ test("isRepairableFailure is true only for module_load, render_error and timeout
     all.filter((kind) => isRepairableFailure(kind)),
     ["module_load", "render_error", "timeout"]
   );
+});
+
+test("isRepairableFailure: step_failed is repairable (16 §7.6.3); infrastructure kinds stay unrepairable", () => {
+  assert.equal(isRepairableFailure("step_failed"), true);
+  for (const kind of [
+    "vite_unavailable",
+    "navigation",
+    "browser",
+    "screenshot",
+    "file_missing",
+    "budget_exceeded",
+    "cancelled"
+  ] as const) {
+    assert.equal(isRepairableFailure(kind), false, kind);
+  }
+});
+
+test("headlineFor gives step_failed the Interaction step failed headline", () => {
+  const detail = 'State "Menu open", step 1 (click role=button "More actions"): no visible element matched within 3 s.';
+  assert.equal(headlineFor("step_failed", detail), `Interaction step failed: ${detail}`);
+  const formatted = formatRenderError({
+    kind: "step_failed",
+    headline: headlineFor("step_failed", detail),
+    stack: null,
+    componentStack: null,
+    serverErrors: [],
+    consoleErrors: [],
+    viteOrigin: null,
+    mockLabels: new Map<string, string>()
+  });
+  assert.equal(formatted, `[step_failed] Interaction step failed: ${detail}`);
 });
 
 test("isOptimizeDepsChurn recognises outdated optimize dep messages", () => {

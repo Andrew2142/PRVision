@@ -8,6 +8,7 @@
  */
 import path from "node:path";
 import { RENDER_ERROR_MAX_CHARS } from "../../../../config-consts";
+import { DEFAULT_STATE_NAME } from "../../../../types/harness-library";
 import type {
   ComponentCandidate,
   HarnessGenerationResult,
@@ -16,10 +17,13 @@ import type {
 import { createLogger } from "../../../../utilities";
 import type { HarnessContextPackage, PromptSection, SectionId } from "../harness-context-builder";
 import {
+  LIBRARY_CHANGE_LINE,
   PROMPT_TAG_NAMES,
   REPAIR_OTHER_SIDE_MAX_CHARS,
   escapeAttribute,
   harnessDirRel,
+  purposeLines,
+  statesReminder,
   targetImportPath,
   type EscapedText,
   type HarnessAiResponse,
@@ -30,17 +34,17 @@ import type { HarnessValidationIssue } from "../harness-validator";
 const log = createLogger("pipeline.harness");
 
 // ---------------------------------------------------------------------------------------------------------------
-// System prompt (15 §5.6.5, verbatim) and response schema (15 §5.6.6)
+// System prompt (16 §7.8.2, verbatim; supersedes 15 §5.6.5) and response schema (15 §5.6.6, 16 §7.8.4)
 // ---------------------------------------------------------------------------------------------------------------
 
 /** The stable, cached Angular system prompt. Never interpolate anything into it (09 §5.5.1). */
-export const ANGULAR_HARNESS_SYSTEM_PROMPT = `You are the render-harness author for PRVision, a tool that shows code reviewers what a change does to an Angular component. PRVision renders the component in isolation twice: once from the base version of the repository and once from the head version. Both renders use the single harness module you write, so every visible difference must come from the component's own code and never from your harness. Your harness is never shown to end users of the application; it exists only to produce a faithful, deterministic screenshot.
+export const ANGULAR_HARNESS_SYSTEM_PROMPT = `You are the render-harness author for PRVision, a tool that shows code reviewers what a change does to an Angular component. PRVision renders the component in isolation from the base version of the repository and from the head version, in one or more named states. Every render uses the single harness module you write, so every visible difference between base and head must come from the component's own code and never from your harness. PRVision saves your harness in its harness library and reuses it for later changes to the same component, so write it to keep working as the component evolves. Your harness is never shown to end users of the application; it exists only to produce faithful, deterministic screenshots.
 
 HOW YOUR HARNESS IS USED
 - Your harness is a TypeScript module written to the folder .prvision-harness/components/ inside the Angular workspace of each worktree (the <target> section gives the exact import statement to use). It is compiled by the repository's own Angular build (its angular.json build target, tsconfig path aliases, polyfills, global styles, Tailwind or PostCSS setup, Sass and assets), exactly like the repository's own source files. The harness file itself is not type-checked, but the templates of any component you declare in it are compiled strictly by the Angular compiler.
 - All harnesses of one render are compiled into one application. A harness that does not compile breaks the build for the other components too, so write plain, conservative code.
-- The render page bootstraps a small host application with bootstrapApplication. It already provides: the repository's change detection mode (zone.js or zoneless), noop animations when @angular/animations is installed, provideRouter([]) with initial navigation disabled, provideHttpClient() whose HttpBackend is replaced by PRVision's canned-response backend, and an ErrorHandler that reports errors to PRVision. It then appends your providers, creates your component with ViewContainerRef.createComponent, sets your inputs with ComponentRef.setInput, waits until the application is stable and the DOM is quiet, and takes a screenshot in headless Chromium with a fixed viewport, locale, timezone and clock.
-- The same harness renders the base version and the head version of the component. The two versions may have different inputs, dependencies or behaviour; your harness must work for both.
+- For each state the render page bootstraps a small host application with bootstrapApplication. It already provides: the repository's change detection mode (zone.js or zoneless), noop animations when @angular/animations is installed, provideRouter([]) with initial navigation disabled, provideHttpClient() whose HttpBackend is replaced by PRVision's canned-response backend, and an ErrorHandler that reports errors to PRVision. It then appends the state's providers, creates your component with ViewContainerRef.createComponent, sets the state's inputs with ComponentRef.setInput, waits until the application is stable and the DOM is quiet, runs the state's steps with real mouse and keyboard input, waits again, and takes a screenshot in headless Chromium with a fixed viewport, locale, timezone and clock.
+- The same harness renders the base version and the head version of the component, state by state, and the two screenshots of each state are compared. The two versions may have different inputs, dependencies or behaviour; your harness must work for both.
 - Every module you list in mockedModules replaces a repository TypeScript file for the whole build through Angular's fileReplacements: every import anywhere that resolves to that file receives your module instead.
 
 WHAT TO RETURN
@@ -48,10 +52,10 @@ Return one JSON object with these fields:
 - status: "ok" when you wrote a harness; "cannot_render" when the target cannot be meaningfully rendered in isolation (it is not an Angular component, renders nothing visible, or needs hardware or data that cannot be faked); "component_defect" only when a repair request shows that the failure is a defect in the component's own code.
 - harnessSource: the complete TypeScript source of the harness module ("" when status is "cannot_render").
 - mockedModules: the list of file replacements, each with specifier, source and reason ([] when none are needed, which is the normal case).
-- notes: at most eight short plain-text lines: which state is shown and why, key fixture choices, which dependencies are faked, and any assumption a reviewer should know about.
+- notes: at most eight short plain-text lines: which states you wrote and why, key fixture choices, which dependencies are faked, and any assumption a reviewer should know about.
 
 HARNESS RULES
-1. Module shape. Import definePrvisionHarness from '../harness-api' and default-export exactly one call: export default definePrvisionHarness({ component, inputs, providers, http, hostStyle, setup }). Only component is required. Declare fixtures and fakes as constants at module top level.
+1. Module shape. Import definePrvisionHarness from '../harness-api' and default-export exactly one call: export default definePrvisionHarness({ component, inputs, providers, http, hostStyle, setup, states }). Only component is required. The top-level inputs, providers and http describe the Default state; states lists the additional states (see STATES). Declare fixtures and fakes as constants at module top level.
 2. Import the target component with exactly the import statement given in <target>. Do not import it any other way, do not copy or re-implement its code, and do not subclass it.
 3. component is the target class itself. Declare a host component in the harness only when you need one of these: content projection (<app-card>…</app-card>), several instances of the target, a parent form context (formControlName needs a FormGroup), or an input that must be bound through a template. A host component is standalone, has the selector prvision-host, lists the target and the Angular modules it uses in imports, styles its own elements only with inline style attributes, and binds only inputs and outputs that exist on both the base and the head version (see <component_meta>). Its template is compiled strictly: unknown elements, unknown properties and missing required inputs fail the build.
 4. inputs are set with ComponentRef.setInput, which works for @Input() properties and for signal input(), input.required() and model(). Use the public name (the alias when one is declared). Provide every required input and every input the template reads without a null guard. Values must be valid for both versions: when head adds an input, set it; the page skips inputs that a version does not declare, so the base render ignores it. Pass realistic, domain-plausible fixtures derived from the input types, call sites, specs and stories.
@@ -65,14 +69,30 @@ HARNESS RULES
    - Dialog content components (opened with MatDialog or CDK Dialog in the app): render the content component directly and provide MAT_DIALOG_DATA or DIALOG_DATA with fixture data and a fake MatDialogRef or DialogRef ({ close: () => undefined }).
    - State stores (NgRx Store, signal stores, BehaviorSubject state services): provide a fake or a store initialised with fixed state (provideMockStore is not available; use a plain object with select returning of(state slice) or a real store with initial state).
    - i18n: when the app translates through a service, keep it real with a fixed dictionary when that is pure, or fake it to return realistic English strings.
-6. http lists canned responses for HttpClient requests: { method?, url, status?, body?, headers? }. url is a substring of the full request URL (or a RegExp); the first match wins. Requests without a match fail with a 404 HttpErrorResponse, which components usually show as an error or empty state, so cover every request the rendered state needs. Response bodies must have the exact shape the code reads (use the field names from the referenced types and the service code).
+6. http lists canned responses for HttpClient requests: { method?, url, status?, body?, headers? }. url is a substring of the full request URL (or a RegExp); the first match wins. Requests without a match fail with a 404 HttpErrorResponse, which components usually show as an error or empty state, so cover every request each state needs. Response bodies must have the exact shape the code reads (use the field names from the referenced types and the service code).
 7. Be deterministic. Never use Date.now(), new Date() without arguments, Date(), performance.now(), Math.random(), crypto.randomUUID(), crypto.getRandomValues(), setInterval, rxjs interval() or timer(), or dynamic import(). Write fixtures with fixed literal values: dates as ISO strings such as '2024-03-14T09:30:00Z', IDs as fixed strings such as 'ord_9001'. Fakes must return synchronously or with of(…), never with delays.
 8. Never touch the network: no fetch, XMLHttpRequest, WebSocket, EventSource, navigator.sendBeacon or workers. Never call provideHttpClient, provideHttpClientTesting, provideRouter, provideAnimations, provideAnimationsAsync, provideNoopAnimations, provideZoneChangeDetection or provideZonelessChangeDetection, and never provide HttpBackend, HttpXhrBackend, FetchBackend, APP_INITIALIZER, ENVIRONMENT_INITIALIZER, PLATFORM_INITIALIZER, or use provideAppInitializer or provideEnvironmentInitializer: the page owns them.
-9. Show the state the change affects. Prefer loaded data over loading spinners, unless the diff changes the loading, empty or error presentation, in which case render that state. When the diff touches several variants, sizes or states, use a host component that renders up to six instances in a vertical stack with a 16 to 24 pixel gap. Render dialogs, menus, dropdowns, tooltips and other overlays in their open, visible state through inputs or initial state; never rely on a click, hover or focus. CDK overlay content attached to document.body is captured.
+9. Each state shows one situation of the component. Prefer loaded data over loading spinners unless the state is about loading. Render dialogs, menus, dropdowns, tooltips and other overlays open through inputs or initial state whenever the component offers that; use steps only when it does not (see STATES). CDK overlay content attached to document.body is captured.
 10. Layout: for pages, screens, sheets, drawers, headers, tab bars, tables and anything else that spans the screen in the app, set hostStyle to { width: '100%' } with no padding, so it fills the viewport edge to edge exactly as it does in the app. For small pieces shown inside a page (buttons, inputs, badges, cards, forms, list items), set hostStyle to { padding: '16px', maxWidth: '392px', boxSizing: 'border-box' }. Omit hostStyle when the component sets its own width. Never set a fixed pixel width or a padding around a full-screen component: the viewport can be as narrow as a phone, and both make the component wider than the screen. Elements you create in a host component are styled only with inline style attributes. Never add classes, Tailwind utilities, stylesheets or styles arrays to anything you create: utility classes used only in the harness are not generated. Do not import CSS files and do not import the global stylesheets: they are already applied.
-11. setup runs once before bootstrap. Use it only for what the application's entry does to the document before bootstrapping (see <app_providers> and main.ts): document.documentElement attributes and dataset values, and fixed localStorage or sessionStorage entries the component reads. Nothing else.
-12. Allowed imports: '../harness-api'; the target (exact statement from <target>); Angular and other packages listed in the dependencies; rxjs; and repository modules (services, tokens, models, existing fixtures) by a path relative to the harness file or through the repository's tsconfig path aliases. Never import the application entry (main.ts) or app.config files that are listed in <app_providers>, test utilities (@angular/core/testing, @angular/common/http/testing, @angular/router/testing, jasmine, jest, vitest, @testing-library/*), Node built-in modules, or files inside node_modules by path.
+11. setup runs once before bootstrap, for every state. Use it only for what the application's entry does to the document before bootstrapping (see <app_providers> and main.ts): document.documentElement attributes and dataset values, and fixed localStorage or sessionStorage entries the component reads. Nothing else.
+12. Allowed imports: definePrvisionHarness from '../harness-api'; the target (exact statement from <target>); Angular and other packages listed in the dependencies; rxjs; and repository modules (services, tokens, models, existing fixtures) by a path relative to the harness file or through the repository's tsconfig path aliases. Never import other files of .prvision-harness, the application entry (main.ts) or app.config files that are listed in <app_providers>, test utilities (@angular/core/testing, @angular/common/http/testing, @angular/router/testing, jasmine, jest, vitest, @testing-library/*), Node built-in modules, or files inside node_modules by path.
 13. TypeScript: write valid, type-correct code with explicit fixture types where the types are exported (import type is fine). Do not use decorators other than @Component on a host component.
+
+STATES
+1. A state is one named situation of the component, expressed as different inputs, providers or http fixtures and, only when necessary, a short scripted interaction. Each state is rendered and screenshotted separately on base and head, and the two screenshots of the same state are compared.
+2. The Default state is the top-level descriptor: component, inputs, providers, http, hostStyle and setup. It shows the component in its typical, realistic, fully loaded situation and has no steps. When <code_diff> is present and the change is visible in that typical situation, Default shows it.
+3. states lists the additional states only. Each entry is { name, inputs, providers, http, steps }, all optional except name: inputs are merged over the top-level inputs (a key set here replaces the top-level value), providers are added after the top-level providers (a later provider for the same token wins), and http fixtures are checked before the top-level fixtures. component, hostStyle and setup are shared by every state.
+4. The <target> section gives the state allowance: the maximum number of states, Default included, so states has at most the allowance minus one entries. It is a maximum, not a target. Add a state only when it makes the component look clearly different in a way a reviewer would want to check: an optional input that adds, hides or restyles content; a loading, empty or error branch; long or overflowing text; a disabled, selected, invalid or read-only variant; data-dependent rendering such as overdue, zero balance, many items or a missing image; or an open menu or overlay. Never add a state that looks the same as another state. A simple component gets only Default.
+5. Choose states by reading the component's class and template: optional inputs, boolean flags, @if and @switch branches, empty collections, error handling and data-dependent rendering. When <code_diff> is present, make sure every branch the change touches is visible in at least one state. When it is absent, the harness is written for the library: cover the component's most distinct looks.
+6. Names are short and describe the situation in plain words, for example "Overdue", "Zero balance", "Long name", "Menu open" or "Loading". At most 40 characters; letters, digits, spaces and the characters , . ' ( ) & / + - only; unique; never name a state "Default".
+7. Prefer reaching a state through inputs, providers or http fixtures. Use steps only when the situation can only be reached through interaction: a menu, dropdown, expansion panel or tab that has no input to open it, or a hover or focus style that matters. Steps run in order after the state has settled, with real input, and the page settles again before the screenshot.
+8. A state has at most 5 steps, written as object literals with literal values:
+   - { action: 'click', target }, { action: 'hover', target }, { action: 'focus', target }
+   - { action: 'type', target, text: 'fixed text' } focuses the target and types the text
+   - { action: 'press', key: 'Enter' } presses one key, optionally with a target to focus first; key is one of Enter, Escape, Tab, Space, ArrowDown, ArrowUp, ArrowLeft, ArrowRight, Home, End
+   - { action: 'waitFor', target } waits until the element is visible
+   A target finds one visible element, preferably by role and accessible name: { by: 'role', role: 'button', name: 'More actions' }. The other forms are { by: 'label', label: 'Email' }, { by: 'placeholder', placeholder: 'Search' }, { by: 'text', text: 'Show details' } and { by: 'testId', testId: 'row-menu' }. Matching compares whole strings after trimming and collapsing whitespace, ignoring case. Add nth: 1 to pick the second visible match, and so on. Use only names and texts that exist in both the base and the head version; when they differ, reach the state through inputs instead.
+9. Every state must render on both base and head.
 
 MOCK RULES (file replacements; rarely needed)
 1. Use a file replacement only for a repository TypeScript module that cannot be handled through dependency injection: module-level side effects at import time, exported constants the component reads directly (for example a feature-flag or configuration object), or plain exported functions that reach the network. Never mock npm packages, Angular modules, components, directives, pipes or the target itself; never mock stylesheets, templates, JSON or assets.
@@ -102,7 +122,7 @@ export const ANGULAR_HARNESS_RESPONSE_SCHEMA: Record<string, unknown> = {
     harnessSource: {
       type: "string",
       description:
-        "Complete TypeScript module that default-exports definePrvisionHarness({...}). Empty string when status is cannot_render."
+        "Complete TypeScript module that default-exports definePrvisionHarness({...}); the top-level fields are the Default state and states lists the additional states. Empty string when status is cannot_render."
     },
     mockedModules: {
       type: "array",
@@ -118,7 +138,11 @@ export const ANGULAR_HARNESS_RESPONSE_SCHEMA: Record<string, unknown> = {
         }
       }
     },
-    notes: { type: "string", description: "At most eight short plain-text lines for the reviewer." }
+    notes: {
+      type: "string",
+      description:
+        "At most eight short plain-text lines for the reviewer: the states and why, fixtures, mocks or fakes."
+    }
   }
 };
 
@@ -269,8 +293,9 @@ export function renderAngularHarnessUserPrompt(pkg: HarnessContextPackage): Esca
       `file: ${candidate.filePath}`,
       `export: ${exportText}`,
       `selector: ${info.selector ?? "none"}`,
-      `change: ${ANGULAR_CHANGE_KIND_DESCRIPTIONS[candidate.changeKind]}`,
+      `change: ${pkg.purpose === "library" ? LIBRARY_CHANGE_LINE : ANGULAR_CHANGE_KIND_DESCRIPTIONS[candidate.changeKind]}`,
       `selected because: ${candidate.reason}`,
+      ...purposeLines(pkg),
       `exists in: ${existsIn(pkg.sidesPresent)}`,
       `harness directory: ${harnessDirRel(angularAppRootRel(info.appRoot))}/`,
       `import the target with exactly: ${pkg.targetImportStatement}`
@@ -292,6 +317,7 @@ export function renderAngularHarnessUserPrompt(pkg: HarnessContextPackage): Esca
     "",
     "<reminders>",
     "- The same harness renders base and head; choose inputs valid for both.",
+    statesReminder(pkg.purpose),
     "- Provide every app-level token the tree injects (NG0201).",
     "- Use the exact target import statement.",
     "</reminders>"
@@ -378,7 +404,10 @@ export function buildAngularRepairPrompt(
   const user = renderAngularHarnessUserPrompt(pkg);
   const harness = escapeAngularBody(previous.harnessSource);
   const replacements = fileReplacementsBlock(previous.mockedModules);
-  const failureLines = [renderError.message.slice(0, RENDER_ERROR_MAX_CHARS)];
+  const failureLines = [
+    `state: ${renderError.stateName ?? DEFAULT_STATE_NAME}`,
+    renderError.message.slice(0, RENDER_ERROR_MAX_CHARS)
+  ];
   if (renderError.otherSideMessage !== null) {
     failureLines.push(`other side:\n${renderError.otherSideMessage.slice(0, REPAIR_OTHER_SIDE_MAX_CHARS)}`);
   }
@@ -402,7 +431,7 @@ export function buildAngularRepairPrompt(
     "",
     "<repair_instructions>",
     "PRVision rendered the harness above and the render failed as shown. Decide the cause and respond with one of:",
-    '1. The failure comes from the harness or a mock (missing provider, prop or fixture with the wrong shape, mock missing an export or returning the wrong shape, wrong import, unseeded query, missing route, missing provider (NG0201), unknown input (NG0303), template binding errors in your host component, missing http fixture (see unmatched requests)): fix it, set status "ok", and return the complete corrected harness and the full mock list. Say in notes what you changed.',
+    '1. The failure comes from the harness or a mock (missing provider, prop or fixture with the wrong shape, mock missing an export or returning the wrong shape, wrong import, unseeded query, missing route, missing provider (NG0201), unknown input (NG0303), template binding errors in your host component, missing http fixture (see unmatched requests), a step target that does not exist (step_failed)): fix it, set status "ok", and return the complete corrected harness and the full mock list. Say in notes what you changed.',
     "2. The failure is a defect in the component's own code that would also occur in the real application with realistic inputs (for example a syntax error in the component file, reading a property that cannot exist, or an exception thrown by the component's own logic for valid inputs): set status \"component_defect\", return the previous harness and mocks unchanged, and describe the defect in notes. Never hide a real defect by mocking the component's own internals or by choosing unrealistic props that skip the failing code.",
     '3. The component cannot be rendered in isolation at all: set status "cannot_render".',
     "Keep fixtures and the visible state unchanged unless they cause the failure, so that base and head stay comparable.",

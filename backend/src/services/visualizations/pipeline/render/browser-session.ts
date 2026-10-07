@@ -28,23 +28,30 @@ import {
   RENDER_SETTLE_QUIET_MS,
   RENDER_STABILITY_INTERVAL_MS,
   RENDER_STABILITY_MAX_ATTEMPTS,
-  RENDER_VIEWPORT
+  RENDER_VIEWPORT,
+  STATE_STEP_TIMEOUT_MS
 } from "../../../../config-consts";
+import type { HarnessStep, HarnessStepTarget } from "../../../../types/harness-library";
 import { createLogger, getErrorMessage } from "../../../../utilities";
+import { isHarnessStep, stepIssue } from "../harness-states";
 import { blockBrowserContextMediaPermissions, browserContextWithBlockedMedia } from "./browser-media-permissions";
 import {
   buildDeterminismInitScript,
+  buildMarkStepTargetScript,
   COLLECT_TIMEOUT_DIAGNOSTICS_SCRIPT,
   DETECT_STYLESHEET_HEALTH_SCRIPT,
   measureCaptureScript,
   READ_HARNESS_STATE_SCRIPT,
+  SETTLE_AFTER_STEPS_SCRIPT,
   toCaptureMeasurement,
   toHarnessState,
+  toStepMark,
   toStylesheetHealth,
   toTimeoutDiagnostics,
   type CaptureMeasurement,
   type ClipRect,
   type HarnessErrorReport,
+  type HarnessPageState,
   type HarnessState,
   type TimeoutDiagnostics
 } from "./page-scripts";
@@ -184,11 +191,248 @@ export function sameClip(a: ClipRect, b: ClipRect): boolean {
   return a.width === b.width && a.height === b.height; // x and y are always 0 (top-left anchored)
 }
 
-/** `${origin}${harnessUrlPath}?c=<id>&quiet=…&settleMax=…&assetWait=…` (10 §5.7.6). */
-export function harnessUrl(origin: string, harnessUrlPath: string, componentId: number): string {
+/** `${origin}${harnessUrlPath}?c=<id>&quiet=…&settleMax=…&assetWait=…&s=<state>` (10 §5.7.6, 16 §7.6.3). */
+export function harnessUrl(
+  origin: string,
+  harnessUrlPath: string,
+  componentId: number,
+  stateName: string = DEFAULT_PAGE_STATE
+): string {
   return `${origin}${harnessUrlPath}?c=${String(componentId)}&quiet=${String(RENDER_SETTLE_QUIET_MS)}&settleMax=${String(
     RENDER_SETTLE_MAX_MS
-  )}&assetWait=${String(RENDER_ASSET_WAIT_MS)}`;
+  )}&assetWait=${String(RENDER_ASSET_WAIT_MS)}&s=${encodeURIComponent(stateName)}`;
+}
+
+const DEFAULT_PAGE_STATE = "Default";
+const STEP_POLL_INTERVAL_MS = 100;
+const STEP_ERROR_MAX_CHARS = 300;
+/** `settleMax + 2 × assetWait + 1 000` ms (16 §7.6.3 step 4). */
+export const SETTLE_AFTER_STEPS_TIMEOUT_MS = RENDER_SETTLE_MAX_MS + 2 * RENDER_ASSET_WAIT_MS + 1_000;
+
+// ---------------------------------------------------------------------------------------------------------------
+// Scripted steps (16 §7.6.3)
+// ---------------------------------------------------------------------------------------------------------------
+
+/** The part of a Playwright page the state runner uses (a fake page in tests). */
+export interface StatePage {
+  evaluate(expression: string): Promise<unknown>;
+  locator(selector: string): {
+    click(options: { timeout: number }): Promise<void>;
+    hover(options: { timeout: number }): Promise<void>;
+    focus(options: { timeout: number }): Promise<void>;
+  };
+  keyboard: { type(text: string): Promise<void>; press(key: string): Promise<void> };
+}
+
+export interface StateRunInput {
+  /** The state the page was asked for (`s=`). */
+  stateName: string;
+  /** `__PRVISION_STATE__` read with the ready signal; null for pages without it (Default, no steps). */
+  pageState: HarnessPageState | null;
+  /** Page errors so far (count and the latest message). */
+  pageErrors: () => { count: number; last: string | null };
+  stepTimeoutMs: number;
+  settleTimeoutMs: number;
+  signal: AbortSignal;
+  /** True for errors that mean the page or browser is gone; those are rethrown (the session classifies them). */
+  isInfraError: (error: unknown) => boolean;
+}
+
+export type StateRunResult =
+  | { ok: true; stateNames: string[]; stepsRun: number }
+  | { ok: false; kind: "step_failed" | "render_error" | "timeout" | "cancelled"; detail: string };
+
+function describeStepTarget(target: HarnessStepTarget): string {
+  const nth = target.nth !== undefined && target.nth > 0 ? ` nth=${String(target.nth)}` : "";
+  switch (target.by) {
+    case "role":
+      return `role=${target.role} ${JSON.stringify(target.name)}${nth}`;
+    case "text":
+      return `text ${JSON.stringify(target.text)}${nth}`;
+    case "label":
+      return `label ${JSON.stringify(target.label)}${nth}`;
+    case "placeholder":
+      return `placeholder ${JSON.stringify(target.placeholder)}${nth}`;
+    case "testId":
+      return `testId ${JSON.stringify(target.testId)}${nth}`;
+  }
+}
+
+/** Short step description for error messages: `click role=button "More actions"`. */
+export function describeStepForError(step: HarnessStep): string {
+  if (step.action === "press") {
+    return step.target === undefined ? `press ${step.key}` : `press ${step.key} ${describeStepTarget(step.target)}`;
+  }
+  return `${step.action} ${describeStepTarget(step.target)}`;
+}
+
+function firstLine(text: string, max: number): string {
+  const line = (text.split("\n")[0] ?? "").trim();
+  return line.length > max ? line.slice(0, max) : line;
+}
+
+function seconds(ms: number): string {
+  return String(Math.round((ms / 1000) * 10) / 10);
+}
+
+/**
+ * Checks the state the page selected, runs its scripted steps with real Playwright input and settles the page
+ * again (16 §7.6.3 steps 1–5). Never throws except for infrastructure errors (`isInfraError`).
+ *
+ * @param page - The page (after the ready signal).
+ * @param input - Requested state, page state, error counter, timeouts and the abort signal.
+ * @returns ok with the page's state names and steps run, or a classified failure detail.
+ */
+export async function runHarnessState(page: StatePage, input: StateRunInput): Promise<StateRunResult> {
+  const reported = input.pageState?.name ?? DEFAULT_PAGE_STATE;
+  if (reported !== input.stateName) {
+    return {
+      ok: false,
+      kind: "render_error",
+      detail: `Harness reported state ${reported}, expected ${input.stateName}`
+    };
+  }
+  const stateNames = input.pageState === null ? [DEFAULT_PAGE_STATE] : input.pageState.names;
+  const rawSteps = input.pageState?.steps ?? [];
+  const steps: HarnessStep[] = [];
+  for (const [index, raw] of rawSteps.entries()) {
+    if (!isHarnessStep(raw)) {
+      return {
+        ok: false,
+        kind: "step_failed",
+        detail: `State "${input.stateName}", step ${String(index + 1)}: ${stepIssue(raw) ?? "the step is not valid"}.`
+      };
+    }
+    steps.push(raw);
+  }
+  const errorsBefore = input.pageErrors().count;
+  const errorAfter = (stepNumber: number): StateRunResult | null => {
+    const errors = input.pageErrors();
+    if (errors.count <= errorsBefore) {
+      return null;
+    }
+    return {
+      ok: false,
+      kind: "render_error",
+      detail: `State "${input.stateName}": error after step ${String(stepNumber)}: ${errors.last ?? "unknown error"}`
+    };
+  };
+  for (const [index, step] of steps.entries()) {
+    if (input.signal.aborted) {
+      return { ok: false, kind: "cancelled", detail: "Cancelled." };
+    }
+    const label = `State "${input.stateName}", step ${String(index + 1)} (${describeStepForError(step)})`;
+    const token = `s${String(index)}`;
+    const target = step.target;
+    try {
+      if (target !== undefined) {
+        const found = await resolveStepTarget(page, target, token, input);
+        if (found !== "found") {
+          return {
+            ok: false,
+            kind: found === "cancelled" ? "cancelled" : "step_failed",
+            detail:
+              found === "no_bridge"
+                ? `${label}: the harness page cannot run steps (no step runtime).`
+                : `${label}: no visible element matched within ${seconds(input.stepTimeoutMs)} s.`
+          };
+        }
+      }
+      const locator = page.locator(`[data-prvision-step-target="${token}"]`);
+      const options = { timeout: input.stepTimeoutMs };
+      switch (step.action) {
+        case "click":
+          await locator.click(options);
+          break;
+        case "hover":
+          await locator.hover(options);
+          break;
+        case "focus":
+          await locator.focus(options);
+          break;
+        case "type":
+          await locator.focus(options);
+          await page.keyboard.type(step.text);
+          break;
+        case "press":
+          if (step.target !== undefined) {
+            await locator.focus(options);
+          }
+          await page.keyboard.press(step.key === "Space" ? " " : step.key);
+          break;
+        case "waitFor":
+          break;
+      }
+    } catch (error: unknown) {
+      if (input.isInfraError(error)) {
+        throw error;
+      }
+      return {
+        ok: false,
+        kind: "step_failed",
+        detail: `${label}: ${firstLine(getErrorMessage(error), STEP_ERROR_MAX_CHARS)}`
+      };
+    }
+    const failure = errorAfter(index + 1);
+    if (failure !== null) {
+      return failure;
+    }
+  }
+  if (steps.length > 0) {
+    let settled: boolean;
+    try {
+      settled = await Promise.race([
+        (async (): Promise<boolean> => {
+          await page.evaluate(SETTLE_AFTER_STEPS_SCRIPT);
+          return true;
+        })(),
+        delay(input.settleTimeoutMs, false, { ref: false })
+      ]);
+    } catch (error: unknown) {
+      if (input.isInfraError(error)) {
+        throw error;
+      }
+      return { ok: false, kind: "render_error", detail: `State "${input.stateName}": ${getErrorMessage(error)}` };
+    }
+    if (!settled) {
+      return {
+        ok: false,
+        kind: "timeout",
+        detail: `State "${input.stateName}": the page did not settle within ${String(input.settleTimeoutMs)} ms after its steps.`
+      };
+    }
+    const failure = errorAfter(steps.length);
+    if (failure !== null) {
+      return failure;
+    }
+  }
+  return { ok: true, stateNames, stepsRun: steps.length };
+}
+
+async function resolveStepTarget(
+  page: StatePage,
+  target: HarnessStepTarget,
+  token: string,
+  input: StateRunInput
+): Promise<"found" | "missing" | "no_bridge" | "cancelled"> {
+  const deadline = Date.now() + input.stepTimeoutMs;
+  const script = buildMarkStepTargetScript(target, token);
+  for (;;) {
+    if (input.signal.aborted) {
+      return "cancelled";
+    }
+    const mark = toStepMark(await page.evaluate(script));
+    if (!mark.bridge) {
+      return "no_bridge";
+    }
+    if (mark.found) {
+      return "found";
+    }
+    if (Date.now() >= deadline) {
+      return "missing";
+    }
+    await delay(STEP_POLL_INTERVAL_MS);
+  }
 }
 
 function stripQuery(url: string): string {
@@ -217,6 +461,9 @@ type HarnessSignal =
 interface PageEvidence {
   /** Angular harness: requests without an HTTP fixture, from the last harness state read (15 §5.7.4). */
   httpUnmatched: string[];
+  /** Uncaught page errors (count and latest message), for errors raised by scripted steps (16 §7.6.3). */
+  pageErrorCount: number;
+  lastPageError: string | null;
   consoleErrors: string[];
   serverErrors: string[];
   firstModuleErrorAt: number | null;
@@ -372,7 +619,7 @@ export class BrowserSession {
       const page = await this.preparePage(context, input, evidence, remaining());
 
       try {
-        await page.goto(harnessUrl(input.host.origin, input.host.harnessUrlPath, input.componentId), {
+        await page.goto(harnessUrl(input.host.origin, input.host.harnessUrlPath, input.componentId, input.stateName), {
           waitUntil: "domcontentloaded",
           timeout: remaining()
         });
@@ -423,6 +670,23 @@ export class BrowserSession {
       }
       const harnessState = signal.state;
 
+      // Scripted steps of the state (16 §7.6.3), then capture.
+      const stateRun = await runHarnessState(page, {
+        stateName: input.stateName,
+        pageState: harnessState.state,
+        pageErrors: () => ({ count: evidence.pageErrorCount, last: evidence.lastPageError }),
+        stepTimeoutMs: Math.min(STATE_STEP_TIMEOUT_MS, remaining()),
+        settleTimeoutMs: SETTLE_AFTER_STEPS_TIMEOUT_MS,
+        signal: input.signal,
+        isInfraError: (error) => evidence.crashed || isClosedError(error)
+      });
+      if (!stateRun.ok) {
+        if (stateRun.kind === "cancelled" || isAborted(input.signal)) {
+          return cancelledOutcome();
+        }
+        return fail(stateRun.kind, stateRun.detail);
+      }
+
       // Capture.
       let captured: { buffer: Buffer; measurement: CaptureMeasurement; stable: boolean };
       try {
@@ -469,7 +733,9 @@ export class BrowserSession {
         stylesheetWarning,
         unstable: harnessState.unstable,
         skippedInputs: harnessState.skippedInputs,
-        httpUnmatched: harnessState.httpUnmatched
+        httpUnmatched: harnessState.httpUnmatched,
+        stateNames: stateRun.stateNames,
+        stepsRun: stateRun.stepsRun
       };
     } catch (error) {
       if (isAborted(input.signal)) {
@@ -578,6 +844,8 @@ export class BrowserSession {
       );
     });
     page.on("pageerror", (error) => {
+      evidence.pageErrorCount += 1;
+      evidence.lastPageError = capText(error.message, RENDER_CONSOLE_ERROR_MAX_CHARS);
       pushCapped(evidence.consoleErrors, `pageerror: ${error.message}`);
     });
     page.on("response", (response: Response) => {
@@ -868,6 +1136,8 @@ function isAborted(signal: AbortSignal): boolean {
 function newEvidence(): PageEvidence {
   return {
     httpUnmatched: [],
+    pageErrorCount: 0,
+    lastPageError: null,
     consoleErrors: [],
     serverErrors: [],
     firstModuleErrorAt: null,

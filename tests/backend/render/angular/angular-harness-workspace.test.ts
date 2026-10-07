@@ -163,6 +163,7 @@ test("AngularHarnessWorkspaceWriter.prepareSide writes templates, index, tsconfi
   for (const file of ["main.ts", "harness-api.ts", "http-backend.ts"]) {
     write(path.join(templates, file), `// ${file}\n`);
   }
+  write(path.join(root, "shared", "prvision-steps.ts"), "// prvision-steps.ts\n");
   const worktree = path.join(root, "worktree");
   const app = path.join(worktree, "apps", "web");
   write(path.join(app, "src", "index.html"), APP_INDEX);
@@ -200,6 +201,7 @@ test("AngularHarnessWorkspaceWriter.prepareSide writes templates, index, tsconfi
     "main.ts",
     "harness-api.ts",
     "http-backend.ts",
+    "prvision-steps.ts",
     "index.html",
     "tsconfig.json",
     "framework.generated.ts",
@@ -244,6 +246,9 @@ test("AngularHarnessWorkspaceWriter.prepareSide warns when the index is missing;
   for (const file of ["main.ts", "harness-api.ts", "http-backend.ts"]) {
     write(path.join(templates, file), "\n");
   }
+  // 16 §7.5: the shared step runtime (<templates>/../shared) is required too.
+  await assert.rejects(assertAngularTemplatesPresent(templates), AngularTemplatesMissingError);
+  write(path.join(root, "shared", "prvision-steps.ts"), "\n");
   await assertAngularTemplatesPresent(templates);
   const worktree = path.join(root, "wt");
   write(path.join(worktree, "tsconfig.app.json"), "{}");

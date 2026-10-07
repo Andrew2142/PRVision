@@ -65,7 +65,7 @@ const PIPELINE_STAGES = [
 const STEP_USAGE = { inputTokens: 100, outputTokens: 50, calls: 1 };
 
 // ---------------------------------------------------------------------------------------------------------------
-// Hand-written harnesses (09 rules: default export PRVisionHarness, exact target import, inline styles only)
+// Hand-written harnesses (16 §7.3 shape: definePrvisionHarness with a Default state, exact target import, inline styles only)
 // ---------------------------------------------------------------------------------------------------------------
 
 const NOOP = "const noop = (): void => {};\n";
@@ -82,10 +82,11 @@ const HARNESSES: Record<string, ScriptedHarness> = {
   Button: {
     importStatement: `import Button from "../../src/components/Button";`,
     harnessSource: `import type { ReactElement } from "react";
+import { definePrvisionHarness } from "../harness-api";
 import Button from "../../src/components/Button";
 
 ${NOOP}
-export default function PRVisionHarness(): ReactElement {
+function DefaultState(): ReactElement {
   return (
     <div style={{ padding: 24, width: 360, display: "flex", flexDirection: "column", gap: 16, alignItems: "flex-start" }}>
       <Button variant="primary" onClick={noop}>Save changes</Button>
@@ -93,6 +94,8 @@ export default function PRVisionHarness(): ReactElement {
     </div>
   );
 }
+
+export default definePrvisionHarness({ states: [{ name: "Default", render: DefaultState }] });
 `,
     mockedModules: [],
     notes: "Primary and secondary variants."
@@ -100,16 +103,19 @@ export default function PRVisionHarness(): ReactElement {
   Card: {
     importStatement: `import Card from "../../src/components/Card";`,
     harnessSource: `import type { ReactElement } from "react";
+import { definePrvisionHarness } from "../harness-api";
 import Card from "../../src/components/Card";
 
 ${NOOP}
-export default function PRVisionHarness(): ReactElement {
+function DefaultState(): ReactElement {
   return (
     <div style={{ padding: 24, width: 360 }}>
       <Card title="Quarterly report" description="Revenue grew 12% over the last quarter." actionLabel="Open report" status="new" onAction={noop} />
     </div>
   );
 }
+
+export default definePrvisionHarness({ states: [{ name: "Default", render: DefaultState }] });
 `,
     mockedModules: [],
     notes: "Card with the new status badge (base ignores the status prop)."
@@ -117,9 +123,10 @@ export default function PRVisionHarness(): ReactElement {
   Badge: {
     importStatement: `import { Badge } from "../../src/components/Badge";`,
     harnessSource: `import type { ReactElement } from "react";
+import { definePrvisionHarness } from "../harness-api";
 import { Badge } from "../../src/components/Badge";
 
-export default function PRVisionHarness(): ReactElement {
+function DefaultState(): ReactElement {
   return (
     <div style={{ padding: 24, width: 360, display: "flex", gap: 8 }}>
       <Badge tone="neutral">Draft</Badge>
@@ -128,6 +135,8 @@ export default function PRVisionHarness(): ReactElement {
     </div>
   );
 }
+
+export default definePrvisionHarness({ states: [{ name: "Default", render: DefaultState }] });
 `,
     mockedModules: [],
     notes: "All three tones."
@@ -135,6 +144,7 @@ export default function PRVisionHarness(): ReactElement {
   UserMenu: {
     importStatement: `import UserMenu from "../../src/components/UserMenu";`,
     harnessSource: `import type { ReactElement } from "react";
+import { definePrvisionHarness } from "../harness-api";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import UserMenu from "../../src/components/UserMenu";
@@ -159,7 +169,7 @@ queryClient.setQueryData(["auth", "me"], {
   email: "ada@example.com"
 });
 
-export default function PRVisionHarness(): ReactElement {
+function DefaultState(): ReactElement {
   return (
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={["/dashboard"]}>
@@ -170,6 +180,8 @@ export default function PRVisionHarness(): ReactElement {
     </QueryClientProvider>
   );
 }
+
+export default definePrvisionHarness({ states: [{ name: "Default", render: DefaultState }] });
 `,
     mockedModules: [],
     notes: "Signed-in user seeded into the react-query cache under [auth, me]."
@@ -178,15 +190,18 @@ export default function PRVisionHarness(): ReactElement {
   Notes: {
     importStatement: `import Notes from "../../src/pages/Notes";`,
     harnessSource: `import type { ReactElement } from "react";
+import { definePrvisionHarness } from "../harness-api";
 import Notes from "../../src/pages/Notes";
 
-export default function PRVisionHarness(): ReactElement {
+function DefaultState(): ReactElement {
   return (
     <div style={{ width: 560 }}>
       <Notes />
     </div>
   );
 }
+
+export default definePrvisionHarness({ states: [{ name: "Default", render: DefaultState }] });
 `,
     mockedModules: [],
     notes: "The notes page."
@@ -194,16 +209,19 @@ export default function PRVisionHarness(): ReactElement {
   NoteFormModal: {
     importStatement: `import { NoteFormModal } from "../../src/components/notes/NoteFormModal";`,
     harnessSource: `import type { ReactElement } from "react";
+import { definePrvisionHarness } from "../harness-api";
 import { NoteFormModal } from "../../src/components/notes/NoteFormModal";
 
 ${NOOP}
-export default function PRVisionHarness(): ReactElement {
+function DefaultState(): ReactElement {
   return (
     <div style={{ padding: 24, width: 480 }}>
       <NoteFormModal title="Add a note" onSave={noop} onClose={noop} />
     </div>
   );
 }
+
+export default definePrvisionHarness({ states: [{ name: "Default", render: DefaultState }] });
 `,
     mockedModules: [],
     notes: "The note dialog."
@@ -211,16 +229,19 @@ export default function PRVisionHarness(): ReactElement {
   NoteForm: {
     importStatement: `import { NoteForm } from "../../src/components/notes/NoteForm";`,
     harnessSource: `import type { ReactElement } from "react";
+import { definePrvisionHarness } from "../harness-api";
 import { NoteForm } from "../../src/components/notes/NoteForm";
 
 ${NOOP}
-export default function PRVisionHarness(): ReactElement {
+function DefaultState(): ReactElement {
   return (
     <div style={{ padding: 24, width: 480 }}>
       <NoteForm title="Add a note" onSave={noop} />
     </div>
   );
 }
+
+export default definePrvisionHarness({ states: [{ name: "Default", render: DefaultState }] });
 `,
     mockedModules: [],
     notes: "The inline note form."
@@ -460,7 +481,7 @@ describe("pipeline end to end (real git, Vite, Chromium and Postgres; scripted A
       assert.equal(typeof c.changeReason, "string", `${label} changeReason`);
       assert.equal(c.baseError, null, `${label} baseError`);
       assert.equal(c.headError, null, `${label} headError`);
-      assert.ok(String(c.harnessSource).includes("PRVisionHarness"), `${label} harness persisted`);
+      assert.ok(String(c.harnessSource).includes("definePrvisionHarness"), `${label} harness persisted`);
       assert.equal(c.headImagePath, artifactPath(visualizationId, c.id, "head"), `${label} head image path`);
       assert.ok(fs.existsSync(path.join(DATA_DIR, c.headImagePath)), `${label} head.png on disk`);
       assert.ok(Number(c.imageWidth) > 0 && Number(c.imageHeight) > 0, `${label} image size`);

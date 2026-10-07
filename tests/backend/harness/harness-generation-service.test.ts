@@ -132,7 +132,7 @@ test("asks for one correction when validation fails then persists the fixed harn
   const batch = await service.generateAll([button]);
   assert.equal(batch.results.length, 1);
   const correction = ai.callsFor("harness_repair")[0];
-  assert.ok(correction?.prompt.includes("<validation_errors>\n- [default_export_wrong_name]"));
+  assert.ok(correction?.prompt.includes("<validation_errors>\n- [harness_shape]"));
   assert.ok(correction?.prompt.includes("<previous_response>"));
   assert.ok(
     console.has("warn", "Harness for Button failed static checks (1 issues); asking the AI to correct it.", STAGE)
@@ -156,7 +156,7 @@ test("fails component as invalid_harness after failed correction and keeps last 
       componentId: 1,
       kind: "invalid_harness",
       aiReason: null,
-      message: "AI harness failed static checks: default_export_wrong_name"
+      message: "AI harness failed static checks: harness_shape"
     }
   ]);
   const row = db.row(Table.VISUALIZATION_COMPONENTS, 1);
@@ -165,15 +165,12 @@ test("fails component as invalid_harness after failed correction and keeps last 
   assert.deepEqual(row.mockedModules, []);
   assert.match(
     String(row.harnessNotes),
-    /^Harness generation failed: AI harness failed static checks: default_export_wrong_name\n- \[default_export_wrong_name\] /
+    /^Harness generation failed: AI harness failed static checks: harness_shape\n- \[harness_shape\] /
   );
   assert.equal(row.baseError, NOT_RENDERED);
   assert.equal(row.headError, NOT_RENDERED);
   assert.ok(
-    console.has(
-      "warn",
-      "Harness generation failed for Button: AI harness failed static checks: default_export_wrong_name"
-    )
+    console.has("warn", "Harness generation failed for Button: AI harness failed static checks: harness_shape")
   );
 });
 

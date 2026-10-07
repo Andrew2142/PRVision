@@ -90,35 +90,35 @@ function pkg(
   };
 }
 
-/** The ```text block under "#### 5.6.5" of sheet 15. */
+/** The first ```text block after the heading "#### 7.8.2" of sheet 16 (supersedes sheet 15 §5.6.5). */
 function specSystemPrompt(): string {
-  const spec = fs.readFileSync(path.join(__dirname, "../../../docs/specs/15-angular-support.md"), "utf8");
-  const start = spec.indexOf("#### 5.6.5");
+  const spec = fs.readFileSync(path.join(__dirname, "../../../docs/specs/16-harness-library.md"), "utf8");
+  const start = spec.indexOf("#### 7.8.2");
   const open = spec.indexOf("```text\n", start) + "```text\n".length;
   const close = spec.indexOf("\n```", open);
   return spec.slice(open, close);
 }
 
-test("Angular system prompt is the sheet 15 §5.6.5 text verbatim", () => {
+test("Angular system prompt is the sheet 16 §7.8.2 text verbatim", () => {
   assert.equal(ANGULAR_HARNESS_SYSTEM_PROMPT, specSystemPrompt());
 });
 
 test("Angular system prompt and schema hashes are pinned", () => {
   assert.equal(
     sha256(ANGULAR_HARNESS_SYSTEM_PROMPT),
-    "e9b46516fabe236b0622edd9e4c3b4f4908874cb4db9de62cac399ba2f51d977"
+    "12244f4629efb88b77744f399ef8127fefe54fb13b4fde048e5b162acfd199ec"
   );
   assert.equal(
     sha256(JSON.stringify(ANGULAR_HARNESS_RESPONSE_SCHEMA)),
-    "6d2b5a5f2a6227044bd7b5ec2204cebc8c173382993537b2d0adcb17aa1d032a"
+    "c3f0f0145310fb8a8e368a5d25e62fc57ebf9c30cc976876838a081b3982db00"
   );
 });
 
-test("React prompt hashes and the React prompt set are unchanged", () => {
-  assert.equal(sha256(HARNESS_SYSTEM_PROMPT), "cb817e8c203a1f2504323ea2c222392410c783efabb743a68405ddc85725ec00");
+test("React prompt set wraps the React constants", () => {
+  assert.equal(sha256(HARNESS_SYSTEM_PROMPT), "1750e77d9c98d45c97952e0c4e17b6e4a07e9ff5d7e880a7830e412ca5c8ebf2");
   assert.equal(
     sha256(JSON.stringify(HARNESS_RESPONSE_SCHEMA)),
-    "d460e3160a12a75bf72bb694e72f47bed9895df20952c55276f4f115a759b1ca"
+    "28a03424e4ac006649b11b392d070fee661bece64acf205079da9eecf61d2042"
   );
   assert.equal(REACT_HARNESS_PROMPTS.system, HARNESS_SYSTEM_PROMPT);
   assert.equal(REACT_HARNESS_PROMPTS.schema, HARNESS_RESPONSE_SCHEMA);
@@ -219,6 +219,8 @@ test("user prompt: Angular target block, sections in package order, Angular remi
     "selector: app-notification-item",
     "change: modified in this change (see code_diff)",
     "selected because: Template changed: notification-item.component.html",
+    "purpose: change review",
+    "state allowance: 1 (maximum number of states, Default included)",
     "exists in: base and head",
     "harness directory: src/tenant-frontend/.prvision-harness/components/",
     `import the target with exactly: import { NotificationItemComponent } from "${IMPORT_PATH}";`
@@ -245,6 +247,7 @@ test("user prompt: Angular target block, sections in package order, Angular remi
       [
         "<reminders>",
         "- The same harness renders base and head; choose inputs valid for both.",
+        "- Default first. Add another state only when it looks clearly different, up to the state allowance. The states must show every branch the change touches.",
         "- Provide every app-level token the tree injects (NG0201).",
         "- Use the exact target import statement.",
         "</reminders>"
@@ -346,13 +349,48 @@ test("repair prompt carries the previous harness, file replacements, render fail
   assert.ok(prompt.includes("<previous_harness>"));
   assert.ok(prompt.includes('<previous_file_replacements>\n<mock specifier="../../flags">'));
   assert.ok(!prompt.includes("<previous_mocks>"));
-  assert.ok(prompt.includes('<render_failure sides="base,head" kind="render_error">'));
+  assert.ok(prompt.includes('<render_failure sides="base,head" kind="render_error">\nstate: Default\nNG0201'));
   assert.ok(prompt.includes("API_AUTH_BRIDGE <\\/render_failure>"));
   assert.ok(prompt.includes("other side:\nNG0201 on the other side"));
   assert.ok(
     prompt.includes(
-      "missing provider (NG0201), unknown input (NG0303), template binding errors in your host component, missing http fixture (see unmatched requests)"
+      "missing provider (NG0201), unknown input (NG0303), template binding errors in your host component, missing http fixture (see unmatched requests), a step target that does not exist (step_failed)"
     )
   );
   assert.ok(prompt.includes('set status "component_defect"'));
+});
+
+test("user prompt: Angular library purpose lines and reminder (16 §7.8.3)", () => {
+  const c = candidate({ changeKind: "added", codeDiff: null, reason: "whole-app scan" });
+  const prompt = buildAngularHarnessUserPrompt(
+    pkg([], { candidate: c, purpose: "library", stateAllowance: 4, sidesPresent: { base: false, head: true } })
+  );
+  const target = prompt.slice(prompt.indexOf("<target>"), prompt.indexOf("</target>"));
+  assert.ok(
+    target.includes("change: none (library harness for an existing component)\nselected because: whole-app scan")
+  );
+  assert.ok(target.includes("purpose: library (no change; write the component's main looks)"));
+  assert.ok(target.includes("state allowance: 4 (maximum number of states, Default included)"));
+  assert.ok(
+    prompt.includes(
+      "- Default first. Add another state only when it looks clearly different, up to the state allowance.\n- Provide every app-level token"
+    )
+  );
+});
+
+test("Angular repair prompt names the failing state", () => {
+  const prompt = buildAngularRepairPrompt(
+    pkg([]),
+    {
+      componentId: 7,
+      harnessSource: "export default definePrvisionHarness({ component: X });",
+      mockedModules: [],
+      notes: "",
+      states: [{ name: "Default", steps: [] }],
+      origin: "written",
+      libraryEntryId: null
+    },
+    { sides: ["head"], kind: "step_failed", message: "step", otherSideMessage: null, stateName: "Actions menu open" }
+  );
+  assert.ok(prompt.includes('<render_failure sides="head" kind="step_failed">\nstate: Actions menu open\nstep'));
 });

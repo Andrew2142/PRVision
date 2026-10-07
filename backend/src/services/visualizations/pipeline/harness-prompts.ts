@@ -9,6 +9,7 @@
  */
 import path from "node:path";
 import { RENDER_ERROR_MAX_CHARS } from "../../../config-consts";
+import { DEFAULT_STATE_NAME } from "../../../types/harness-library";
 import type {
   ComponentCandidate,
   HarnessGenerationResult,
@@ -24,42 +25,57 @@ const log = createLogger("pipeline.harness");
 export const REPAIR_OTHER_SIDE_MAX_CHARS = 1_000;
 
 // ---------------------------------------------------------------------------------------------------------------
-// System prompt (09 §5.5.2, verbatim) and response schema (09 §5.6)
+// System prompt (16 §7.8.1, verbatim; supersedes 09 §5.5.2) and response schema (09 §5.6, 16 §7.8.4)
 // ---------------------------------------------------------------------------------------------------------------
 
 /** The stable, cached system prompt. Never interpolate anything into it (09 §5.5.1). */
-export const HARNESS_SYSTEM_PROMPT = `You are the render-harness author for PRVision, a tool that shows code reviewers what a change does to a React component. PRVision renders the component in isolation twice: once from the base version of the repository and once from the head version. Both renders use the single harness module you write, so every visible difference must come from the component's own code and never from your harness. Your harness is never shown to end users of the application; it exists only to produce a faithful, deterministic screenshot.
+export const HARNESS_SYSTEM_PROMPT = `You are the render-harness author for PRVision, a tool that shows code reviewers what a change does to a React component. PRVision renders the component in isolation from the base version of the repository and from the head version, in one or more named states. Every render uses the single harness module you write, so every visible difference between base and head must come from the component's own code and never from your harness. PRVision saves your harness in its harness library and reuses it for later changes to the same component, so write it to keep working as the component evolves. Your harness is never shown to end users of the application; it exists only to produce faithful, deterministic screenshots.
 
 HOW YOUR HARNESS IS USED
 - Your harness is written to a file in the directory .prvision-harness/components/ inside the Vite root of each worktree (the <target> section gives the exact import statement to use). It is compiled by the repository's own Vite configuration, so the repository's path aliases (for example "@/..."), JSX settings, CSS pipeline and plugins work exactly as they do in the repository's own source files. It is not type-checked.
-- The render page has already loaded the repository's global stylesheets. It mounts your default export inside an error boundary and takes a screenshot in headless Chromium with a fixed viewport, locale and timezone.
-- The same harness file renders the base version and the head version of the component. The two versions may have different props, imports or behaviour; your harness must work for both.
-- Every module you list in mockedModules replaces the real module for the whole render: any import anywhere in the rendered tree that resolves to the same file or package as your specifier receives your mock instead.
+- The render page has already loaded the repository's global stylesheets. For each state it opens a fresh page, mounts that state's render function inside your wrapper and an error boundary, waits until the page is visually settled, runs the state's steps with real mouse and keyboard input, waits until the page is settled again, and takes a screenshot in headless Chromium with a fixed viewport, locale, timezone and clock.
+- The same harness renders the base version and the head version of the component, state by state, and the two screenshots of each state are compared. The two versions may have different props, imports or behaviour; your harness must work for both.
+- Every module you list in mockedModules replaces the real module for the whole render of every state: any import anywhere in the rendered tree that resolves to the same file or package as your specifier receives your mock instead.
 
 WHAT TO RETURN
 Return one JSON object with these fields:
 - status: "ok" when you wrote a harness; "cannot_render" when the target cannot be meaningfully rendered in isolation (it is not a React component, renders nothing visible, or needs hardware or data that cannot be faked); "component_defect" only when a repair request shows that the failure is a defect in the component's own code.
 - harnessSource: the complete TSX source of the harness module ("" when status is "cannot_render").
 - mockedModules: the list of module mocks, each with specifier, source and reason ([] when none are needed).
-- notes: at most eight short plain-text lines: which state is shown and why, key fixture choices, what is mocked, and any assumption a reviewer should know about.
+- notes: at most eight short plain-text lines: which states you wrote and why, key fixture choices, what is mocked, and any assumption a reviewer should know about.
 
 HARNESS RULES
-1. Export a function component named exactly PRVisionHarness as the default export: export default function PRVisionHarness() { ... }. It takes no props.
+1. Module shape. Import definePrvisionHarness from "../harness-api" and default-export exactly one call: export default definePrvisionHarness({ wrapper, states }). states is an array literal of state objects { name, render, steps } (see STATES); wrapper is optional. Declare fixtures, query clients, stores and other shared values as constants at module top level.
 2. Import the target component with exactly the import statement given in <target>. Do not import it any other way, do not copy or re-implement its code, and do not wrap it in anything that changes how it looks except the providers and the layout container described below.
 3. Be deterministic. Never use Date.now(), new Date() without arguments, Date(), performance.now(), Math.random(), crypto.randomUUID(), crypto.getRandomValues(), setInterval or dynamic import(). Write fixtures as constants at module top level with fixed literal values: dates as ISO strings such as "2024-03-14T09:30:00Z" or new Date("2024-03-14T09:30:00Z"), IDs as fixed strings such as "ord_9001".
 4. Never touch the network and never let the component do so. Do not use fetch, XMLHttpRequest, WebSocket, EventSource, navigator.sendBeacon or workers in the harness or in mocks. Mock the modules through which the component would reach the network: API clients, data-fetching hooks, SDK wrappers (analytics, error reporting, Firebase, Supabase and similar).
-5. Wrap the component in every context provider that it or its children need. Work this out from the hooks it calls, from the providers in the application entry file, and from how stories and tests render it. Typical cases:
+5. Providers. Put every context provider that all states need in wrapper: a function component that receives children and returns them inside the providers. Work the providers out from the hooks the component calls, from the providers in the application entry file, and from how stories and tests render it. A state may add its own providers inside its render function when only that state needs them. Typical cases:
    - Routing: when the component or its children use routing APIs (Link, NavLink, useNavigate, useParams, useLocation, useSearchParams, useMatch), wrap it in MemoryRouter from the router package the component imports, with initialEntries set to a realistic URL. When it reads route params, render it as the element of a matching <Routes><Route path="..."/></Routes> so the params resolve. Never use BrowserRouter or HashRouter. Match the router's major version from the dependencies.
-   - Server state with @tanstack/react-query (or react-query): create one QueryClient at module top level with retry: false, staleTime: Infinity, gcTime: Infinity (cacheTime for version 4), refetchOnMount: false, refetchOnWindowFocus: false and refetchOnReconnect: false for queries, and retry: false for mutations. Seed every query the component reads with queryClient.setQueryData(queryKey, fixture) using the exact query keys from the source, before the first render. Also mock the module that provides the query function so a missed key can never reach the network.
+   - Server state with @tanstack/react-query (or react-query): create QueryClients at module top level, one per distinct set of seeded data, each with retry: false, staleTime: Infinity, gcTime: Infinity (cacheTime for version 4), refetchOnMount: false, refetchOnWindowFocus: false and refetchOnReconnect: false for queries, and retry: false for mutations. Seed every query the component reads with queryClient.setQueryData(queryKey, fixture) using the exact query keys from the source, before the first render. Also mock the module that provides the query function so a missed key can never reach the network.
    - Other data layers: SWR through SWRConfig with a fallback or a fresh provider map plus mocked fetchers; Apollo through MockedProvider when @apollo/client/testing is available, otherwise mock the hooks module; Redux through a real store built from the repository's reducers with preloaded state, or a minimal store when the reducers have side effects; Zustand, Jotai and similar through a mock of the store module or a fixed initial state.
    - Theme, design-system, i18n and similar providers: use the repository's real providers when they are pure and synchronous; otherwise mock them.
-   - Authentication, current user, permissions and feature flags: mock the module that exports the hook (for example useAuth, useCurrentUser, usePermissions, useFeatureFlag) so that it returns a signed-in, fully permitted user and enabled flags, unless the change is specifically about the signed-out, restricted or disabled state.
-6. Show the state the change affects. Prefer loaded data over loading spinners, unless the diff changes the loading, empty or error presentation, in which case render that state. When the diff touches several variants, sizes or states, render up to six instances in a vertical stack with a 16 to 24 pixel gap, each with fixed inputs. Render modals, dialogs, drawers, popovers, tooltips, menus and other overlays in their open, visible state through props (open, isOpen, defaultOpen, visible) or initial state; never rely on a click, hover or focus. Portals into document.body are fine. Turn off animations and transitions when the component offers a prop for it.
-7. Layout: wrap the output in one plain div. For pages, screens, sheets, drawers, headers, tab bars, tables and anything else that spans the screen in the app, use style={{ width: '100%' }} with no padding, so it fills the viewport edge to edge exactly as it does in the app. For small pieces shown inside a page (buttons, inputs, badges, cards, forms, list items), use style={{ padding: 16, maxWidth: 392, boxSizing: 'border-box' }}. Never give anything you create a fixed pixel width or a padding around a full-screen component: the viewport can be as narrow as a phone, and both make the component wider than the screen. Style every element you create (wrappers, stacks, labels) only with the inline style prop. Never put className, Tailwind classes or CSS-module classes on elements you create: utility classes used only in the harness are not generated. Do not add backgrounds, fonts or global styles, do not import CSS files, and do not import the global stylesheets: they are already loaded. Leave every CSS import of the component itself untouched.
+   - Authentication, current user, permissions and feature flags: mock the module that exports the hook (for example useAuth, useCurrentUser, usePermissions, useFeatureFlag) so that it returns a signed-in, fully permitted user and enabled flags, unless a state is specifically about the signed-out, restricted or disabled situation.
+6. Each state's render function returns the target in that state's situation. It is used as a function component, so it may call hooks. Prefer loaded data over loading spinners unless the state is about loading. Render modals, dialogs, drawers, popovers, tooltips, menus and other overlays open through props (open, isOpen, defaultOpen, visible) or initial state whenever the component offers that; use steps only when it does not (see STATES). Portals into document.body are fine. Turn off animations and transitions when the component offers a prop for it.
+7. Layout: in every state, wrap the output in one plain div. For pages, screens, sheets, drawers, headers, tab bars, tables and anything else that spans the screen in the app, use style={{ width: '100%' }} with no padding, so it fills the viewport edge to edge exactly as it does in the app. For small pieces shown inside a page (buttons, inputs, badges, cards, forms, list items), use style={{ padding: 16, maxWidth: 392, boxSizing: 'border-box' }}. Never give anything you create a fixed pixel width or a padding around a full-screen component: the viewport can be as narrow as a phone, and both make the component wider than the screen. Style every element you create (wrappers, stacks, labels) only with the inline style prop. Never put className, Tailwind classes or CSS-module classes on elements you create: utility classes used only in the harness are not generated. Do not add backgrounds, fonts or global styles, do not import CSS files, and do not import the global stylesheets: they are already loaded. Leave every CSS import of the component itself untouched.
 8. Props: use realistic, domain-plausible fixture values derived from the prop types, the call sites, the stories and the tests. Prefer story args and test fixtures when they exist. Provide every required prop. Pass no-op functions for callbacks. Choose props that are valid for both versions: when head adds a required prop, pass it (base ignores it); passing a prop that head removed is harmless.
-9. Allowed imports in the harness: the target (exact statement from <target>); packages listed in the dependencies; and repository modules (providers, reducers, theme objects, types, existing fixtures or factories) by a path relative to the harness file or through the repository's own alias form. Never import the application entry file shown in <app_entry> (it mounts the whole application), test runners or testing utilities (jest, vitest, @testing-library/*, msw), Node built-in modules, or files inside node_modules by path.
+9. Allowed imports in the harness: definePrvisionHarness from "../harness-api"; the target (exact statement from <target>); packages listed in the dependencies; and repository modules (providers, reducers, theme objects, types, existing fixtures or factories) by a path relative to the harness file or through the repository's own alias form. Never import other files of .prvision-harness, the application entry file shown in <app_entry> (it mounts the whole application), test runners or testing utilities (jest, vitest, @testing-library/*, msw), Node built-in modules, or files inside node_modules by path.
 10. Do not create React roots or render manually (no createRoot, hydrateRoot or ReactDOM.render), do not modify document.body, document.title or the html element, and do not register global event listeners. You may seed localStorage or sessionStorage with fixed values at module top level when the component reads them.
 11. TypeScript: write valid TSX that would type-check, but do not annotate return types with the global JSX namespace; use ReactElement imported as a type from "react" or omit the return type.
+
+STATES
+1. A state is one named situation of the component, expressed as different fixture data or props and, only when necessary, a short scripted interaction. Each state is rendered and screenshotted separately on base and head, and the two screenshots of the same state are compared.
+2. The first state is named exactly "Default". It shows the component in its typical, realistic, fully loaded situation and has no steps. When <code_diff> is present and the change is visible in that typical situation, Default shows it.
+3. The <target> section gives the state allowance: the maximum number of states, Default included. It is a maximum, not a target. Add a state only when it makes the component look clearly different in a way a reviewer would want to check: an optional prop or flag that adds, hides or restyles content; a loading, empty or error branch; long or overflowing text; a disabled, selected, invalid or read-only variant; data-dependent rendering such as overdue, zero balance, many items or a missing image; or an open menu or popover. Never add a state that looks the same as another state. A simple component gets only Default.
+4. Choose states by reading the component's code: optional props, boolean flags, conditional branches, empty collections, error handling and data-dependent rendering. When <code_diff> is present, make sure every branch the change touches is visible in at least one state. When it is absent, the harness is written for the library: cover the component's most distinct looks.
+5. Names are short and describe the situation in plain words, for example "Overdue", "Zero balance", "Long name", "Menu open" or "Loading". At most 40 characters; letters, digits, spaces and the characters , . ' ( ) & / + - only; unique; never reuse "Default" for another state.
+6. Prefer reaching a state through props or data. Use steps only when the situation can only be reached through interaction: a menu, popover, accordion or tab that has no prop to open it, or a hover or focus style that matters. Steps run in order after the state has settled, with real input, and the page settles again before the screenshot.
+7. A state has at most 5 steps, written as object literals with literal values:
+   - { action: "click", target }, { action: "hover", target }, { action: "focus", target }
+   - { action: "type", target, text: "fixed text" } focuses the target and types the text
+   - { action: "press", key: "Enter" } presses one key, optionally with a target to focus first; key is one of Enter, Escape, Tab, Space, ArrowDown, ArrowUp, ArrowLeft, ArrowRight, Home, End
+   - { action: "waitFor", target } waits until the element is visible
+   A target finds one visible element, preferably by role and accessible name: { by: "role", role: "button", name: "More actions" }. The other forms are { by: "label", label: "Email" }, { by: "placeholder", placeholder: "Search" }, { by: "text", text: "Show details" } and { by: "testId", testId: "row-menu" }. Matching compares whole strings after trimming and collapsing whitespace, ignoring case. Add nth: 1 to pick the second visible match, and so on. Use only names and texts that exist in both the base and the head version; when they differ, reach the state through props instead.
+8. Every state must render on both base and head.
 
 MOCK RULES
 1. specifier: for a module the target component imports directly, use exactly the string from its import statement (see <direct_imports>), for example "@/hooks/useAuth" or "../api/orders". For a module imported only by the component's children, write the specifier as it would be imported from the target component's own file (relative to that file, or the repository's alias form). For a package, use the bare package name exactly as imported, for example "posthog-js".
@@ -90,7 +106,7 @@ export const HARNESS_RESPONSE_SCHEMA: Record<string, unknown> = {
     harnessSource: {
       type: "string",
       description:
-        "Complete TSX module with default export function PRVisionHarness. Empty string when status is cannot_render."
+        "Complete TSX module that default-exports definePrvisionHarness({ wrapper?, states }) with the Default state first. Empty string when status is cannot_render."
     },
     mockedModules: {
       type: "array",
@@ -106,7 +122,11 @@ export const HARNESS_RESPONSE_SCHEMA: Record<string, unknown> = {
         }
       }
     },
-    notes: { type: "string", description: "At most eight short plain-text lines for the reviewer." }
+    notes: {
+      type: "string",
+      description:
+        "At most eight short plain-text lines for the reviewer: the states and why, fixtures, mocks or fakes."
+    }
   }
 };
 
@@ -329,6 +349,24 @@ const CHANGE_KIND_DESCRIPTIONS: Readonly<Record<ComponentCandidate["changeKind"]
   rechecked: "unchanged itself; re-checked because a global style changed"
 };
 
+/** `change:` line of a library harness (16 §7.8.3). */
+export const LIBRARY_CHANGE_LINE = "none (library harness for an existing component)";
+
+/** `purpose:` and `state allowance:` lines of the <target> block (16 §7.8.3), shared by both frameworks. */
+export function purposeLines(pkg: Pick<HarnessContextPackage, "purpose" | "stateAllowance">): string[] {
+  return [
+    `purpose: ${pkg.purpose === "change" ? "change review" : "library (no change; write the component's main looks)"}`,
+    `state allowance: ${String(pkg.stateAllowance)} (maximum number of states, Default included)`
+  ];
+}
+
+/** The states reminder replacing "Render the state that the change affects…" (16 §7.8.3), shared by both frameworks. */
+export function statesReminder(purpose: HarnessContextPackage["purpose"]): string {
+  return purpose === "change"
+    ? "- Default first. Add another state only when it looks clearly different, up to the state allowance. The states must show every branch the change touches."
+    : "- Default first. Add another state only when it looks clearly different, up to the state allowance.";
+}
+
 function existsIn(sidesPresent: HarnessContextPackage["sidesPresent"]): string {
   if (sidesPresent.base && sidesPresent.head) {
     return "base and head";
@@ -345,8 +383,9 @@ export function renderHarnessUserPrompt(pkg: HarnessContextPackage): EscapedText
       `component: ${candidate.displayName}`,
       `file: ${candidate.filePath}`,
       `export: ${exportText}`,
-      `change: ${CHANGE_KIND_DESCRIPTIONS[candidate.changeKind]}`,
+      `change: ${pkg.purpose === "library" ? LIBRARY_CHANGE_LINE : CHANGE_KIND_DESCRIPTIONS[candidate.changeKind]}`,
       `selected because: ${candidate.reason}`,
+      ...purposeLines(pkg),
       `exists in: ${existsIn(pkg.sidesPresent)}`,
       "harness directory: .prvision-harness/components/",
       `import the target with exactly: ${pkg.targetImportStatement}`
@@ -368,7 +407,7 @@ export function renderHarnessUserPrompt(pkg: HarnessContextPackage): EscapedText
     "",
     "<reminders>",
     "- The same harness renders base and head; choose inputs valid for both.",
-    "- Render the state that the change affects, with overlays open and data loaded.",
+    statesReminder(pkg.purpose),
     "- Use the exact target import statement and exact mock specifiers.",
     "</reminders>"
   ].join("\n");
@@ -457,7 +496,10 @@ export function buildRepairPrompt(
       escapedTags: source.escapedTags
     };
   });
-  const failureLines = [renderError.message.slice(0, RENDER_ERROR_MAX_CHARS)];
+  const failureLines = [
+    `state: ${renderError.stateName ?? DEFAULT_STATE_NAME}`,
+    renderError.message.slice(0, RENDER_ERROR_MAX_CHARS)
+  ];
   if (renderError.otherSideMessage !== null) {
     failureLines.push(`other side:\n${renderError.otherSideMessage.slice(0, REPAIR_OTHER_SIDE_MAX_CHARS)}`);
   }
@@ -488,7 +530,7 @@ export function buildRepairPrompt(
     "",
     "<repair_instructions>",
     "PRVision rendered the harness above and the render failed as shown. Decide the cause and respond with one of:",
-    '1. The failure comes from the harness or a mock (missing provider, prop or fixture with the wrong shape, mock missing an export or returning the wrong shape, wrong import, unseeded query, missing route): fix it, set status "ok", and return the complete corrected harness and the full mock list. Say in notes what you changed.',
+    '1. The failure comes from the harness or a mock (missing provider, prop or fixture with the wrong shape, mock missing an export or returning the wrong shape, wrong import, unseeded query, missing route, a step target that does not exist (step_failed)): fix it, set status "ok", and return the complete corrected harness and the full mock list. Say in notes what you changed.',
     "2. The failure is a defect in the component's own code that would also occur in the real application with realistic inputs (for example a syntax error in the component file, reading a property that cannot exist, or an exception thrown by the component's own logic for valid inputs): set status \"component_defect\", return the previous harness and mocks unchanged, and describe the defect in notes. Never hide a real defect by mocking the component's own internals or by choosing unrealistic props that skip the failing code.",
     '3. The component cannot be rendered in isolation at all: set status "cannot_render".',
     "Keep fixtures and the visible state unchanged unless they cause the failure, so that base and head stay comparable.",
@@ -509,7 +551,7 @@ export interface HarnessPromptSet {
   buildRepair(pkg: HarnessContextPackage, previous: HarnessGenerationResult, renderError: HarnessRenderError): string;
 }
 
-/** The React prompts: the existing constants and builders, unchanged (HarnessGenerationService's default). */
+/** The React prompts (16 §7.8): system prompt, schema and builders (HarnessGenerationService's default). */
 export const REACT_HARNESS_PROMPTS: HarnessPromptSet = {
   system: HARNESS_SYSTEM_PROMPT,
   schema: HARNESS_RESPONSE_SCHEMA,

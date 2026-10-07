@@ -350,7 +350,7 @@ export interface PageRenderInput {
     | "side"
   >;
   componentId: number;
-  /** 16 §6.12: the harness state to render (render services pass "Default"; the page uses it from 16b on). */
+  /** 16 §7.6.3: the harness state to render; the page selects it with `s=<state>` and runs its steps. */
   stateName: string;
   timeoutMs: number; // budget for this attempt (goto → PNG written)
   outputPath: string; // absolute temp path; written atomically
@@ -382,6 +382,11 @@ export type PageRenderOutcome =
       skippedInputs?: string[];
       /** Angular harness: HTTP requests without a fixture (≤ 10). Absent/[] for React. */
       httpUnmatched?: string[];
+      // --- 16b block (16 §7.6.3) ---
+      /** Every state name the harness declares, as the page reported them (["Default"] for pre-16b pages). */
+      stateNames: string[];
+      /** Scripted steps run before the capture. */
+      stepsRun: number;
     }
   | {
       ok: false;

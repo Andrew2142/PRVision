@@ -41,11 +41,11 @@ import { HarnessContextBuilder, SafeFileReader, type HarnessContextPackage } fro
 import { REACT_HARNESS_PROMPTS, type HarnessAiResponse, type HarnessPromptSet } from "./harness-prompts";
 import {
   HarnessValidator,
-  singleDefaultState,
   type HarnessValidationInput,
   type HarnessValidationIssue,
   type HarnessValidationReport
 } from "./harness-validator";
+import { extractHarnessStates } from "./harness-states";
 import { isReplacedCandidate, replacedSideCandidate, type ReplacedCandidate } from "./replaced-components";
 
 const STAGE = "generating_harnesses" as const;
@@ -536,12 +536,16 @@ export class HarnessGenerationService {
         return attempt.harness;
       }
       if (attempt.kind === "failed" && attempt.lastHarness !== null && attempt.lastHarness.trim() !== "") {
-        // 16a shim fields (16 §6.12): one Default state, written in this run, not saved to the library yet.
+        // The last (invalid) attempt is kept as a snapshot only; its states are read best effort (16 §7.7.1).
+        const extraction = extractHarnessStates(attempt.lastHarness, this.ctx.repository.framework, {
+          stateAllowance: this.ctx.library.stateAllowance,
+          allowLegacy: true
+        });
         return {
           harnessSource: attempt.lastHarness,
           mockedModules: [],
           notes: "",
-          states: singleDefaultState(),
+          states: extraction.ok ? extraction.states : [],
           origin: "written",
           libraryEntryId: null
         };
@@ -671,7 +675,7 @@ export class HarnessGenerationService {
         harnessSource: last.harnessSource,
         mockedModules: last.mockedModules.map(({ specifier, source }) => ({ specifier, source })),
         notes: composeNotes(last, report.warnings),
-        states: report.states ?? singleDefaultState(), // 16a: the validator's Default state until 16b
+        states: report.states ?? [], // a valid report always carries its states (16 §7.7.3)
         origin: "written",
         libraryEntryId: null
       },
@@ -1051,7 +1055,7 @@ export class HarnessGenerationService {
             harnessSource: response.harnessSource,
             mockedModules: response.mockedModules.map(({ specifier, source }) => ({ specifier, source })),
             notes: capText(repairedNotes, HARNESS_NOTES_MAX_CHARS),
-            states: report.states ?? singleDefaultState(), // 16a: the validator's Default state until 16b
+            states: report.states ?? [], // a valid report always carries its states (16 §7.7.3)
             origin: "written",
             libraryEntryId: null
           }

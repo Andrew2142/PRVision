@@ -10,6 +10,7 @@ import path from "node:path";
 import ts from "typescript";
 import { ANGULAR_HARNESS_TEMPLATES_DIR, HARNESS_DIR_NAME } from "../../../../../config-consts";
 import { isPathInside } from "../../../../../utilities";
+import { SHARED_TEMPLATE_DIR_NAME, SHARED_TEMPLATE_FILES } from "../harness-workspace";
 import { isRecord, type RenderSide } from "../render-types";
 import { indexInputOf, usesZone, type AngularProjectInfo, mergedTargetOptions } from "./angular-build-options";
 
@@ -396,7 +397,11 @@ export async function installedPackageMajor(fromDir: string, packageName: string
  * @param dir - The Angular templates directory (ANGULAR_HARNESS_TEMPLATES_DIR).
  */
 export async function assertAngularTemplatesPresent(dir: string): Promise<void> {
-  for (const file of ANGULAR_TEMPLATE_FILES) {
+  const files = [
+    ...ANGULAR_TEMPLATE_FILES,
+    ...SHARED_TEMPLATE_FILES.map((file) => path.join("..", SHARED_TEMPLATE_DIR_NAME, file))
+  ];
+  for (const file of files) {
     try {
       await fs.access(path.join(dir, file));
     } catch {
@@ -440,6 +445,13 @@ export class AngularHarnessWorkspaceWriter {
     }
     for (const file of ANGULAR_TEMPLATE_FILES) {
       await fs.copyFile(path.join(this.templatesDir, file), path.join(layout.harnessDir, file));
+    }
+    // 16 §7.5: the shared step runtime lives next to the React templates (<templates>/shared/).
+    for (const file of SHARED_TEMPLATE_FILES) {
+      await fs.copyFile(
+        path.join(this.templatesDir, "..", SHARED_TEMPLATE_DIR_NAME, file),
+        path.join(layout.harnessDir, file)
+      );
     }
     await writeAtomic(path.join(layout.harnessDir, ".gitignore"), "*\n");
 

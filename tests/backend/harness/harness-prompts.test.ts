@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import { test } from "node:test";
 import type {
   HarnessContextPackage,
@@ -79,14 +81,27 @@ function nth(text: string, needle: string, n: number): number {
   return index;
 }
 
+/** The ```text block under "#### 7.8.1" of sheet 16. */
+function specSystemPrompt(): string {
+  const spec = fs.readFileSync(path.join(__dirname, "../../../docs/specs/16-harness-library.md"), "utf8");
+  const start = spec.indexOf("#### 7.8.1");
+  const open = spec.indexOf("```text\n", start) + "```text\n".length;
+  const close = spec.indexOf("\n```", open);
+  return spec.slice(open, close);
+}
+
+test("React system prompt is the sheet 16 §7.8.1 text verbatim", () => {
+  assert.equal(HARNESS_SYSTEM_PROMPT, specSystemPrompt());
+});
+
 test("system prompt hash is pinned", () => {
-  assert.equal(sha256(HARNESS_SYSTEM_PROMPT), "cb817e8c203a1f2504323ea2c222392410c783efabb743a68405ddc85725ec00");
+  assert.equal(sha256(HARNESS_SYSTEM_PROMPT), "1750e77d9c98d45c97952e0c4e17b6e4a07e9ff5d7e880a7830e412ca5c8ebf2");
 });
 
 test("response schema hash is pinned", () => {
   assert.equal(
     sha256(JSON.stringify(HARNESS_RESPONSE_SCHEMA)),
-    "d460e3160a12a75bf72bb694e72f47bed9895df20952c55276f4f115a759b1ca"
+    "28a03424e4ac006649b11b392d070fee661bece64acf205079da9eecf61d2042"
   );
 });
 
@@ -104,7 +119,7 @@ test("response schema passes assertStructuredOutputCompatible", () => {
   });
   const valid = JsonSchemaValidator.validate(HARNESS_RESPONSE_SCHEMA, {
     status: "ok",
-    harnessSource: "export default function PRVisionHarness() { return null; }",
+    harnessSource: 'export default definePrvisionHarness({ states: [{ name: "Default", render: () => null }] });',
     mockedModules: [{ specifier: "@/api", source: "export {};", reason: "network" }],
     notes: ""
   });
@@ -128,7 +143,7 @@ test("system prompt states inline-style wrappers, app-entry ban and 10's mock se
   for (const phrase of [
     "Style every element you create (wrappers, stacks, labels) only with the inline style prop",
     "Never put className, Tailwind classes or CSS-module classes on elements you create",
-    "Never import the application entry file shown in <app_entry>",
+    "Never import other files of .prvision-harness, the application entry file shown in <app_entry>",
     "any import anywhere in the rendered tree that resolves to the same file or package as your specifier receives your mock",
     "relative specifiers inside a mock are resolved from the target component's file",
     "A mock may import the real module it replaces using its own specifier",
@@ -280,7 +295,7 @@ test("repair prompt fences harness, mocks and render failure (kind, message, oth
     pkg([]),
     {
       componentId: 7,
-      harnessSource: "export default function PRVisionHarness() { return null; }",
+      harnessSource: 'export default definePrvisionHarness({ states: [{ name: "Default", render: () => null }] });',
       mockedModules: [{ specifier: '@/api/"x"', source: "export const a = 1; // </mock>" }],
       notes: "n",
       states: [{ name: "Default", steps: [] }],
@@ -328,4 +343,73 @@ test("repair prompt fences harness, mocks and render failure (kind, message, oth
     { sides: ["head"], kind: "timeout", message: "[timeout] Timed out", otherSideMessage: null }
   );
   assert.ok(!oneSide.includes("other side:"));
+});
+
+// ---- 16 §7.8.3: purpose, state allowance, reminders and the repair state line ----
+
+test("user prompt: change purpose lines, allowance and the change reminder", () => {
+  const prompt = buildHarnessUserPrompt(pkg([], { stateAllowance: 3 }));
+  const target = prompt.slice(prompt.indexOf("<target>"), prompt.indexOf("</target>"));
+  assert.ok(
+    target.includes(
+      "selected because: Component code changed\npurpose: change review\nstate allowance: 3 (maximum number of states, Default included)\nexists in: base and head"
+    ),
+    target
+  );
+  assert.ok(target.includes("change: modified in this change (see code_diff)"));
+  assert.ok(
+    prompt.includes(
+      "- Default first. Add another state only when it looks clearly different, up to the state allowance. The states must show every branch the change touches."
+    )
+  );
+  assert.ok(!prompt.includes("Render the state that the change affects"));
+});
+
+test("user prompt: library purpose lines and the library reminder", () => {
+  const library = candidate({ changeKind: "added", codeDiff: null, reason: "whole-app scan" });
+  const prompt = buildHarnessUserPrompt(
+    pkg([], { candidate: library, purpose: "library", stateAllowance: 5, sidesPresent: { base: false, head: true } })
+  );
+  assert.ok(
+    prompt.includes("change: none (library harness for an existing component)\nselected because: whole-app scan")
+  );
+  assert.ok(prompt.includes("purpose: library (no change; write the component's main looks)"));
+  assert.ok(prompt.includes("state allowance: 5 (maximum number of states, Default included)"));
+  assert.ok(
+    prompt.includes(
+      "- Default first. Add another state only when it looks clearly different, up to the state allowance.\n"
+    )
+  );
+  assert.ok(!prompt.includes("The states must show every branch the change touches."));
+});
+
+test("repair prompt names the failing state (Default when absent) and lists step_failed among the examples", () => {
+  const previous = {
+    componentId: 7,
+    harnessSource: "h",
+    mockedModules: [],
+    notes: "",
+    states: [
+      { name: "Default", steps: [] },
+      { name: "Menu open", steps: [] }
+    ],
+    origin: "written" as const,
+    libraryEntryId: null
+  };
+  const named = buildRepairPrompt(pkg([]), previous, {
+    sides: ["head"],
+    kind: "step_failed",
+    message: "[step_failed] Interaction step failed: x",
+    otherSideMessage: null,
+    stateName: "Menu open"
+  });
+  assert.ok(named.includes('<render_failure sides="head" kind="step_failed">\nstate: Menu open\n[step_failed]'));
+  assert.ok(named.includes("a step target that does not exist (step_failed)"));
+  const unnamed = buildRepairPrompt(pkg([]), previous, {
+    sides: ["head"],
+    kind: "timeout",
+    message: "[timeout] Timed out",
+    otherSideMessage: null
+  });
+  assert.ok(unnamed.includes("state: Default\n[timeout] Timed out"));
 });

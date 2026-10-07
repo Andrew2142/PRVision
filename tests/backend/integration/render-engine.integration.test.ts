@@ -70,7 +70,7 @@ function harness(
 ): HarnessGenerationResult {
   return {
     componentId,
-    harnessSource: `import Target from "${importPath}";\n${body.includes("Target") ? "" : "void Target;\n"}export default function PRVisionHarness() {\n  return ${body};\n}\n`,
+    harnessSource: `import { definePrvisionHarness } from "../harness-api";\nimport Target from "${importPath}";\n${body.includes("Target") ? "" : "void Target;\n"}export default definePrvisionHarness({\n  states: [{ name: "Default", render: () => ${body} }]\n});\n`,
     mockedModules: [],
     notes,
     states: [{ name: "Default", steps: [] }],
@@ -261,7 +261,7 @@ describe("render engine against the fixture repo (real Vite + Chromium)", { time
         candidate: candidate(ids.missing, `${IT_DIR}/Swatch.tsx`, "modified", 5),
         harness: {
           componentId: ids.missing,
-          harnessSource: `import Target from "${itImport("Swatch")}";\nimport { helper } from "./does-not-exist";\nexport default function PRVisionHarness() {\n  return <div data-x={String(helper)}><Target /></div>;\n}\n`,
+          harnessSource: `import { definePrvisionHarness } from "../harness-api";\nimport Target from "${itImport("Swatch")}";\nimport { helper } from "./does-not-exist";\nexport default definePrvisionHarness({\n  states: [{ name: "Default", render: () => <div data-x={String(helper)}><Target /></div> }]\n});\n`,
           mockedModules: [],
           notes: "Scripted harness with a broken import.",
           states: [{ name: "Default", steps: [] }],
@@ -371,7 +371,7 @@ describe("render engine against the fixture repo (real Vite + Chromium)", { time
     const layout = resolveSideLayout("head", path.join(root, "head"), "vite.config.ts");
     fs.writeFileSync(
       path.join(layout.componentsDir, `${String(ids.remote)}.tsx`),
-      `/** @jsxRuntime automatic */\nimport Target from "${itImport("RemoteImage")}";\nexport default function PRVisionHarness() {\n  return <Target />;\n}\n`
+      `/** @jsxRuntime automatic */\nimport { definePrvisionHarness } from "../harness-api";\nimport Target from "${itImport("RemoteImage")}";\nexport default definePrvisionHarness({ states: [{ name: "Default", render: () => <Target /> }] });\n`
     );
     const controller = new AbortController();
     const host = await ViteHostClient.start(

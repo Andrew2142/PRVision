@@ -153,7 +153,7 @@ export interface MockedModule {
 }
 export interface HarnessGenerationResult {
   componentId: number;
-  harnessSource: string; // TSX module, default export PRVisionHarness
+  harnessSource: string; // TSX module, default export definePrvisionHarness({ wrapper?, states }) (16 §7.3)
   mockedModules: MockedModule[];
   notes: string;
   /**

@@ -1,4 +1,5 @@
-import type { ReactElement } from "react";
+import type { ReactElement, ReactNode } from "react";
+import { definePrvisionHarness } from "../harness-api";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import OrdersPanel from "../../src/features/orders/OrdersPanel";
@@ -33,10 +34,20 @@ queryClient.setQueryData(["orders", CUSTOMER_ID, { pageSize: PAGE_SIZE }], ORDER
 
 const noop = (): void => {};
 
-export default function PRVisionHarness(): ReactElement {
+function Providers({ children }: { children: ReactNode }): ReactElement {
   return (
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={[`/customers/${CUSTOMER_ID}/orders`]}>
+      <MemoryRouter initialEntries={[`/customers/${CUSTOMER_ID}/orders`]}>{children}</MemoryRouter>
+    </QueryClientProvider>
+  );
+}
+
+export default definePrvisionHarness({
+  wrapper: Providers,
+  states: [
+    {
+      name: "Default",
+      render: () => (
         <div style={{ padding: 24, width: 1024 }}>
           <Routes>
             <Route
@@ -45,7 +56,7 @@ export default function PRVisionHarness(): ReactElement {
             />
           </Routes>
         </div>
-      </MemoryRouter>
-    </QueryClientProvider>
-  );
-}
+      ),
+    },
+  ],
+});

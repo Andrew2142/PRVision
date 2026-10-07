@@ -1,9 +1,10 @@
 import type { ReactElement } from "react";
+import { definePrvisionHarness } from "../harness-api";
 import { Button } from "../../src/components/Button/Button";
 
 const noop = (): void => {};
 
-export default function PRVisionHarness(): ReactElement {
+function ButtonShowcase(): ReactElement {
   return (
     <div style={{ padding: 24, width: 360, display: "flex", flexDirection: "column", gap: 16, alignItems: "flex-start" }}>
       <Button variant="primary" onClick={noop}>Save changes</Button>
@@ -14,3 +15,7 @@ export default function PRVisionHarness(): ReactElement {
     </div>
   );
 }
+
+export default definePrvisionHarness({
+  states: [{ name: "Default", render: ButtonShowcase }],
+});

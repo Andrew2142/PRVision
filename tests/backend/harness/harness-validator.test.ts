@@ -184,6 +184,65 @@ test("accepts Example B with its two mocks", async () => {
   assert.equal(report.ok, true);
 });
 
+// ---- multi-state harnesses (16 §7.7) ----
+
+const THREE_STATES = [
+  'import type { ReactElement } from "react";',
+  'import { definePrvisionHarness } from "../harness-api";',
+  'import { Button } from "../../src/components/Button/Button";',
+  "",
+  "const noop = (): void => {};",
+  "",
+  "function Saving(): ReactElement {",
+  '  return <div style={{ padding: 16 }}><Button variant="primary" loading onClick={noop}>Saving…</Button></div>;',
+  "}",
+  "",
+  "export default definePrvisionHarness({",
+  "  wrapper: ({ children }) => <div style={{ maxWidth: 392 }}>{children}</div>,",
+  "  states: [",
+  '    { name: "Default", render: () => <Button variant="primary" onClick={noop}>Save changes</Button> },',
+  '    { name: "Saving", render: Saving },',
+  "    {",
+  '      name: "Menu open",',
+  '      render: () => <Button variant="secondary" onClick={noop}>More</Button>,',
+  '      steps: [{ action: "click", target: { by: "role", role: "button", name: "More" } }]',
+  "    }",
+  "  ]",
+  "});"
+].join("\n");
+
+test("HarnessValidator.validate accepts a three-state harness and returns its states", async () => {
+  const report = await validateA({ harnessSource: THREE_STATES, stateAllowance: 3 });
+  assert.deepEqual(report.errors, []);
+  assert.equal(report.ok, true);
+  assert.deepEqual(report.states, [
+    { name: "Default", steps: [] },
+    { name: "Saving", steps: [] },
+    { name: "Menu open", steps: [{ action: "click", target: { by: "role", role: "button", name: "More" } }] }
+  ]);
+});
+
+test("HarnessValidator.validate respects the state allowance (state_too_many)", async () => {
+  const report = await validateA({ harnessSource: THREE_STATES, stateAllowance: 2 });
+  assertError(report, "state_too_many");
+  assert.ok(
+    report.errors.some((issue) => issue.message === "3 states written; the state allowance is 2 (Default included).")
+  );
+  assert.equal(report.states, null);
+});
+
+test("HarnessValidator.validate scans every state's render function (nondeterministic_api)", async () => {
+  const report = await validateA({
+    harnessSource: replaceOnce(
+      THREE_STATES,
+      '{ name: "Saving", render: Saving }',
+      '{ name: "Saving", render: () => <span>{Math.random()}</span> }'
+    ),
+    stateAllowance: 3
+  });
+  assertError(report, "nondeterministic_api");
+});
+
 // ---- negative variants of Example B (09 §5.13 table) ----
 
 test("rejects a target imported through the project alias (target_not_imported)", async () => {
@@ -209,15 +268,23 @@ test("rejects a named import of a default-exported target (target_binding_mismat
   assertError(report, "target_binding_mismatch");
 });
 
-test("rejects export default function Harness (default_export_wrong_name)", async () => {
+test("rejects a default export that is not definePrvisionHarness from ../harness-api (harness_shape)", async () => {
+  // 16 §7.7.2: the module shape is harness_shape for React now; default_export_wrong_name is no longer emitted.
   const report = await validateB({
     harnessSource: replaceOnce(
       PANEL_HARNESS,
-      "export default function PRVisionHarness()",
-      "export default function Harness()"
+      "export default definePrvisionHarness({",
+      "export default defineHarness({"
     )
   });
-  assertError(report, "default_export_wrong_name");
+  assertError(report, "harness_shape");
+  assert.ok(
+    report.errors.some(
+      (issue) =>
+        issue.message === "Default-export definePrvisionHarness({ wrapper?, states }) imported from '../harness-api'."
+    )
+  );
+  assert.equal(report.states, null);
 });
 
 test("rejects a useAuth mock without export function useAuth (mock_missing_export)", async () => {
@@ -336,31 +403,46 @@ test("accepts the string fetch( inside a JSX text node (AST, not regex)", async 
 
 // ---- further cases (09 §9) ----
 
-test("accepts const PRVisionHarness plus export default identifier", async () => {
+test("accepts a state render that is the identifier of a top-level const arrow function", async () => {
   const harness = replaceOnce(
-    harnessFixture("button/harness.tsx"),
-    "export default function PRVisionHarness(): ReactElement {",
-    "const PRVisionHarness = (): ReactElement => {"
-  ).replace(/}\n?$/, "};\nexport default PRVisionHarness;\n");
+    replaceOnce(
+      harnessFixture("button/harness.tsx"),
+      "function ButtonShowcase(): ReactElement {",
+      "const ButtonShowcase = (): ReactElement => {"
+    ),
+    "  );\n}\n\nexport default",
+    "  );\n};\n\nexport default"
+  );
   const report = await validateA({ harnessSource: harness });
   assert.deepEqual(report.errors, []);
+  assert.deepEqual(report.states, [{ name: "Default", steps: [] }]);
 });
 
-test("rejects anonymous default export", async () => {
-  for (const replacement of ["export default function ()", "const Inner = function ()"]) {
-    const harness = replaceOnce(
-      harnessFixture("button/harness.tsx"),
-      "export default function PRVisionHarness()",
-      replacement
-    );
-    const source = replacement.startsWith("const") ? `${harness}\nexport default () => Inner();` : harness;
-    const report = await validateA({ harnessSource: source });
-    assertError(report, "default_export_wrong_name");
+test("rejects default exports other than definePrvisionHarness({...}) and a missing default export (harness_shape)", async () => {
+  const fixture = harnessFixture("button/harness.tsx");
+  const call = 'export default definePrvisionHarness({\n  states: [{ name: "Default", render: ButtonShowcase }],\n});';
+  for (const replacement of [
+    "export default function () {\n  return ButtonShowcase();\n}",
+    "const Inner = function () {\n  return ButtonShowcase();\n};\nexport default () => Inner();",
+    'const harness = definePrvisionHarness({ states: [{ name: "Default", render: ButtonShowcase }] });\nexport default harness;',
+    'const harness = definePrvisionHarness({ states: [{ name: "Default", render: ButtonShowcase }] });'
+  ]) {
+    const report = await validateA({ harnessSource: replaceOnce(fixture, call, replacement) });
+    assertError(report, "harness_shape");
   }
-  const missing = await validateA({
-    harnessSource: replaceOnce(harnessFixture("button/harness.tsx"), "export default function", "function")
-  });
-  assertError(missing, "missing_default_export");
+});
+
+test("rejects the legacy PRVisionHarness shape for new harnesses (harness_shape)", async () => {
+  const legacy = replaceOnce(
+    harnessFixture("button/harness.tsx"),
+    'export default definePrvisionHarness({\n  states: [{ name: "Default", render: ButtonShowcase }],\n});',
+    "export default ButtonShowcase;"
+  )
+    .replace(/function ButtonShowcase/g, "function PRVisionHarness")
+    .replace("export default ButtonShowcase;", "export default PRVisionHarness;");
+  const report = await validateA({ harnessSource: legacy });
+  assertError(report, "harness_shape");
+  assert.ok(!codes(report).includes("default_export_wrong_name"));
 });
 
 test("rejects createRoot usage", async () => {
@@ -381,12 +463,33 @@ test("rejects relative harness import missing on base for modified component", a
 });
 
 test("rejects relative import escaping worktree", async () => {
-  for (const specifier of ["../../../outside", "../../node_modules/react/index", "./other-harness"]) {
+  for (const specifier of ["../../../outside", "../../node_modules/react/index"]) {
     const report = await validateA({
       harnessSource: `import "${specifier}";\n${harnessFixture("button/harness.tsx")}`
     });
     assertError(report, "relative_import_outside_worktree");
   }
+});
+
+test("rejects imports of the render page's own .prvision-harness files (forbidden_import)", async () => {
+  // 16 §7.7.3: only definePrvisionHarness (and its types) may come from ../harness-api; every other page file,
+  // another harness included, is forbidden.
+  for (const statement of [
+    'import { installStepBridge } from "../prvision-steps";',
+    'import type { Step } from "../prvision-steps";',
+    'import "../entry";',
+    'import "./other-harness";',
+    'import { definePrvisionHarness as d, PrvisionStepKey } from "../harness-api";',
+    'import * as api from "../harness-api";'
+  ]) {
+    const report = await validateA({ harnessSource: `${statement}\n${harnessFixture("button/harness.tsx")}` });
+    assertError(report, "forbidden_import");
+    assert.ok(!codes(report).includes("relative_import_outside_worktree"), statement);
+  }
+  const typeImport = await validateA({
+    harnessSource: `import type { PrvisionStep } from "../harness-api";\n${harnessFixture("button/harness.tsx")}`
+  });
+  assert.deepEqual(typeImport.errors, []);
 });
 
 test("warns on setTimeout", async () => {

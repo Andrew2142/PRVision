@@ -1,5 +1,5 @@
 /*
- * PRVision Angular harness API (static template, sheet 15d).
+ * PRVision Angular harness API (static template, sheets 15d and 16b).
  * AI-written harness modules import ONLY definePrvisionHarness/types from this file plus application code.
  */
 import type { EnvironmentProviders, Provider, Type } from '@angular/core';
@@ -11,6 +11,36 @@ export interface PrvisionHttpFixture {
   status?: number;                 // default 200; >= 400 → HttpErrorResponse with `body` as `error`
   body?: unknown;
   headers?: Record<string, string>;
+}
+
+export type PrvisionStepTarget =
+  | { by: 'role'; role: string; name: string; nth?: number }
+  | { by: 'text'; text: string; nth?: number }
+  | { by: 'label'; label: string; nth?: number }
+  | { by: 'placeholder'; placeholder: string; nth?: number }
+  | { by: 'testId'; testId: string; nth?: number };
+
+export type PrvisionStepKey =
+  | 'Enter' | 'Escape' | 'Tab' | 'Space' | 'ArrowDown' | 'ArrowUp' | 'ArrowLeft' | 'ArrowRight' | 'Home' | 'End';
+
+export type PrvisionStep =
+  | { action: 'click'; target: PrvisionStepTarget }
+  | { action: 'hover'; target: PrvisionStepTarget }
+  | { action: 'focus'; target: PrvisionStepTarget }
+  | { action: 'type'; target: PrvisionStepTarget; text: string }
+  | { action: 'press'; key: PrvisionStepKey; target?: PrvisionStepTarget }
+  | { action: 'waitFor'; target: PrvisionStepTarget };
+
+/** One additional state. Default is the top-level descriptor and never appears here. */
+export interface PrvisionAngularState {
+  name: string;
+  /** Shallow-merged over the top-level inputs (a key here replaces the top-level value). */
+  inputs?: Record<string, unknown>;
+  /** Appended after the top-level providers (a later provider for the same token wins). */
+  providers?: Array<Provider | EnvironmentProviders>;
+  /** Checked before the top-level fixtures (first match wins). */
+  http?: PrvisionHttpFixture[];
+  steps?: PrvisionStep[];
 }
 
 export interface PrvisionAngularHarness<T = unknown> {
@@ -26,6 +56,8 @@ export interface PrvisionAngularHarness<T = unknown> {
   hostStyle?: Record<string, string>;
   /** Runs before bootstrapApplication: document attributes, storage seeds. */
   setup?: () => void | Promise<void>;
+  /** Additional states (Default = the fields above). component, hostStyle and setup are shared. */
+  states?: PrvisionAngularState[];
 }
 
 export function definePrvisionHarness<T>(harness: PrvisionAngularHarness<T>): PrvisionAngularHarness<T> {

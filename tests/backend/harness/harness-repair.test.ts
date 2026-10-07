@@ -174,7 +174,7 @@ test("repair validates and corrects once", async (t) => {
   const outcome = await corrected.service.repairHarness(1, corrected.previous, RENDER_ERROR);
   assert.equal(outcome.ok, true);
   const correction = corrected.ai.callsFor("harness_repair")[1];
-  assert.ok(correction?.prompt.includes("<validation_errors>\n- [default_export_wrong_name]"));
+  assert.ok(correction?.prompt.includes("<validation_errors>\n- [harness_shape]"));
 
   const stillInvalid = await generated(t, [
     respond(okResponse("Button", { harnessSource: invalidHarness("Button") })),
@@ -183,7 +183,7 @@ test("repair validates and corrects once", async (t) => {
   assert.deepEqual(await stillInvalid.service.repairHarness(1, stillInvalid.previous, RENDER_ERROR), {
     ok: false,
     reason: "invalid_harness",
-    message: "Repaired harness failed static checks: default_export_wrong_name"
+    message: "Repaired harness failed static checks: harness_shape"
   });
   assert.equal(stillInvalid.ai.callsFor("harness_repair").length, 2, "repair + one correction");
 });

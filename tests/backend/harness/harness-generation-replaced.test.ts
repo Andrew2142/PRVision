@@ -175,10 +175,7 @@ test("HarnessGenerationService.generateAll fails a replaced row when one side's 
   assert.deepEqual(batch.results, []);
   assert.equal(batch.failures.length, 1);
   assert.equal(batch.failures[0]?.kind, "invalid_harness");
-  assert.equal(
-    batch.failures[0].message,
-    `before (${OLD}): AI harness failed static checks: default_export_wrong_name`
-  );
+  assert.equal(batch.failures[0].message, `before (${OLD}): AI harness failed static checks: harness_shape`);
   const row = s.db.row(Table.VISUALIZATION_COMPONENTS, 1);
   assert.equal(row?.renderStatus, "failed");
   assert.equal(row.baseError, "Not rendered: harness generation failed.");

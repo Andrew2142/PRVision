@@ -1,18 +1,23 @@
 /** @jsxRuntime automatic */
 /*
- * PRVision render harness entry (static template, sheet 10).
+ * PRVision render harness entry (static template, sheets 10 and 16b).
  * Copied verbatim to <viteRoot>/.prvision-harness/entry.tsx before every render run.
  *
- * Page URL:  /.prvision-harness/index.html?c=<componentId>&quiet=<ms>&settleMax=<ms>&assetWait=<ms>
+ * Page URL:  /.prvision-harness/index.html?c=<componentId>&s=<state>&quiet=<ms>&settleMax=<ms>&assetWait=<ms>
+ *            (s absent = Default; live mode adds live=1&parent=<frontend origin>)
  * Signals:   window.__PRVISION_STATUS__  booting | importing | mounting | settling | ready | error
  *            window.__PRVISION_READY__   true once mounted and visually settled
  *            window.__PRVISION_ERROR__   { phase, message, stack, componentStack } on failure (first error wins)
+ *            window.__PRVISION_STATE__   { name, names, steps } of the selected state (16 §7.6)
+ *            window.__PRVISION_SETTLE__  () => Promise<void>: the settling sequence, reused after scripted steps
  *
  * This file must not import application code except through ./globals and ./components/*.
  */
-import { Suspense, useEffect, type ComponentType, type ReactElement } from "react";
+import { Fragment, Suspense, useEffect, type ComponentType, type ReactElement, type ReactNode } from "react";
 import { mount } from "virtual:prvision-mount";
 import { PrvisionErrorBoundary } from "./error-boundary";
+import { installStepBridge, runStepsInPage, type Step } from "./prvision-steps";
+import type { PrvisionReactHarnessModule } from "./harness-api";
 
 type PrvisionPhase = "booting" | "importing" | "mounting" | "settling" | "ready" | "error";
 
@@ -28,6 +33,8 @@ declare global {
     __PRVISION_STATUS__?: PrvisionPhase;
     __PRVISION_READY__?: boolean;
     __PRVISION_ERROR__?: PrvisionErrorReport | null;
+    __PRVISION_STATE__?: { name: string; names: string[]; steps: Step[] };
+    __PRVISION_SETTLE__?: () => Promise<void>;
   }
 }
 
@@ -39,6 +46,11 @@ const componentId = params.get("c") ?? "";
 const quietMs = readPositiveInt(params.get("quiet"), 250);
 const settleMaxMs = readPositiveInt(params.get("settleMax"), 5000);
 const assetWaitMs = readPositiveInt(params.get("assetWait"), 3000);
+const stateName = params.get("s") ?? "Default";
+const live = params.get("live") === "1";
+const parentOrigin = params.get("parent");
+const LIVE_STEP_TIMEOUT_MS = 3000;
+const LIVE_ACTIVITY_INTERVAL_MS = 5000;
 
 function readPositiveInt(raw: string | null, fallback: number): number {
   const value = raw === null ? Number.NaN : Number.parseInt(raw, 10);
@@ -50,7 +62,11 @@ function setPhase(phase: PrvisionPhase): void {
 }
 
 function reportError(phase: PrvisionErrorReport["phase"], error: unknown, componentStack: string | null = null): void {
-  if (window.__PRVISION_READY__ === true || window.__PRVISION_ERROR__) {
+  if (window.__PRVISION_READY__ === true) {
+    postLiveError(error); // live mode tells the frontend; never a render failure
+    return;
+  }
+  if (window.__PRVISION_ERROR__) {
     return; // first error wins; errors after ready are console noise, not render failures
   }
   const normalized = error instanceof Error ? error : new Error(String(error));
@@ -125,10 +141,73 @@ function isRenderableComponent(value: unknown): value is ComponentType {
   return typeof value === "function" || (typeof value === "object" && value !== null && "$$typeof" in value);
 }
 
+function isHarnessModule(value: unknown): value is PrvisionReactHarnessModule {
+  return typeof value === "object" && value !== null && (value as { __prvisionHarness?: unknown }).__prvisionHarness === 1
+    && Array.isArray((value as { states?: unknown }).states);
+}
+
+/** The existing settling sequence: two frames, DOM quiet, fonts, images, two frames. */
+async function settle(): Promise<void> {
+  await nextFrame();
+  await nextFrame();
+  await waitForDomQuiet(document.body, quietMs, settleMaxMs);
+  await settleWithin(document.fonts.ready, assetWaitMs);
+  await waitForImages(assetWaitMs);
+  await nextFrame();
+  await nextFrame();
+}
+
+/** The parent frontend origin for live messages, or null when it is not a valid http(s) origin. */
+function liveParentOrigin(): string | null {
+  if (!live || parentOrigin === null) return null;
+  try {
+    const url = new URL(parentOrigin);
+    return (url.protocol === "http:" || url.protocol === "https:") && url.origin === parentOrigin ? url.origin : null;
+  } catch {
+    return null;
+  }
+}
+
+function postToParent(message: Record<string, unknown>): void {
+  const origin = liveParentOrigin();
+  if (origin === null || window.parent === window) return;
+  window.parent.postMessage({ source: "prvision-live", ...message }, origin);
+}
+
+let liveErrorPosted = false;
+function postLiveError(error: unknown): void {
+  if (!live || liveErrorPosted) return;
+  liveErrorPosted = true;
+  postToParent({ type: "error", message: error instanceof Error ? error.message : String(error) });
+}
+
+/** Live mode: tell the frontend the reviewer is using this side (at most once every 5 s). */
+function installLiveActivity(): void {
+  let lastPost = 0;
+  const onActivity = (): void => {
+    const now = Date.now();
+    if (now - lastPost < LIVE_ACTIVITY_INTERVAL_MS) return;
+    lastPost = now;
+    postToParent({ type: "activity" });
+  };
+  for (const type of ["pointerdown", "keydown", "wheel", "input"]) {
+    window.addEventListener(type, onActivity, { capture: true, passive: true });
+  }
+  window.addEventListener("error", (event) => {
+    postLiveError(event.error ?? event.message);
+  });
+  window.addEventListener("unhandledrejection", (event) => {
+    postLiveError(event.reason);
+  });
+}
+
 async function main(): Promise<void> {
   window.__PRVISION_READY__ = false;
   window.__PRVISION_ERROR__ = null;
   setPhase("booting");
+  installStepBridge();
+  window.__PRVISION_SETTLE__ = settle;
+  if (live) installLiveActivity();
 
   const container = document.getElementById("prvision-root");
   if (container === null) {
@@ -144,15 +223,30 @@ async function main(): Promise<void> {
   }
 
   setPhase("importing");
-  let Harness: ComponentType;
+  let Wrapper: ComponentType<{ children: ReactNode }> = Fragment;
+  let StateView: ComponentType;
+  let names: string[];
+  let steps: Step[] = [];
   try {
     // Global styles first (dynamic so a failing stylesheet is reported, not a silent entry failure).
     await import("./globals");
     const harnessModule = await loadHarness();
-    if (!isRenderableComponent(harnessModule.default)) {
-      throw new Error("The harness module has no default export. It must `export default function PRVisionHarness()`.");
+    if (isHarnessModule(harnessModule.default)) {
+      const states = harnessModule.default.states;
+      names = states.map((s) => s.name);
+      const state = states.find((s) => s.name === stateName);
+      if (state === undefined) throw new Error(`State "${stateName}" not found in this harness. States: ${names.join(", ")}.`);
+      StateView = state.render as ComponentType;
+      steps = (state.steps ?? []) as Step[];
+      if (harnessModule.default.wrapper) Wrapper = harnessModule.default.wrapper;
+    } else if (isRenderableComponent(harnessModule.default)) {   // legacy single-state harness (16 §7.3)
+      names = ["Default"];
+      if (stateName !== "Default") throw new Error(`State "${stateName}" not found in this harness. States: Default.`);
+      StateView = harnessModule.default;
+    } else {
+      throw new Error("The harness module must `export default definePrvisionHarness({ states: [...] })`.");
     }
-    Harness = harnessModule.default;
+    window.__PRVISION_STATE__ = { name: stateName, names, steps };
   } catch (error) {
     reportError("import", error);
     return;
@@ -166,7 +260,9 @@ async function main(): Promise<void> {
   const tree: ReactElement = (
     <PrvisionErrorBoundary onError={(error, componentStack) => reportError("render", error, componentStack)}>
       <Suspense fallback={null}>
-        <Harness />
+        <Wrapper>
+          <StateView />
+        </Wrapper>
         <ReadyProbe onCommit={markCommitted} />
       </Suspense>
     </PrvisionErrorBoundary>
@@ -183,17 +279,16 @@ async function main(): Promise<void> {
   if (window.__PRVISION_ERROR__) return;
 
   setPhase("settling");
-  await nextFrame();
-  await nextFrame();
-  await waitForDomQuiet(document.body, quietMs, settleMaxMs);
-  await settleWithin(document.fonts.ready, assetWaitMs);
-  await waitForImages(assetWaitMs);
-  await nextFrame();
-  await nextFrame();
+  await settle();
   if (window.__PRVISION_ERROR__) return;
 
   window.__PRVISION_READY__ = true;
   setPhase("ready");
+
+  if (live) {
+    const report = await runStepsInPage(steps, settle, { timeoutMs: LIVE_STEP_TIMEOUT_MS });
+    postToParent({ type: "state", state: stateName, replayed: report.replayed, skipped: report.skipped });
+  }
 }
 
 void main().catch((error: unknown) => {

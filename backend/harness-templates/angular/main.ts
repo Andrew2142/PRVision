@@ -1,9 +1,11 @@
 /*
- * PRVision Angular render harness entry (static template, sheet 15d).
- * Page URL: /index.html?c=<componentId>&quiet=<ms>&settleMax=<ms>&assetWait=<ms>
+ * PRVision Angular render harness entry (static template, sheets 15d and 16b).
+ * Page URL: /index.html?c=<componentId>&s=<state>&quiet=<ms>&settleMax=<ms>&assetWait=<ms>
+ *           (s absent = Default; live mode adds live=1&parent=<frontend origin>)
  * Signals:  window.__PRVISION_STATUS__ / __PRVISION_READY__ / __PRVISION_ERROR__ (protocol of sheet 10 §5.4.3)
  *           window.__PRVISION_UNSTABLE__ (true when ApplicationRef never became stable within settleMax)
  *           window.__PRVISION_SKIPPED_INPUTS__ (inputs the harness sets that this side does not declare)
+ *           window.__PRVISION_STATE__ / __PRVISION_SETTLE__ (16 §7.6)
  */
 import {
   ApplicationRef, Component, ErrorHandler, Injectable, NgZone, ViewChild, ViewContainerRef, reflectComponentType,
@@ -16,6 +18,7 @@ import { HARNESS_LOADERS } from './registry.generated';
 import { FRAMEWORK_PROVIDERS, FRAMEWORK_WHEN_STABLE } from './framework.generated';
 import { PrvisionHttpBackend, setPrvisionHttpFixtures } from './http-backend';
 import type { PrvisionAngularHarness } from './harness-api';
+import { installStepBridge, runStepsInPage, type Step } from './prvision-steps';
 
 type PrvisionPhase = 'booting' | 'importing' | 'mounting' | 'settling' | 'ready' | 'error';
 interface PrvisionErrorReport { phase: 'import' | 'mount' | 'render'; message: string; stack: string | null; componentStack: string | null; }
@@ -26,6 +29,8 @@ declare global {
     __PRVISION_ERROR__?: PrvisionErrorReport | null;
     __PRVISION_UNSTABLE__?: boolean;
     __PRVISION_SKIPPED_INPUTS__?: string[];
+    __PRVISION_STATE__?: { name: string; names: string[]; steps: Step[] };
+    __PRVISION_SETTLE__?: () => Promise<void>;
   }
 }
 
@@ -34,6 +39,11 @@ const componentId = params.get('c') ?? '';
 const quietMs = readPositiveInt(params.get('quiet'), 250);
 const settleMaxMs = readPositiveInt(params.get('settleMax'), 5000);
 const assetWaitMs = readPositiveInt(params.get('assetWait'), 3000);
+const stateName = params.get('s') ?? 'Default';
+const live = params.get('live') === '1';
+const parentOrigin = params.get('parent');
+const LIVE_STEP_TIMEOUT_MS = 3000;
+const LIVE_ACTIVITY_INTERVAL_MS = 5000;
 
 function readPositiveInt(raw: string | null, fallback: number): number {
   const value = raw === null ? Number.NaN : Number.parseInt(raw, 10);
@@ -41,7 +51,8 @@ function readPositiveInt(raw: string | null, fallback: number): number {
 }
 function setPhase(phase: PrvisionPhase): void { window.__PRVISION_STATUS__ = phase; }
 function reportError(phase: PrvisionErrorReport['phase'], error: unknown): void {
-  if (window.__PRVISION_READY__ === true || window.__PRVISION_ERROR__) return;   // first error wins
+  if (window.__PRVISION_READY__ === true) { postLiveError(error); return; }      // never a render failure after ready
+  if (window.__PRVISION_ERROR__) return;   // first error wins
   const e = error instanceof Error ? error : new Error(String(error));
   window.__PRVISION_ERROR__ = { phase, message: e.message || String(error), stack: e.stack ?? null, componentStack: null };
   setPhase('error');
@@ -70,6 +81,61 @@ function waitForImages(max: number): Promise<boolean> {
   }))), max);
 }
 
+/** The parent frontend origin for live messages, or null when it is not a valid http(s) origin. */
+function liveParentOrigin(): string | null {
+  if (!live || parentOrigin === null) return null;
+  try {
+    const url = new URL(parentOrigin);
+    return (url.protocol === 'http:' || url.protocol === 'https:') && url.origin === parentOrigin ? url.origin : null;
+  } catch {
+    return null;
+  }
+}
+function postToParent(message: Record<string, unknown>): void {
+  const origin = liveParentOrigin();
+  if (origin === null || window.parent === window) return;
+  window.parent.postMessage({ source: 'prvision-live', ...message }, origin);
+}
+let liveErrorPosted = false;
+function postLiveError(error: unknown): void {
+  if (!live || liveErrorPosted) return;
+  liveErrorPosted = true;
+  postToParent({ type: 'error', message: error instanceof Error ? error.message : String(error) });
+}
+function installLiveActivity(): void {
+  let lastPost = 0;
+  const onActivity = (): void => {
+    const now = Date.now();
+    if (now - lastPost < LIVE_ACTIVITY_INTERVAL_MS) return;
+    lastPost = now;
+    postToParent({ type: 'activity' });
+  };
+  for (const type of ['pointerdown', 'keydown', 'wheel', 'input']) {
+    window.addEventListener(type, onActivity, { capture: true, passive: true });
+  }
+  window.addEventListener('error', (event) => postLiveError(event.error ?? event.message));
+  window.addEventListener('unhandledrejection', (event) => postLiveError(event.reason));
+}
+
+/** The bootstrapped application once mounted; __PRVISION_SETTLE__ also waits for its stability. */
+let settleAppRef: ApplicationRef | null = null;
+/** Settling sequence (stability capped at settleMax, two frames, DOM quiet, fonts, images, two frames); true = stable. */
+async function settleAll(): Promise<boolean> {
+  // FRAMEWORK_WHEN_STABLE: appRef.whenStable() on Angular >= 18, the isStable observable on 17 (generated).
+  const stable = settleAppRef === null ? true : await settleWithin(FRAMEWORK_WHEN_STABLE(settleAppRef), settleMaxMs);
+  await nextFrame();
+  await nextFrame();
+  await waitForDomQuiet(document.body, quietMs, settleMaxMs);
+  await settleWithin(document.fonts.ready, assetWaitMs);
+  await waitForImages(assetWaitMs);
+  await nextFrame();
+  await nextFrame();
+  return stable;
+}
+async function settle(): Promise<void> {
+  await settleAll();
+}
+
 @Injectable()
 class PrvisionErrorHandler implements ErrorHandler {
   handleError(error: unknown): void {
@@ -91,6 +157,9 @@ async function main(): Promise<void> {
   window.__PRVISION_READY__ = false;
   window.__PRVISION_ERROR__ = null;
   setPhase('booting');
+  installStepBridge();
+  window.__PRVISION_SETTLE__ = settle;
+  if (live) installLiveActivity();
 
   const load = HARNESS_LOADERS[componentId];
   if (!/^\d+$/.test(componentId) || load === undefined) {
@@ -100,12 +169,27 @@ async function main(): Promise<void> {
 
   setPhase('importing');
   let harness: PrvisionAngularHarness;
+  let steps: Step[] = [];
   try {
     const mod = (await load()) as { default?: PrvisionAngularHarness };
     if (!mod.default || typeof mod.default.component !== 'function') {
       throw new Error('The harness module must `export default definePrvisionHarness({ component, ... })`.');
     }
-    harness = mod.default;
+    const loaded = mod.default;
+    const extra = loaded.states ?? [];
+    const names = ['Default', ...extra.map((s) => s.name)];
+    const selected = stateName === 'Default' ? null : extra.find((s) => s.name === stateName);
+    if (stateName !== 'Default' && selected === undefined) {
+      throw new Error(`State "${stateName}" not found in this harness. States: ${names.join(', ')}.`);
+    }
+    harness = {
+      ...loaded,
+      inputs: { ...(loaded.inputs ?? {}), ...(selected?.inputs ?? {}) },
+      providers: [...(loaded.providers ?? []), ...(selected?.providers ?? [])],
+      http: [...(selected?.http ?? []), ...(loaded.http ?? [])],
+    };
+    steps = (selected?.steps ?? []) as Step[];
+    window.__PRVISION_STATE__ = { name: stateName, names, steps };
     await harness.setup?.();
   } catch (error) {
     reportError('import', error);
@@ -150,18 +234,16 @@ async function main(): Promise<void> {
   if (window.__PRVISION_ERROR__) return;
 
   setPhase('settling');
-  // FRAMEWORK_WHEN_STABLE: appRef.whenStable() on Angular >= 18, the isStable observable on 17 (generated).
-  window.__PRVISION_UNSTABLE__ = !(await settleWithin(FRAMEWORK_WHEN_STABLE(appRef), settleMaxMs));
-  await nextFrame();
-  await nextFrame();
-  await waitForDomQuiet(document.body, quietMs, settleMaxMs);
-  await settleWithin(document.fonts.ready, assetWaitMs);
-  await waitForImages(assetWaitMs);
-  await nextFrame();
-  await nextFrame();
+  settleAppRef = appRef;
+  window.__PRVISION_UNSTABLE__ = !(await settleAll());
   if (window.__PRVISION_ERROR__) return;
   window.__PRVISION_READY__ = true;
   setPhase('ready');
+
+  if (live) {
+    const report = await runStepsInPage(steps, settle, { timeoutMs: LIVE_STEP_TIMEOUT_MS });
+    postToParent({ type: 'state', state: stateName, replayed: report.replayed, skipped: report.skipped });
+  }
 }
 
 void main().catch((error: unknown) => reportError('mount', error));

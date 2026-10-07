@@ -40,8 +40,9 @@ export function headlineFor(kind: RenderFailureKind, detail: string): string {
       return `Browser error: ${detail}`;
     case "screenshot":
       return `Screenshot failed: ${detail}`;
+    case "step_failed":
+      return `Interaction step failed: ${detail}`;
     case "timeout":
-    case "step_failed": // 16b gives it its own headline; never produced before 16b
     case "file_missing":
     case "budget_exceeded":
     case "vite_unavailable":

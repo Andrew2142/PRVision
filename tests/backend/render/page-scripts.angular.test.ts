@@ -23,7 +23,8 @@ test("readHarnessState: a React page without the Angular globals reads unstable 
     error: null,
     unstable: false,
     skippedInputs: [],
-    httpUnmatched: []
+    httpUnmatched: [],
+    state: null
   });
   assert.deepEqual(toHarnessState(null), {
     status: null,
@@ -31,7 +32,8 @@ test("readHarnessState: a React page without the Angular globals reads unstable 
     error: null,
     unstable: false,
     skippedInputs: [],
-    httpUnmatched: []
+    httpUnmatched: [],
+    state: null
   });
 });
 

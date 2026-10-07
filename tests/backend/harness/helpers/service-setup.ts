@@ -37,8 +37,22 @@ export function componentCandidate(name: string, overrides: Partial<ComponentCan
   };
 }
 
-/** A harness that passes HarnessValidator for componentCandidate(name). */
+/** A harness that passes HarnessValidator for componentCandidate(name) (16 §7.3 shape, one Default state). */
 export function validHarness(name: string): string {
+  return [
+    'import { definePrvisionHarness } from "../harness-api";',
+    `import { ${name} } from "../../src/components/${name}/${name}";`,
+    "",
+    "export default definePrvisionHarness({",
+    "  states: [",
+    `    { name: "Default", render: () => <div style={{ padding: 24, width: 360 }}><${name} /></div> }`,
+    "  ]",
+    "});"
+  ].join("\n");
+}
+
+/** The pre-16 `PRVisionHarness` shape, which the validator rejects for new harnesses (harness_shape, 16 §7.7.2). */
+export function invalidHarness(name: string): string {
   return [
     'import type { ReactElement } from "react";',
     `import { ${name} } from "../../src/components/${name}/${name}";`,
@@ -47,11 +61,6 @@ export function validHarness(name: string): string {
     `  return <div style={{ padding: 24, width: 360 }}><${name} /></div>;`,
     "}"
   ].join("\n");
-}
-
-/** Same harness with a wrong default export name (fails default_export_wrong_name). */
-export function invalidHarness(name: string): string {
-  return validHarness(name).replace("function PRVisionHarness", "function Harness");
 }
 
 export function okResponse(name: string, overrides: Partial<HarnessAiResponse> = {}): HarnessAiResponse {

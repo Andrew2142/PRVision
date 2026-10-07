@@ -651,3 +651,81 @@ test("a removed component is validated against the base side only", async () => 
     true
   );
 });
+
+// ---------------------------------------------------------------------------------------------------------------
+// 16 §7.4, §7.7: states
+// ---------------------------------------------------------------------------------------------------------------
+
+const SIGNAL_STATES =
+  "{ component: SignalCardComponent, inputs: { title: 'Signal inputs', count: '21' }, states: [" +
+  "{ name: 'Empty', inputs: { count: '0' } }, " +
+  "{ name: 'Menu open', steps: [{ action: 'click', target: { by: 'role', role: 'button', name: 'More' } }] }] }";
+
+test("AngularHarnessValidator.validate accepts a three-state harness and returns Default first", async () => {
+  const report = await validateSignal(signalHarness(SIGNAL_STATES), { stateAllowance: 3 });
+  assert.deepEqual(report.errors, []);
+  assert.deepEqual(report.states, [
+    { name: "Default", steps: [] },
+    { name: "Empty", steps: [] },
+    { name: "Menu open", steps: [{ action: "click", target: { by: "role", role: "button", name: "More" } }] }
+  ]);
+});
+
+test("AngularHarnessValidator.validate: a harness without states is one Default state", async () => {
+  const report = await validateSignal(signalHarness(SIGNAL_OK));
+  assert.deepEqual(report.states, [{ name: "Default", steps: [] }]);
+});
+
+test("unknown_input: a state's inputs are checked against the target's inputs", async () => {
+  const report = await validateSignal(
+    signalHarness(
+      "{ component: SignalCardComponent, inputs: { title: 'x' }, states: [{ name: 'Typo', inputs: { titel: 'y' } }] }"
+    ),
+    { stateAllowance: 2 }
+  );
+  assert.deepEqual(errorCodes(report), ["unknown_input"]);
+  assert.match(report.errors[0]?.message ?? "", /no input named titel on the head side/);
+});
+
+test("forbidden_provider: providers inside a state", async () => {
+  const report = await validateSignal(
+    signalHarness(
+      "{ component: SignalCardComponent, inputs: { title: 'x' }, states: [{ name: 'Http', providers: [provideHttpClient()] }] }",
+      ["import { provideHttpClient } from '@angular/common/http';"]
+    ),
+    { stateAllowance: 2 }
+  );
+  assert.deepEqual(errorCodes(report), ["forbidden_provider"]);
+});
+
+test("harness_shape: a state's http entry without url is checked like the top-level http", async () => {
+  const report = await validateSignal(
+    signalHarness(
+      "{ component: SignalCardComponent, inputs: { title: 'x' }, states: [{ name: 'Error', http: [{ status: 500 }] }] }"
+    ),
+    { stateAllowance: 2 }
+  );
+  assert.deepEqual(errorCodes(report), ["harness_shape"]);
+});
+
+test("state_name_invalid: a state named Default (the top-level descriptor is Default)", async () => {
+  const report = await validateSignal(
+    signalHarness("{ component: SignalCardComponent, inputs: { title: 'x' }, states: [{ name: 'Default' }] }"),
+    { stateAllowance: 2 }
+  );
+  assert.deepEqual(errorCodes(report), ["state_name_invalid"]);
+  assert.equal(report.states, null);
+});
+
+test("state_too_many: Angular states over the allowance count Default", async () => {
+  const report = await validateSignal(signalHarness(SIGNAL_STATES), { stateAllowance: 2 });
+  assert.deepEqual(errorCodes(report), ["state_too_many"]);
+  assert.equal(report.errors[0]?.message, "3 states written; the state allowance is 2 (Default included).");
+});
+
+test("forbidden_import: an Angular harness importing the step runtime", async () => {
+  const report = await validateSignal(
+    signalHarness(SIGNAL_OK, ["import { installStepBridge } from '../prvision-steps';"])
+  );
+  assert.deepEqual(errorCodes(report), ["forbidden_import"]);
+});

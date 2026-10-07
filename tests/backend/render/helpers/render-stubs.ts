@@ -206,7 +206,9 @@ export class FakeBrowserSession implements RenderBrowserSession {
         consoleErrors: [],
         durationMs: 5,
         blockedRequests: 0,
-        stylesheetWarning: null
+        stylesheetWarning: null,
+        stateNames: [input.stateName],
+        stepsRun: 0
       };
     }
     if (scripted.kind === "browser") {
@@ -301,12 +303,13 @@ export interface FakeRenderEnv {
   templatesDir: string;
 }
 
-/** Writes the three template files (contents irrelevant for stubs) into `dir`. */
+/** Writes the React template files and the shared step runtime (contents irrelevant for stubs) into `dir`. */
 export function writeFakeTemplates(dir: string): void {
-  fs.mkdirSync(dir, { recursive: true });
-  for (const file of ["index.html", "entry.tsx", "error-boundary.tsx"]) {
+  fs.mkdirSync(path.join(dir, "shared"), { recursive: true });
+  for (const file of ["index.html", "entry.tsx", "error-boundary.tsx", "harness-api.ts"]) {
     fs.writeFileSync(path.join(dir, file), `// ${file}\n`);
   }
+  fs.writeFileSync(path.join(dir, "shared", "prvision-steps.ts"), "// prvision-steps.ts\n");
 }
 
 /** A PipelineContext over two temp worktrees (`base`, `head`) with `src/index.css`, plus a temp data dir. */
@@ -380,7 +383,7 @@ export function harnessFor(
   const target = path.posix.relative(".prvision-harness/components", filePath.replace(/\.[jt]sx?$/, ""));
   return {
     componentId,
-    harnessSource: `import Target from "${target}";\nexport default function PRVisionHarness() {\n  return <Target />;\n}\n`,
+    harnessSource: `import { definePrvisionHarness } from "../harness-api";\nimport Target from "${target}";\nexport default definePrvisionHarness({ states: [{ name: "Default", render: () => <Target /> }] });\n`,
     mockedModules: mocks,
     notes,
     states: [{ name: "Default", steps: [] }],

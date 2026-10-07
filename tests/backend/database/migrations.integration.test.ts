@@ -285,7 +285,7 @@ describe("database migrations (real Postgres)", { skip }, () => {
     const id = await insertComponent(visualizationId, {
       changeKind: "replaced",
       ...base,
-      baseHarnessSource: "export default function PRVisionHarness() { return null; }",
+      baseHarnessSource: 'export default definePrvisionHarness({ states: [{ name: "Default", render: () => null }] });',
       baseHarnessNotes: "notes",
       baseMockedModules: [],
       successorEvidence: evidence

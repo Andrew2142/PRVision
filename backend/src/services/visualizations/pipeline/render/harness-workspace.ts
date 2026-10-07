@@ -13,7 +13,10 @@ import { packageNameOf } from "../mock-rules";
 import type { HarnessSideLayout, RenderSide } from "./render-types";
 
 export const HARNESS_JSX_PRAGMA = "/** @jsxRuntime automatic */";
-export const HARNESS_TEMPLATE_FILES = ["index.html", "entry.tsx", "error-boundary.tsx"] as const;
+export const HARNESS_TEMPLATE_FILES = ["index.html", "entry.tsx", "error-boundary.tsx", "harness-api.ts"] as const;
+/** Framework-free page files (16 §7.5) under `<templates>/shared/`, copied next to both frameworks' entries. */
+export const SHARED_TEMPLATE_DIR_NAME = "shared";
+export const SHARED_TEMPLATE_FILES = ["prvision-steps.ts"] as const;
 export const HARNESS_CACHE_DIR_NAME = ".vite-cache";
 export const HARNESS_COMPONENTS_DIR_NAME = "components";
 
@@ -179,12 +182,16 @@ async function pathExists(absolutePath: string): Promise<boolean> {
 }
 
 /**
- * Throws HarnessTemplatesMissingError when index.html, entry.tsx or error-boundary.tsx is absent in `dir`.
+ * Throws HarnessTemplatesMissingError when a React template (or a shared page file) is absent in `dir`.
  *
  * @param dir - The templates directory (HARNESS_TEMPLATES_DIR).
  */
 export async function assertTemplatesPresent(dir: string): Promise<void> {
-  for (const file of HARNESS_TEMPLATE_FILES) {
+  const files = [
+    ...HARNESS_TEMPLATE_FILES,
+    ...SHARED_TEMPLATE_FILES.map((file) => path.join(SHARED_TEMPLATE_DIR_NAME, file))
+  ];
+  for (const file of files) {
     if (!(await pathExists(path.join(dir, file)))) {
       throw new HarnessTemplatesMissingError(
         "PRVision's harness templates are missing (backend/harness-templates). Reinstall PRVision."
@@ -213,6 +220,12 @@ export class HarnessWorkspaceWriter {
     await fs.mkdir(layout.componentsDir, { recursive: true });
     for (const file of HARNESS_TEMPLATE_FILES) {
       await fs.copyFile(path.join(this.templatesDir, file), path.join(layout.harnessDir, file));
+    }
+    for (const file of SHARED_TEMPLATE_FILES) {
+      await fs.copyFile(
+        path.join(this.templatesDir, SHARED_TEMPLATE_DIR_NAME, file),
+        path.join(layout.harnessDir, file)
+      );
     }
     await writeAtomic(path.join(layout.harnessDir, ".gitignore"), "*\n");
     const probes = new Map<string, boolean>();
