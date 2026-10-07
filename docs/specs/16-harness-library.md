@@ -16,40 +16,47 @@ Contract changes are listed in section 22. The lead applies them to 00 as **Revi
 
 | Task | Title | Owns (files) | Codes against | Blocks |
 |---|---|---|---|---|
-| **16a** | Contracts, schema and shared plumbing | enums (§6.1), `database/schema.ts`, migration `0009_harness_library.sql` + `meta/*`, `models/**`, `scripts/generate-models.ts` (`JSON_COLUMN_TYPES`), `enums/utility/table.ts`, `database/table-registry.ts`, `types/harness-library.ts` (verbatim §6.11), additions to `types/visualization-pipeline.ts` (verbatim §6.12), every new config constant (§16) and its boot validation, `utilities/helpers/ai-cost.ts` (§6.13), `AiUsage.cacheWriteInputTokens` in the provider and recorder, `ArtifactStore` state image paths (§6.14), `QueueService` multi-queue support (§6.15) | 00 Revision 9 | every other task |
-| **16b** | Multi-state harness format | `harness-templates/harness-api.ts` (new), `harness-templates/entry.tsx`, `harness-templates/shared/prvision-steps.ts` (new), `harness-templates/angular/{harness-api.ts,main.ts}`, `pipeline/harness-states.ts` (new), `pipeline/harness-prompts.ts`, `pipeline/angular/angular-harness-prompts.ts`, `pipeline/harness-validator.ts`, `pipeline/angular/angular-harness-validator.ts`, `pipeline/render/harness-workspace.ts` (template list), `pipeline/render/angular/angular-harness-workspace.ts` (template copy), `pipeline/render/page-scripts.ts`, `pipeline/render/browser-session.ts`, `pipeline/render/render-errors.ts`, the `PageRenderInput`/`PageRenderOutcome` block of `pipeline/render/render-types.ts` | §6.11, §7 | 16e at run time, 16i |
-| **16c** | Library store, fingerprint and component inventory | `services/harness-library/{harness-library-store.ts, library-fingerprint.ts, component-inventory.ts, index.ts}` | §6.11, §8.1–§8.3 | 16d, 16f, 16g, 16k at run time |
-| **16d** | Pipeline integration (reuse, D7, D9) | `pipeline/library-resolution-service.ts` (new), `pipeline/global-style-triggers.ts` (new), `pipeline/change-analysis-service.ts`, `pipeline/change-source.ts` (working-tree trigger files), `pipeline/angular/angular-change-analysis-service.ts`, `pipeline/harness-generation-service.ts`, `pipeline/angular/angular-harness-generation.ts`, `pipeline/harness-context-builder.ts` and `pipeline/angular/angular-harness-context-builder.ts` (library purpose), `pipeline/visualization-worker-service.ts`, `pipeline/stage-registry.ts`, `services/visualizations/visualizations-service.ts` (`continueRun` wording only), `pipeline/workspace-prepare-service.ts` (working-tree snapshot ref, §11.2) | §6.11, §6.12, §8.4–§8.7; 16c's `HarnessLibraryStorePort` | 16e at run time |
-| **16e** | Per-state render, diff, results and views | `pipeline/render-service.ts`, `pipeline/render/angular/angular-render-service.ts`, the `RenderWorkItem` block of `render-types.ts`, `pipeline/render/render-groups.ts` (batching), `pipeline/image-diff-service.ts`, `pipeline/summary-service.ts` + `pipeline/summary-prompts.ts` (user prompt only), `dtos/visualizations/{visualization-view.dto.ts, visualization-component-view.dto.ts, component-state-view.dto.ts}`, `services/visualizations/visualizations-service.ts` (`get` mapping) | §6.12, §9; 16b's page contract (§7.6) | 16h at run time |
-| **16f** | Scan job, estimate and library API | `services/harness-library/{harness-library-service.ts, library-estimate-service.ts, library-scan-worker-service.ts, library-job-console.ts, library-workspace.ts}`, `controllers/harness-library-controller.ts`, `dtos/harness-library/*` (except export/import), routes block "library" in `routes/index.ts`, `app.ts` controller wiring, `worker.ts` scan worker block, `repositories-service.ts` (create/update/remove additions), `dtos/repositories/{repository-create.dto.ts, repository-update.dto.ts, repository-view.dto.ts, library-estimate-request.dto.ts}` | §6, §8.1–§8.3 (16c ports), §10, §14 | 16h at run time |
-| **16g** | Repair and run workspace recreation | `services/harness-library/harness-repair-worker-service.ts`, `services/visualizations/run-workspace-recreator.ts`, repair methods in `harness-library-service.ts` (own block), repair routes block, `worker.ts` repair worker block | §6, §11; 16b validator, 16c store, 16e per-state persistence helpers (`persistComponentStates`, contract §9.4) | 16i |
-| **16h** | Frontend: library, scan, states, repair | `frontend/src/app/core/models/{harness-library.model.ts, visualization.model.ts, repository.model.ts, domain-enums.model.ts}`, `ApiService` library block, add-repository dialog library step, `features/repositories/components/{harness-library-card, repository-settings-card, scan-dialog}/*`, `features/library-jobs/**` (new route), visualization detail: `components/state-tabs/*`, `component-card`, `image-compare` (state input only), run header counts, Repair and Repair all broken | §14 (API), §15 | — |
-| **16i** | Live mode backend | `services/live/{live-session-service.ts, live-session-worker-service.ts, live-host-manager.ts, index.ts}`, `pipeline/render/live/{live-vite-plugin.ts, live-page-headers.ts, live-init-script.ts}`, `pipeline/render/angular/angular-static-host.ts` (live options), `pipeline/render/vite-server-config.ts` (live options), `controllers/live-sessions-controller.ts`, `dtos/live/*`, routes block "live", `worker.ts` live worker block | §6.9, §12; 16b templates; 16g `RunWorkspaceRecreator` | 16j |
-| **16j** | Live mode frontend | `core/models/live-session.model.ts`, `ApiService` live block, `features/visualizations/visualization-detail/live-session.store.ts`, `features/visualizations/components/live-compare/*`, `image-compare` Live mode | §12.6, §14.6, §15.6 | — |
-| **16k** | Export and import | `services/harness-library/library-transfer-service.ts`, `dtos/harness-library/{library-export-file.dto.ts, library-import.dto.ts, library-import-result-view.dto.ts}`, routes block "transfer", `app.ts` import body parser, frontend `features/repositories/components/import-library-dialog/*`, export button | §13 | — |
-| **16l** | Fixtures, integration tests, QA | `tools/create-fixture-repo.mjs` + `tools/fixture-repo/*` (new branches), `tools/create-angular-fixture-repo.mjs` (new branch), `tests/backend/integration/{harness-library.integration.test.ts, library-scan.integration.test.ts, live-mode.integration.test.ts, library-transfer.integration.test.ts}`, `docs/build-notes/16-qa.md` | everything above | — |
+| **16a** | Contracts, schema and shared plumbing | enums (§6.1), `database/schema.ts`, migration `0009_harness_library.sql` + `meta/*`, `models/**`, `backend/scripts/generate-models.ts` (`JSON_COLUMN_TYPES`), `enums/utility/table.ts`, `database/table-registry.ts`, `types/harness-library.ts` (verbatim §6.11), additions to `types/visualization-pipeline.ts` (verbatim §6.12), the compile shims of §6.12, every new config constant (§16) and its boot validation, `utilities/helpers/ai-cost.ts` (§6.13), `AiUsage.cacheWriteInputTokens` in the provider and recorder, `ArtifactStore` state image paths and the artifact path guard (§6.14), `pipeline/harness-step-text.ts` (`describeStep`, §14.5), `QueueService` multi-queue support (§6.15) | 00 Revision 9 | every other task |
+| **16b** | Multi-state harness format | `harness-templates/harness-api.ts` (new), `harness-templates/entry.tsx`, `harness-templates/shared/prvision-steps.ts` (new), `harness-templates/angular/{harness-api.ts,main.ts}`, `pipeline/harness-states.ts` (new), `pipeline/harness-prompts.ts`, `pipeline/angular/angular-harness-prompts.ts`, `pipeline/harness-validator.ts`, `pipeline/angular/angular-harness-validator.ts`, `pipeline/render/harness-workspace.ts` (template list), `pipeline/render/angular/angular-harness-workspace.ts` (template copy), `pipeline/render/page-scripts.ts`, `pipeline/render/browser-session.ts`, `pipeline/render/render-errors.ts`, the `PageRenderOutcome` block of `pipeline/render/render-types.ts`, and every **test fixture string** that holds a React harness source (§6.12 landing rule) | §6.11, §7 | 16d, 16g, 16i |
+| **16c** | Library store, fingerprint and component inventory | `services/harness-library/{harness-library-store.ts, library-fingerprint.ts, component-inventory.ts, index.ts}` | §6.11, §8.1–§8.3 | 16d, 16f, 16g, 16k |
+| **16d** | Pipeline integration (reuse, D7, D9) | `pipeline/library-resolution-service.ts` (new), `pipeline/global-style-triggers.ts` (new), `pipeline/change-analysis-service.ts`, `pipeline/change-source.ts` (working-tree trigger files), `pipeline/angular/angular-change-analysis-service.ts`, `pipeline/harness-generation-service.ts`, `pipeline/angular/angular-harness-generation.ts`, `pipeline/harness-context-builder.ts` and `pipeline/angular/angular-harness-context-builder.ts` (library purpose), `pipeline/visualization-worker-service.ts`, `pipeline/stage-registry.ts` and `pipeline/frameworks/angular-strategy.ts` (`libraryResolution()` block), `pipeline/workspace-prepare-service.ts` (working-tree snapshot, `linkWorkspaceNodeModules`, §11.2), `services/visualizations/visualizations-service.ts` and `services/repositories/repositories-service.ts` (16d blocks) | §6.11, §6.12, §8.4–§8.7; 16c store, fingerprinter; 16e render results | 16f, 16g |
+| **16e** | Per-state render, diff, results and views | `pipeline/render-service.ts`, `pipeline/render/angular/angular-render-service.ts`, the `RenderWorkItem` block of `render-types.ts`, `pipeline/render/render-groups.ts` (batching), `pipeline/render/live-planning.ts` (new), `pipeline/component-state-persistence.ts` (new), `pipeline/image-diff-service.ts`, `pipeline/summary-service.ts` + `pipeline/summary-prompts.ts` (user prompt only), `dtos/visualizations/{visualization-view.dto.ts, visualization-component-view.dto.ts, component-state-view.dto.ts}`, `services/visualizations/visualizations-service.ts` (`get`/`list` mapping block), the `render(deps)` overrides in `stage-registry.ts` and `frameworks/angular-strategy.ts` (16e block) | §6.12, §9; 16b's page contract (§7.6) through the 16a shim | 16d, 16f, 16g, 16i |
+| **16f** | Scan job, estimate and library API | `services/harness-library/{harness-library-service.ts, library-estimate-service.ts, library-scan-worker-service.ts, library-job-console.ts, library-job-state.ts, library-job-usage-recorder.ts, library-source-queries.ts, scan-render-adapters.ts, library-job-recovery.ts, library-workspace.ts}`, `controllers/harness-library-controller.ts`, `dtos/harness-library/*` (except the 16g and 16k files), routes block "library" in `routes/index.ts`, `app.ts` controller wiring, `worker.ts` scan worker and library recovery block, `repositories-service.ts` (16f block: create/update/remove additions), `dtos/repositories/{repository-create.dto.ts, repository-update.dto.ts, repository-view.dto.ts, library-estimate-request.dto.ts}` | §6, §8.1–§8.3 (16c), §8.6 (16d), §9.2 (16e), §10, §14 | 16g, 16k |
+| **16g** | Repair and run workspace recreation | `services/harness-library/harness-repair-worker-service.ts`, `services/visualizations/run-workspace-recreator.ts`, repair methods in `harness-library-service.ts` (own block), `dtos/harness-library/component-param.dto.ts`, repair routes block, `worker.ts` repair worker block, `visualizations-service.ts` and `repositories-service.ts` (16g blocks) | §6, §11; 16b `extractHarnessStates`, 16c store, 16d snapshot, 16e `persistComponentStates` (§9.4), 16f job helpers | 16i |
+| **16h** | Frontend: library, scan, states, repair | `frontend/src/app/core/models/{harness-library.model.ts, visualization.model.ts, repository.model.ts, domain-enums.model.ts}`, `ApiService` library block, add-repository dialog library step, `features/repositories/components/{harness-library-card, repository-settings-card, scan-dialog}/*`, `features/library-jobs/**` (new route), visualization detail: `components/state-tabs/*`, `component-card`, `image-compare` (state input only), run header counts, default filter, Repair and Repair all broken | §14 (API), §15 | — |
+| **16i** | Live mode backend | `services/live/{live-session-service.ts, live-session-worker-service.ts, live-host-manager.ts, live-session-recovery.ts, index.ts}`, `pipeline/render/live/{live-vite-plugin.ts, live-page-headers.ts, live-init-script.ts}`, `pipeline/render/angular/angular-static-host.ts` (live options), `pipeline/render/vite-server-config.ts`, `pipeline/render/vite-host-process.ts` and the `ViteHostStartOptions` block of `render-types.ts` (live options), `controllers/live-sessions-controller.ts`, `dtos/live/*`, routes block "live", `app.ts` live controller wiring, `worker.ts` live worker block, `visualizations-service.ts` and `repositories-service.ts` (16i blocks) | §6.9, §12; 16b templates; 16e `planLiveItems`; 16g `RunWorkspaceRecreator` | 16j |
+| **16j** | Live mode frontend | `core/models/live-session.model.ts`, `ApiService` live block, `features/visualizations/visualization-detail/live-session.store.ts`, `features/visualizations/components/live-compare/*`, `image-compare` Live mode, `component-card` and `visualization-detail` (16j blocks: live inputs, store provider, stop on destroy) | §12.6, §14.6, §15.6 | — |
+| **16k** | Export and import | `services/harness-library/library-transfer-service.ts`, `dtos/harness-library/{library-export-file.dto.ts, library-import.dto.ts, library-import-result-view.dto.ts}`, routes block "transfer", `app.ts` import body parser, frontend `features/repositories/components/import-library-dialog/*`, `harness-library-card` export/import buttons, `ApiService` transfer block | §13 | — |
+| **16l** | Fixtures, integration tests, QA | `tools/fixture-repo/sample-app-files.mjs`, `tools/fixture-repo/sample-angular-app-files.mjs` (new branches, `FIXTURE_VERSION`), `tests/backend/tools/*`, `tests/backend/integration/{harness-library.integration.test.ts, library-scan.integration.test.ts, live-mode.integration.test.ts, library-transfer.integration.test.ts}`, `docs/build-notes/16-qa.md` | everything above | — |
 
-Dispatch (follows D15: library and states first, then live mode, then export and import):
+Dispatch follows D15 (library and states first, then live mode, then export and import). Waves are ordered so that every task compiles against code that already exists: an agent never imports a class or calls a signature that a parallel task is still writing. After every task `npm run verify` passes (pre-existing failures excepted, named in the build note).
 
-1. **Before dispatch:** the lead appends section 22 to 00 as Revision 9 and adds this sheet to `docs/specs/README.md`.
-2. **Wave 8a (alone):** 16a. It is small and mechanical, but every other task imports its enums, tables, types and constants. It lands first so no two agents edit `schema.ts` or generate migrations.
-3. **Wave 8b (parallel):** 16b, 16c, 16d, 16e, 16f, 16g, 16h, and the fixture-generator part of 16l. Each task codes against §6.11/§6.12 and stubs its neighbours in tests (00 §3 rule). File ownership above is disjoint except the shared files below.
-4. **Wave 8c (parallel, after 8b is merged):** 16i and 16j (live mode).
-5. **Wave 8d (after 8c):** 16k (export and import).
-6. **Wave 8e:** the integration tests and the manual QA run of 16l.
+1. **Before dispatch (done in the sheet 16 commit):** section 22 is appended to 00 as Revision 9 (00 §21) and this sheet is listed in `docs/specs/README.md`.
+2. **Wave 8a (alone):** 16a. Every other task imports its enums, tables, types, constants and compile shims. It lands first so no two agents edit `schema.ts` or generate migrations.
+3. **Wave 8b (parallel):** 16b, 16c, 16e, 16h, and the fixture-generator part of 16l. They depend only on 16a (16e talks to 16b's page through the `PageRenderInput.stateName` shim and fake sessions in tests).
+4. **Wave 8c (alone):** 16d. It needs 16c's store and fingerprinter and 16e's per-state render results.
+5. **Wave 8d (alone):** 16f. It needs 16d's generation options, `NoopHarnessPersistence` and `linkWorkspaceNodeModules`, and 16e's render overrides.
+6. **Wave 8e (alone):** 16g. It needs 16f's service file, controller and job helpers.
+7. **Wave 8f (parallel):** 16i and 16j (live mode, D15 step 2).
+8. **Wave 8g (alone):** 16k (export and import, D15 step 3).
+9. **Wave 8h:** the integration tests and the manual QA run of 16l.
 
-Shared files edited by more than one task (append-only; each task touches only its own clearly commented block):
+Shared files edited by more than one task (each task touches only its own clearly commented block; later waves append, never rewrite an earlier block):
 
 | File | Blocks |
 |---|---|
 | `backend/src/routes/index.ts` | 16f "library", 16g "repair", 16i "live", 16k "transfer" |
-| `backend/src/app.ts` | 16f controller wiring (also wires 16g/16k routes into the same controller), 16i controller wiring, 16k import body parser |
-| `backend/src/worker.ts` | 16f scan worker, 16g repair worker, 16i live worker |
-| `backend/src/services/harness-library/harness-library-service.ts` | 16f (summary, estimate, scans, jobs), 16g (repair methods), 16k delegates to `library-transfer-service.ts` from its own methods |
-| `backend/src/services/visualizations/pipeline/render/render-types.ts` | 16b (`PageRenderInput`, `PageRenderOutcome`), 16e (`RenderWorkItem`, state plan types) |
-| `backend/src/services/visualizations/visualizations-service.ts` | 16d (`continueRun` wording), 16e (`get` mapping) |
+| `backend/src/app.ts` | 16f controller wiring (the same `HarnessLibraryController` later serves 16g/16k routes), 16i live controller wiring, 16k import body parser |
+| `backend/src/worker.ts` | 16f scan worker + library job recovery, 16g repair worker, 16i live worker + live recovery |
+| `backend/src/services/harness-library/harness-library-service.ts` | 16f (summary, estimate, scans, jobs), 16g (repair methods), 16k (export/import methods delegating to `library-transfer-service.ts`) |
+| `backend/src/services/visualizations/pipeline/render/render-types.ts` | 16a (shim fields), 16b (`PageRenderOutcome`), 16e (`RenderWorkItem`, state plan types), 16i (`ViteHostStartOptions.live`) |
+| `backend/src/services/visualizations/pipeline/stage-registry.ts`, `frameworks/angular-strategy.ts` | 16d (`libraryResolution()`), 16e (`render(deps)` overrides) |
+| `backend/src/services/visualizations/visualizations-service.ts` | 16d (`continueRun` wording; `remove` deletes the working-tree snapshot folder), 16e (`get`/`list` mapping), 16g (`remove` 409 while a repair is active), 16i (`remove` stops the live session) |
+| `backend/src/services/repositories/repositories-service.ts` | 16d (`remove` deletes the snapshot folders of its runs), 16f (create/update; `remove` 409 while a library job is active), 16i (`remove` stops live sessions of its runs) |
 | `frontend/src/app/core/services/api.service.ts` | 16h library block, 16j live block, 16k transfer block |
-| `frontend/src/app/features/visualizations/components/image-compare/*` | 16h (state input, wave 8b), 16j (Live mode, wave 8c) |
+| `frontend/src/app/features/visualizations/components/image-compare/*` | 16h (state input), 16j (Live mode) |
+| `frontend/src/app/features/visualizations/components/component-card/*`, `visualization-detail/*` | 16h (states, harness status, header), 16j (live inputs, `LiveSessionStore` provider, stop on destroy) |
+| `frontend/src/app/features/repositories/components/harness-library-card/*` | 16h (card), 16k (Export and Import buttons) |
 
 ---
 
@@ -122,7 +129,7 @@ Also out of scope (engineering): a screen that lists or edits individual library
 
 | Decision | Where implemented |
 |---|---|
-| D1 library inside PRVision | §6.3; nothing is written to the clone (§19) |
+| D1 library inside PRVision | §6.3; nothing is written to the clone (§11.2, §19) |
 | D2 entries, identity, fingerprint, reuse while it renders | §6.3, §8.1, §8.4 |
 | D3 build mode chosen at Add repository, estimate | §6.2, §10.7, §15.2 |
 | D4 state allowance 1–5, maximum, Default always, per repository, rescan | §6.2, §7, §10.6, §15.4 |
@@ -161,14 +168,16 @@ The decisions file fixes the product. These are the engineering choices it left 
 | E13 | The scan renders **one side** (the scan commit) to verify each harness, through the existing render services with in-memory persistence and a scratch artifact folder. Scan screenshots are deleted. | D11 needs "will not render on its own" to be known; screenshots are per run (D14). |
 | E14 | Scan, repair and live sessions run in the **worker process** on three new BullMQ queues (`harness-scans`, `harness-repairs`, `live-sessions`), each concurrency 1 except live (`LIVE_MAX_SESSIONS`). The API never spawns build servers. | Same architecture as visualizations (00 D3); a long scan does not block repairs. |
 | E15 | Scan and Continue scan are the same job kind `scan` ("write what is missing"); Rescan is kind `rescan` ("rewrite everything with the current allowance"). A cancelled or capped scan ends its job; Continue starts a new job. | Jobs are immutable records with one cap each; the UI label depends on the last job's outcome. |
-| E16 | Spending: scan jobs stop **before starting** an AI call whose expected cost would cross the cap; calls in flight finish (at most `HARNESS_CONCURRENCY_ANTHROPIC_API` − 1 calls of overshoot). The final status is `cap_reached`. | A hard mid-call abort would waste the tokens already spent. |
+| E16 | Spending: scan jobs stop **before starting** an AI call whose expected cost, added to the spend so far and the expected cost of the calls already in flight, would cross the cap. Calls in flight finish, so the overshoot is bounded by the cost of at most `HARNESS_CONCURRENCY_ANTHROPIC_API` calls and in practice by the estimation error of those calls. The final status is `cap_reached`. | A hard mid-call abort would waste the tokens already spent. |
 | E17 | Prices are a constant table (`AI_MODEL_PRICES_USD_PER_MTOK`, §16.3). An unknown model is priced with the most expensive listed model and labelled approximate, so the cap stays conservative. | D13 says "published prices"; there is no pricing API. |
-| E18 | Working-tree runs get a **snapshot commit** of the head worktree, kept alive by the ref `refs/prvision/wt-<visualizationId>` in the user's clone (00 §4 already allows `refs/prvision/*` refs), deleted with the visualization. Live mode and repair recreate the head side from it. | D10 requires older runs to go live; uncommitted changes are otherwise lost after the run. Only a ref under PRVision's namespace and git objects are written, never the working copy. |
+| E18 | Working-tree runs keep a **snapshot of the uncommitted changes in PRVision's data dir** (`<dataDir>/snapshots/<visualizationId>/`: the binary patch against the base commit plus copies of the untracked files, exactly what 07 already applies to the head worktree), deleted with the visualization. Live mode and repair recreate the head side by applying it to a worktree at `base_sha`. Nothing is written to the user's clone (no commit, no ref). | D10 requires older runs to go live; uncommitted changes are otherwise lost after the run. D1 and the non-goals forbid writing to the user's repository. |
 | E19 | Live hosts are started lazily per **(side, render group)**, because a Vite host's mocks and an Angular build's file replacements are fixed per group (10 §5.3). One click starts the session for the whole run (D10); opening a card asks the session for that card's group. | Matches the render engine; keeps memory bounded (`LIVE_MAX_HOSTS_PER_SIDE`). |
 | E20 | Live pages run in the reviewer's browser in an iframe served from `127.0.0.1:<port>`. They get the fixed start time and seeded random numbers of screenshots, but time advances and animations run. A Content-Security-Policy blocks off-origin requests, matching the screenshot sandbox. | Interactive, yet the first frame matches the screenshot. |
 | E21 | Export is the envelope `data` of a JSON API response; the browser saves it as a file. Import posts the file content as JSON (route-specific body limit). | No change to the envelope contract (00 §14.2). |
 | E22 | The repository page shows a library card with counts and actions, plus a settings card (state allowance). The scan progress page is a new route `/library-jobs/:id`. | D3/D4/D12 surfaces; no entry-level screen (non-goal by scope). |
 | E23 | Default state allowance is **3** for new repositories (pre-selected in the dialog) and for existing repositories in the migration. Existing repositories get build mode `grow`. | A maximum, not a target; simple components still get one state. |
+| E24 | The "Rescan to apply" hint (D4) is **derived from the entries**: it shows for `scan` repositories when any saved harness was written with an allowance different from the repository's current one. There is no "scanned allowance" column. | Correct after partial, capped, cancelled or continued scans, and after imports; nothing to keep in sync. |
+| E25 | Library writes use **optimistic revisions** (`expectedRevision`): `0` = insert only, `n` = replace only revision `n`, `null` = unconditional (repair and import only, which are explicit user actions). Runs and scans never overwrite a revision they did not read. | A run, a scan and a repair can touch the same entry concurrently; the newest explicit write wins and no AI-written harness is silently replaced by an older plan. |
 
 ---
 ## 5. File inventory
@@ -185,18 +194,19 @@ All backend paths are under `backend/src/` unless stated. "pipeline" = `services
 | `database/schema.ts` | §6.2–§6.9 |
 | `database/migrations/0009_harness_library.sql` + `meta/0009_snapshot.json` + `_journal.json` | generated by `npm run db:generate -- --name harness_library`; never hand-edited after generation |
 | `database/table-registry.ts` | five new entries |
-| `scripts/generate-models.ts` | `JSON_COLUMN_TYPES` entries (§6.10); type import from `../types/harness-library` |
+| `backend/scripts/generate-models.ts` | `JSON_COLUMN_TYPES` entries (§6.10); type import from `../types/harness-library` |
 | `models/**` | regenerated by `npm run generate:models` |
 | `types/harness-library.ts` (new) | verbatim §6.11 |
 | `types/visualization-pipeline.ts` | verbatim additions §6.12 |
 | `types/index.ts` | export `harness-library` |
+| `pipeline/harness-step-text.ts` (new) | `describeStep` (§14.5) |
 | `config-consts/{ai,render,queue,app}.config.ts`, `config-consts/config-validation.ts` | §16 |
 | `utilities/helpers/ai-cost.ts` (new), `utilities/helpers/index.ts` | §6.13 |
 | `utilities/services/ai/anthropic-api-provider.ts` (`mapUsage`), `utilities/services/ai/ai-provider.ts` (`addUsage`, `ZERO_USAGE`) | `cacheWriteInputTokens` |
 | `pipeline/ai-usage-recorder.ts` | `StoredAiUsage` keeps the two optional cache counts |
-| `utilities/services/artifact-store.ts` | §6.14 |
+| `utilities/services/artifact-store.ts`, `middleware/artifact-path-guard-middleware.ts` (`ARTIFACT_PUBLIC_PATH_PATTERN`) | §6.14 |
 | `utilities/services/queue-service.ts` | §6.15 |
-| producers of the new required fields (09, 10, 11, 08/15b result builders, worker `buildContext`, test helpers) | compile shims only (§6.12 landing rule) |
+| producers and consumers of the new required fields (09, 10, 11, 08/15b result builders, validators, context builders, worker `buildContext`, test helpers) | compile shims only (§6.12 landing rule) |
 
 ### 5.2 16b — multi-state harness format
 
@@ -216,7 +226,8 @@ All backend paths are under `backend/src/` unless stated. "pipeline" = `services
 | `pipeline/render/page-scripts.ts` | `READ_HARNESS_STATE_SCRIPT` reads `__PRVISION_STATE__`; `buildMarkStepTargetScript`, `SETTLE_AFTER_STEPS_SCRIPT`; exports `buildSeededRandomSource(seed)` (used by 16i) |
 | `pipeline/render/browser-session.ts` | `harnessUrl(..., stateName)`, step execution (§7.6.3) |
 | `pipeline/render/render-errors.ts` | `step_failed` kind (repairable) |
-| `pipeline/render/render-types.ts` (16b block) | `PageRenderInput.stateName`, `PageRenderOutcome.stateNames`, `stepsRun` |
+| `pipeline/render/render-types.ts` (16b block) | `PageRenderOutcome.stateNames`, `stepsRun` (`PageRenderInput.stateName` is added by 16a) |
+| test fixture strings holding React harness sources (`tests/backend/harness/**`, `tests/backend/render/**`, `tests/backend/integration/**` scripted harnesses and helpers) | ported to the `definePrvisionHarness` shape so the new validator accepts them; expectations unchanged |
 
 ### 5.3 16c — library store, fingerprint, inventory
 
@@ -240,25 +251,26 @@ All backend paths are under `backend/src/` unless stated. "pipeline" = `services
 | `pipeline/angular/angular-harness-generation.ts` | passes the new options through |
 | `pipeline/harness-context-builder.ts`, `pipeline/angular/angular-harness-context-builder.ts` | `purpose: "change" | "library"` in the package (§8.6.2) |
 | `pipeline/visualization-worker-service.ts` | library step, pause, reuse, save-back, counts (§8.7) |
-| `pipeline/stage-registry.ts`, `pipeline/frameworks/angular-strategy.ts` | `libraryResolution()` factory; `render(deps)` gains optional `persistence` and `artifactStore` overrides (§10.4 step 7.4) |
-| `utilities/services/git-client.ts` | `snapshotWorktree`, `updateRef` (§11.2) |
-| `pipeline/workspace-prepare-service.ts` | working-tree snapshot commit and ref; cleanup keeps the ref (§11.2); exports `linkWorkspaceNodeModules(...)` (behaviour-preserving extraction of 07's link step, used by 16f/16g/16i) |
-| `services/visualizations/visualizations-service.ts` | `continueRun` console wording (new harnesses); `remove` deletes the snapshot ref |
+| `pipeline/stage-registry.ts`, `pipeline/frameworks/angular-strategy.ts` (16d block) | `libraryResolution()` factory |
+| `pipeline/workspace-prepare-service.ts` | saves the working-tree snapshot to the data dir (§11.2); exports `applyWorkingTreeSnapshot(...)` (used by 16g) and `linkWorkspaceNodeModules(...)` (behaviour-preserving extraction of 07's inline step 8, used by 16f/16g/16i) |
+| `services/visualizations/visualizations-service.ts` (16d block) | `continueRun` console wording (new harnesses); `remove` deletes `<dataDir>/snapshots/<id>/` |
+| `services/repositories/repositories-service.ts` (16d block) | `remove` deletes the snapshot folders of its runs |
 
 ### 5.5 16e — per-state render, diff and views
 
 | File | Responsibility |
 |---|---|
-| `pipeline/render-service.ts` | per-state pages, item pool, dynamic stage budget, fix-up only for written harnesses (§9) |
+| `pipeline/render-service.ts` | per-state pages, item pool, dynamic stage budget, fix-up only for written harnesses (§9); `RenderArtifactStore` gains the state paths and `ComponentRenderPersistence`/`ComponentRenderPayload` the state rows (both are defined in this file) |
+| `pipeline/stage-registry.ts`, `pipeline/frameworks/angular-strategy.ts` (16e block) | `render(deps)` gains optional `persistence` and `artifactStore` overrides passed to the render services (§10.4 step 7.4) |
 | `pipeline/render/angular/angular-render-service.ts` | same for Angular |
 | `pipeline/render/render-types.ts` (16e block) | `RenderWorkItem.states`, `StatePlan` |
 | `pipeline/render/render-groups.ts` | `splitLargeGroups(groups, RENDER_GROUP_MAX_ITEMS)` |
-| `pipeline/render/live-planning.ts` (new) | `planLiveItems(...)`: the pure planning part of both render services, exported for 16i |
+| `pipeline/render/live-planning.ts` (new) | `planLiveItems(...)` (signature §12.3 step 2): the pure planning part of both render services, exported for 16i; takes the states as input |
 | `pipeline/component-state-persistence.ts` (new) | `persistComponentStates(...)`, `aggregateComponentStates(...)` (§9.4) |
 | `pipeline/image-diff-service.ts` | per-state diff, aggregate row values (§9.5) |
 | `pipeline/summary-service.ts`, `pipeline/summary-prompts.ts` | state lines and image choice in the user prompt only (§9.7) |
 | `dtos/visualizations/component-state-view.dto.ts` (new), `visualization-component-view.dto.ts`, `visualization-view.dto.ts` | views (§14.5) |
-| `services/visualizations/visualizations-service.ts` (`get`) | loads states and library status |
+| `services/visualizations/visualizations-service.ts` (`get`/`list` block) | loads states, library status, `activeRepairJob`, `liveAvailable`, `checkedCount` |
 
 ### 5.6 16f — scan job, estimate, library API
 
@@ -274,11 +286,11 @@ All backend paths are under `backend/src/` unless stated. "pipeline" = `services
 | `lib/library-source-queries.ts` (new) | `createWorkspaceSourceQueries(ctx)` for scans and repairs |
 | `lib/scan-render-adapters.ts` (new) | `ScanArtifactStore`, `InMemoryRenderPersistence` (§10.3) |
 | `lib/library-job-recovery.ts` (new) | boot recovery and sweep for library jobs (§10.8) |
-| `controllers/harness-library-controller.ts` (new) | library, job, repair and transfer routes |
+| `controllers/harness-library-controller.ts` (new) | library and job routes (16g and 16k add their methods in their own blocks) |
 | `dtos/harness-library/{library-scan-create.dto.ts, library-estimate-query.dto.ts, library-job-events-query.dto.ts, library-summary-view.dto.ts, library-job-view.dto.ts, library-job-event-view.dto.ts, library-estimate-view.dto.ts, index.ts}` (new) | §14 |
 | `dtos/repositories/library-estimate-request.dto.ts` (new) | unregistered estimate |
-| `dtos/repositories/repository-create.dto.ts`, `repository-update.dto.ts`, `repository-view.dto.ts`, `dtos/repositories/index.ts` | §14.2 (and the missing `repository-update` barrel export) |
-| `services/repositories/repositories-service.ts` | create with build mode, allowance and optional scan; update allowance; remove blocks on active library jobs |
+| `dtos/repositories/repository-create.dto.ts`, `repository-update.dto.ts`, `repository-view.dto.ts`, `dtos/repositories/index.ts` (adds `library-estimate-request`) | §14.2 (`repository-update` stays exported from `dtos/index.ts` as today) |
+| `services/repositories/repositories-service.ts` (16f block) | create with build mode, allowance and optional scan (calls `HarnessLibraryService.startScan`, injected; `harness-library-service.ts` never imports `repositories-service.ts`); update allowance; remove blocks on active library jobs |
 | `routes/index.ts`, `app.ts`, `worker.ts` | own blocks |
 
 ### 5.7 16g — repair
@@ -288,8 +300,9 @@ All backend paths are under `backend/src/` unless stated. "pipeline" = `services
 | `services/visualizations/run-workspace-recreator.ts` (new) | recreate base and head worktrees of a finished run (§11.1) |
 | `lib/harness-repair-worker-service.ts` (new) | repair job processor (§11.3) |
 | `lib/harness-library-service.ts` (16g block) | `startRepair(visualizationId, componentIds | "broken")` |
-| `dtos/harness-library/library-repair-view.dto.ts` (new) | reuses `LibraryJobView` |
-| `routes/index.ts`, `worker.ts` | own blocks |
+| `dtos/harness-library/component-param.dto.ts` (new) | `ComponentParamDTO` (`id`, `componentId`) |
+| `routes/index.ts`, `worker.ts`, `controllers/harness-library-controller.ts` | own blocks (repair methods respond with `LibraryJobView`) |
+| `services/visualizations/visualizations-service.ts`, `services/repositories/repositories-service.ts` (16g blocks) | `remove` → 409 while a repair or library job is active |
 
 ### 5.8 16h — frontend: library, scan, states, repair
 
@@ -322,8 +335,9 @@ All backend paths are under `backend/src/` unless stated. "pipeline" = `services
 | `pipeline/render/vite-server-config.ts`, `pipeline/render/vite-host-process.ts`, `pipeline/render/render-types.ts` (`ViteHostStartOptions.live`) | the `live` start option adds the live plugin (§12.4) |
 | `services/live/live-session-recovery.ts` (new) | boot recovery and sweep for sessions (§12.7) |
 | `pipeline/render/angular/angular-static-host.ts` | `live` option: headers, script injection, Host guard |
-| `controllers/live-sessions-controller.ts` (new), `dtos/live/{live-open.dto.ts, live-heartbeat.dto.ts, live-session-view.dto.ts, index.ts}` (new) | §14.6 |
+| `controllers/live-sessions-controller.ts` (new), `dtos/live/{live-open.dto.ts, live-heartbeat.dto.ts, live-stop.dto.ts, live-session-view.dto.ts, index.ts}` (new) | §14.6 |
 | `routes/index.ts`, `app.ts`, `worker.ts` | own blocks |
+| `services/visualizations/visualizations-service.ts`, `services/repositories/repositories-service.ts` (16i blocks) | `remove` stops live sessions |
 
 ### 5.10 16j — live mode frontend
 
@@ -347,8 +361,8 @@ All backend paths are under `backend/src/` unless stated. "pipeline" = `services
 
 | File | Responsibility |
 |---|---|
-| `tools/create-fixture-repo.mjs`, `tools/fixture-repo/*` | branches `qa/global-style`, `qa/states`, `qa/library-break` (§20.10) |
-| `tools/create-angular-fixture-repo.mjs`, `tools/fixture-repo/sample-angular-app-files.mjs` | branch `qa/global-style` |
+| `tools/fixture-repo/sample-app-files.mjs` (read by `tools/create-fixture-repo.mjs`) | branches `qa/global-style`, `qa/states`, `qa/library-break`; `FIXTURE_VERSION` 3 (§20.10) |
+| `tools/fixture-repo/sample-angular-app-files.mjs` (read by `tools/create-angular-fixture-repo.mjs`) | branch `qa/tailwind-config` (the existing `qa/global-style` covers `styles.css`); `FIXTURE_VERSION` 3 |
 | `tests/backend/integration/*.integration.test.ts` | §20.10 |
 | `docs/build-notes/16-qa.md` | manual QA record (§20.11) |
 
@@ -412,7 +426,6 @@ LIVE_SESSIONS: "live_sessions",
 |---|---|---|
 | `library_build_mode` | `text not null default 'grow'` | CHECK `repositories_library_build_mode_check` in `LibraryBuildMode` |
 | `state_allowance` | `integer not null default 3` | CHECK `repositories_state_allowance_check`: `between 1 and 5` (literals equal `STATE_ALLOWANCE_MIN/MAX`; a test asserts they match) |
-| `library_scanned_allowance` | `integer null` | allowance of the last **completed** scan or rescan that left no component without an entry; CHECK null or 1–5. Drives the "Rescan to apply" hint (§15.3) |
 
 ### 6.3 `harness_library_entries` (new)
 
@@ -427,7 +440,7 @@ One saved harness per component (D1, D2, E1). Hard-deleted only by a scan that f
 | `export_name` | `varchar(255) not null` | E1 |
 | `display_name` | `varchar(255) not null` | |
 | `selector` | `varchar(255) null` | Angular selector; CHECK `framework = 'angular' or selector is null` |
-| `source_fingerprint` | `varchar(64) not null` | CHECK `~ '^[0-9a-f]{64}$'` (§8.1) |
+| `source_fingerprint` | `varchar(64) null` | CHECK `source_fingerprint is null or source_fingerprint ~ '^[0-9a-f]{64}$'` (§8.1); null when the component could not be located when the harness was saved |
 | `harness_source` | `text null` | null = writing was attempted and produced no harness (cannot render, AI error, invalid) |
 | `mocked_modules` | `jsonb not null default '[]'` | `MockedModule[]` |
 | `notes` | `text not null default ''` | the AI notes plus PRVision notes, ≤ 4 000 chars |
@@ -546,7 +559,7 @@ The `visualization_components_change_kind_check` constraint is regenerated with 
 | `new_harness_count` | `integer not null default 0` | harnesses written by this run (a `replaced` row with two new harnesses counts 2) |
 | `needs_update_count` | `integer not null default 0` | rows with `harness_needs_update` (updated by repair) |
 | `global_style_trigger` | `text null` | first changed file that triggered the whole-library re-check (§8.5) |
-| `head_snapshot_ref` | `varchar(255) null` | `refs/prvision/wt-<id>` for `working_tree` runs (E18); CHECK `head_snapshot_ref is null or source_type = 'working_tree'` |
+| `working_tree_snapshot` | `boolean not null default false` | true when `<dataDir>/snapshots/<id>/` was saved (E18, §11.2); CHECK `not working_tree_snapshot or source_type = 'working_tree'` |
 
 `component_limit` keeps its column and CHECK; its meaning becomes "new harnesses to write" (E12).
 
@@ -559,13 +572,16 @@ The `visualization_components_change_kind_check` constraint is regenerated with 
 | `status` | `text not null default 'starting'` | CHECK in `LiveSessionStatus` |
 | `job_id` | `varchar(64) null` | |
 | `hosts` | `jsonb not null default '[]'` | `LiveHostState[]` (§6.11), written only by the live worker |
-| `open_requests` | `jsonb not null default '[]'` | `LiveOpenRequest[]`, appended by the API, drained by the worker |
+| `open_requests` | `jsonb not null default '[]'` | `LiveOpenRequestRecord[]`, appended by the API, drained by the worker |
+| `open_requests_version` | `integer not null default 0` | +1 on every write of `open_requests`; both writers update with `where id = ? and open_requests_version = <read>` (optimistic, §12.3). Never compare `updated_at` for this: JavaScript `Date` drops Postgres microseconds |
 | `error_message` | `text null` | |
 | `stop_reason` | `text null` | CHECK in `LiveStopReason` or null; CHECK `stop_reason is null or status in ('stopping','stopped','failed')` |
 | `last_heartbeat_at` | `timestamptz not null default now()` | any heartbeat |
 | `last_activity_at` | `timestamptz not null default now()` | heartbeats with `active: true`, opens |
 | `ready_at`, `stopped_at` | `timestamptz null` | |
 | `created_at`, `updated_at` | common | |
+
+Column ownership: the API writes `open_requests`, `open_requests_version`, `last_heartbeat_at`, `last_activity_at`, and `status`/`stop_reason` only for the `→ stopping` transition; the worker writes everything else. Each update names only its own columns.
 
 Indexes: unique partial `live_sessions_active_visualization_key` on `(visualization_id)` where `status in ('starting','ready','stopping')`; partial `live_sessions_active_idx` on `(status)` with the same predicate.
 
@@ -584,13 +600,15 @@ Indexes: unique partial `live_sessions_active_visualization_key` on `(visualizat
 | `harnessLibraryJobs.aiUsage` | `AiUsage` | `../types/visualization-pipeline` |
 | `visualizationComponentStates.steps` | `HarnessStep[]` | `../types/harness-library` |
 | `liveSessions.hosts` | `LiveHostState[]` | `../types/harness-library` |
-| `liveSessions.openRequests` | `LiveOpenRequest[]` | `../types/harness-library` |
+| `liveSessions.openRequests` | `LiveOpenRequestRecord[]` | `../types/harness-library` |
 
-  The generator emits one `import type` line per source module (today it only knows `visualization-pipeline`).
+  `JSON_COLUMN_TYPES` is keyed `"<exportName>.<prop>"` with `{ tsType, typeImports }`; each entry gains the module its types come from, and the generator emits one `import type` line per source module (today it only emits `JSON_TYPES_MODULE` = `../types/visualization-pipeline`).
 - Generated model classes (03 naming): `HarnessLibraryEntryModel`, `HarnessLibraryJobModel`, `HarnessLibraryJobEventModel`, `VisualizationComponentStateModel`, `LiveSessionModel`.
-- Workflow (repo CLAUDE.md, 03 §9.3): edit `schema.ts` → `npm run generate:models` → `npm run db:generate -- --name harness_library` (creates `0009_harness_library.sql`) → commit schema, models and migration together. Migrations `0000`–`0008` are never edited. Existing rows: repositories get `grow`/3; components get nulls/false/0; no state rows are back-filled (old runs show one implicit Default state built from the component row, §14.5).
+- Workflow (repo CLAUDE.md, 03 §9.3): edit `schema.ts` → `npm run generate:models` → `npm run db:generate -- --name harness_library` (creates `0009_harness_library.sql`) → commit schema, models and migration together. Migrations `0000`–`0008` are never edited. Existing rows: repositories get `grow`/3; visualizations get 0/null/false; components get nulls/false/0; no state rows are back-filled (old runs show one implicit Default state built from the component row, §14.5).
 
 ### 6.11 `types/harness-library.ts` (verbatim; 16a writes it, every task imports it)
+
+`types/index.ts` gains `export * from "./harness-library";` (no name in it clashes with `visualization-pipeline.ts`). This file and `visualization-pipeline.ts` import each other with `import type` only; `import-x/no-cycle` ignores type-only imports, and neither may add a value import of the other.
 
 ```ts
 import type {
@@ -646,7 +664,7 @@ export interface HarnessLibraryEntryRecord {
   exportName: string;
   displayName: string;
   selector: string | null;
-  sourceFingerprint: string;
+  sourceFingerprint: string | null;
   harnessSource: string | null;
   mockedModules: MockedModule[];
   notes: string;
@@ -671,7 +689,7 @@ export interface SaveWrittenHarnessInput {
   identity: LibraryComponentIdentity;
   displayName: string;
   selector: string | null;
-  sourceFingerprint: string;
+  sourceFingerprint: string | null;
   harness: { harnessSource: string; mockedModules: MockedModule[]; notes: string; states: HarnessStateSpec[] } | null;
   stateAllowance: number;
   status: HarnessLibraryStatus;
@@ -680,7 +698,10 @@ export interface SaveWrittenHarnessInput {
   lastFailedVisualizationId: number | null;
   aiModel: string | null;
   aiUsage: AiUsage | null;
-  /** Optimistic concurrency: replace only when the stored revision still equals this; null = insert or replace unconditionally. */
+  /**
+   * Optimistic concurrency (E25): 0 = insert only (an existing entry → revision_changed); n ≥ 1 = replace only while the
+   * stored revision equals n (no stored entry → insert); null = insert or replace unconditionally (repair, import).
+   */
   expectedRevision: number | null;
 }
 
@@ -697,6 +718,7 @@ export interface LibraryCounts {
   ready: number;
   needsUpdate: number;
   withoutHarness: number; // needs_update entries with harness_source null
+  otherAllowance: number; // entries with a harness whose state_allowance differs from the allowance passed in (E24)
 }
 
 /** 16c implements; 16d, 16f, 16g, 16k depend on this port only. */
@@ -708,7 +730,7 @@ export interface HarnessLibraryStorePort {
   markRenderOutcome(entryId: number, outcome: LibraryRenderOutcome): Promise<void>;
   moveIdentity(entryId: number, to: LibraryComponentIdentity & { displayName: string }): Promise<void>;
   deleteEntries(repositoryId: number, entryIds: readonly number[]): Promise<number>;
-  counts(repositoryId: number): Promise<LibraryCounts>;
+  counts(repositoryId: number, currentAllowance: number): Promise<LibraryCounts>;
 }
 
 /** One component found by the inventory (§8.3). */
@@ -716,7 +738,8 @@ export interface InventoryComponent {
   identity: LibraryComponentIdentity;
   displayName: string;
   selector: string | null;
-  sourceFingerprint: string;
+  /** null when not computed (estimates) or when the component cannot be located (§8.1). */
+  sourceFingerprint: string | null;
   /** Component children it renders (direct); used for ordering. */
   childCount: number;
   /** 0 = renders no other component of the app; else 1 + max child layer (cycles collapsed). */
@@ -739,7 +762,7 @@ export interface SideHarnessPlan {
 }
 
 export interface LibraryResolution {
-  /** componentId → plan per present side (one item, or two for `replaced` rows). */
+  /** componentId → plan per present side (one item, or two for `replaced` rows); `rechecked` rows included (one plan, the entry). */
   plans: Map<number, SideHarnessPlan[]>;
   newHarnessCount: number;      // harnesses to write if nothing is capped
   reusedCount: number;          // rows with at least one reused side
@@ -763,7 +786,8 @@ export interface LiveHostState {
   lastUsedAt: string;             // ISO
 }
 
-export interface LiveOpenRequest {
+/** Stored in live_sessions.open_requests (not the HTTP body, which is LiveOpenRequest in §14.6). */
+export interface LiveOpenRequestRecord {
   componentId: number;
   requestedAt: string; // ISO
 }
@@ -861,6 +885,7 @@ export interface ImageDiffResult {
 
 // HarnessRenderError (09 §5.1) gains:
 //   stateName?: string; // the failing state (§9.6); absent = Default
+// and its `kind` union gains "step_failed" (now "module_load" | "render_error" | "timeout" | "step_failed").
 
 // ChangeAnalysisResult (08) gains:
 //   globalStyleChanges: string[]; // changed stylesheets analysis classifies as global, head paths, sorted (§8.5.2)
@@ -877,7 +902,15 @@ export interface PipelineContext {
 
 `RenderFailureKindValue` must equal 10's `RenderFailureKind` union after 16b adds `step_failed`; a type-level test asserts both directions. (16a adds `step_failed` to the `RenderFailureKind` union itself so the assertion holds from wave 8a; 16b adds its handling.)
 
-**Landing rule for 16a (compile shims).** 16a lands alone and `npm run verify` must pass afterwards, so 16a also makes every existing producer satisfy the new required fields with **no behaviour change**: `HarnessGenerationService` and the reused-result paths return `states: [{ name: "Default", steps: [] }]`, `origin: "written"`, `libraryEntryId: null`; render services return `states: []` and set `failureKind` from the kind they already compute; `ImageDiffService` returns `states: []`; both change analysis services return `globalStyleChanges: []`; `buildContext` in the worker and every test helper set `library: { stateAllowance: repository.stateAllowance, buildMode: repository.libraryBuildMode }` (helpers: `{ stateAllowance: 1, buildMode: "grow" }`). The wave 8b tasks replace these shims with the real behaviour in the files they own.
+**Landing rule for 16a (compile shims).** 16a lands alone and `npm run verify` must pass afterwards, so 16a also adds the fields below and makes every existing producer satisfy them with **no behaviour change**. The later tasks replace these shims with the real behaviour in the files they own; no task waits on a parallel task for a type.
+
+- `HarnessGenerationService` and the reused-result paths return `states: [{ name: "Default", steps: [] }]`, `origin: "written"`, `libraryEntryId: null` (also on `SideHarness`).
+- Render services return `states: []` and set `failureKind` from the kind they already compute; `ImageDiffService` returns `states: []`; both change analysis services return `globalStyleChanges: []`.
+- `buildContext` in the worker sets `library: { stateAllowance: repository.stateAllowance, buildMode: repository.libraryBuildMode }`.
+- `HarnessValidationInput` gains `stateAllowance: number` (callers pass `ctx.library.stateAllowance`; unused until 16b). `HarnessValidationReport` gains `states: HarnessStateSpec[] | null` (both validators return `[{ name: "Default", steps: [] }]` for a valid report, `null` otherwise, until 16b).
+- `HarnessContextPackage` gains `purpose: "change" | "library"` and `stateAllowance: number` (both context builders set `"change"` and `ctx.library.stateAllowance`; unused until 16b's user prompt and 16d's library purpose).
+- `PageRenderInput` gains `stateName: string` (render services pass `"Default"`; the browser session ignores it until 16b).
+- `RenderFailureKind` and `HarnessRenderError.kind` gain `step_failed` (never produced until 16b; `isRepairableFailure` returns true for it).
 
 Test helpers that build a `PipelineContext` (`tests/backend/helpers/pipeline-context.ts`) default `library` to `{ stateAllowance: 1, buildMode: "grow" }`. Test helpers that build `HarnessGenerationResult` default `states` to `[{ name: "Default", steps: [] }]`, `origin: "written"`, `libraryEntryId: null`. With these defaults every existing 08–15 test keeps its meaning.
 
@@ -900,7 +933,7 @@ export function priceFor(model: string): PriceLookup;
 export function usageCostUsd(model: string, usage: AiUsage): UsageCost;
 ```
 
-`AiUsage` gains `cacheWriteInputTokens?: number`. `AnthropicApiProvider.mapUsage` already sums `cache_creation_input_tokens` into `inputTokens`; it now also returns the sum as `cacheWriteInputTokens`. `addUsage` adds both optional cache counts (absent = 0, result omits a field only when both inputs omit it). `StoredAiUsage` keeps `cacheReadInputTokens` and `cacheWriteInputTokens` when present; `toStoredUsage` accepts rows without them. `VisualizationDetailView.aiUsage` is unchanged.
+`AiUsage` gains `cacheWriteInputTokens?: number`. `AnthropicApiProvider.mapUsage` already sums `cache_creation_input_tokens` into `inputTokens`; it now also returns the sum as `cacheWriteInputTokens`. `addUsage` adds both optional cache counts (absent = 0, result omits a field only when both inputs omit it). `StoredAiUsage` (today `{ inputTokens, outputTokens, calls }`) gains optional `cacheReadInputTokens` and `cacheWriteInputTokens`, written when present; `toStoredUsage` accepts rows without them. `VisualizationDetailView.aiUsage` is unchanged.
 
 ### 6.14 `ArtifactStore` (state image paths)
 
@@ -911,7 +944,9 @@ componentStateImagePath(visualizationId: number, componentId: number, ordinal: n
 ensureComponentStateDir(visualizationId: number, componentId: number, ordinal: number): Promise<void>;
 ```
 
-`RELATIVE_IMAGE_PATH` becomes `^artifacts\/([1-9]\d{0,15})\/([1-9]\d{0,15})\/(?:s([1-9])\/)?(base|head|diff)\.png$`. `toPublicUrl`, `resolveSafe` and the `/artifacts` path guard accept the new form; `removeVisualization` already removes the whole run folder. The `like 'artifacts/%'` CHECKs need no change.
+`RELATIVE_IMAGE_PATH` becomes `^artifacts\/([1-9]\d{0,15})\/([1-9]\d{0,15})\/(?:s([1-9])\/)?(base|head|diff)\.png$`. `toPublicUrl` and `resolveSafe` accept the new form; the `/artifacts` guard's `ARTIFACT_PUBLIC_PATH_PATTERN` (`middleware/artifact-path-guard-middleware.ts`) becomes `^\/[1-9]\d{0,9}\/[1-9]\d{0,9}\/(?:s[1-9]\/)?(base|head|diff)\.png$`. `removeVisualization` already removes the whole run folder. The `like 'artifacts/%'` CHECKs need no change. Artifacts are served with `Cache-Control: private, no-cache`, so images rewritten by a repair are revalidated by the browser; no URL versioning is needed.
+
+The render services' own port `RenderArtifactStore` (defined in `pipeline/render-service.ts`, today `imagePaths` + `ensureComponentDir`) gains the same two state methods in 16e; `ArtifactStore` satisfies it, and the scan's `ScanArtifactStore` (§10.3) implements it without `ArtifactStore`.
 
 ### 6.15 `QueueService` (three more queues)
 
@@ -1189,7 +1224,7 @@ window.__PRVISION_STATE__ = { name: stateName, names, steps };
 ```
 
 5. The tree mounts `<Wrapper><StateView /></Wrapper>` where it mounted `<Harness />` (inside the same error boundary and Suspense, before `ReadyProbe`).
-6. After `__PRVISION_READY__ = true`, when `live` is true: `const report = await runStepsInPage(steps, settle, { timeoutMs: 3000 })`, then, if `parentOrigin` is a valid `http(s)` origin, `window.parent.postMessage({ source: "prvision-live", type: "state", state: stateName, replayed: report.replayed, skipped: report.skipped }, parentOrigin)`. Errors after ready are posted as `{ source: "prvision-live", type: "error", message }` (first one only) and never change `__PRVISION_ERROR__`.
+6. After `__PRVISION_READY__ = true`, when `live` is true: `const report = await runStepsInPage(steps, settle, { timeoutMs: 3000 })`, then, if `parentOrigin` is a valid `http(s)` origin, `window.parent.postMessage({ source: "prvision-live", type: "state", state: stateName, replayed: report.replayed, skipped: report.skipped }, parentOrigin)`. Errors after ready are posted as `{ source: "prvision-live", type: "error", message }` (first one only) and never change `__PRVISION_ERROR__`. While live, the page also posts `{ source: "prvision-live", type: "activity" }` to the parent on `pointerdown`, `keydown`, `wheel` and `input` (capture phase, passive), at most once every 5 s. Input inside a cross-origin iframe never reaches the frontend's own listeners, so this is how the frontend knows the reviewer is still using a live side (§15.6). The page never posts when `parentOrigin` is not a valid `http(s)` origin.
 
 #### 7.6.2 `angular/main.ts`
 
@@ -1272,7 +1307,7 @@ Angular: the default export is `definePrvisionHarness({...})`; `states` absent �
 #### 7.7.3 Validator changes
 
 - `HarnessValidationInput` gains `stateAllowance: number` (1–5).
-- React `HarnessValidator.run`: step 3 (`checkDefaultExport`) is replaced by `checkHarnessShape` + `extractHarnessStates(..., { allowLegacy: false })`; every later step (imports, APIs, mocks) is unchanged and naturally covers all render functions and the wrapper. Imports of `"../harness-api"` are allowed only as `import { definePrvisionHarness } from "../harness-api"` (type-only imports of its types too); any other import of a `.prvision-harness` file (`../prvision-steps`, `../entry`) → `forbidden_import`.
+- React `HarnessValidator.validate` (private `run`): the `checkDefaultExport` step is replaced by `checkHarnessShape` + `extractHarnessStates(..., { allowLegacy: false })`; every later step (imports, APIs, mocks) is unchanged and naturally covers all render functions and the wrapper. Imports of `"../harness-api"` are allowed only as `import { definePrvisionHarness } from "../harness-api"` (type-only imports of its types too); any other import of a `.prvision-harness` file (`../prvision-steps`, `../entry`) → `forbidden_import`.
 - Angular `AngularHarnessValidator`: the allowed descriptor keys gain `states`; each state's `inputs` keys go through the existing `unknown_input` check (§15 5.6.7 step 6); `state_*` checks from `extractHarnessStates`; `providers` and `http` of states go through the existing forbidden-provider and http-shape checks.
 - The report's `states` is attached for 09: `HarnessValidationReport` gains `states: HarnessStateSpec[] | null` (null when extraction failed).
 
@@ -1450,10 +1485,10 @@ Both must still pass `assertStructuredOutputCompatible`.
 #### 7.8.5 Pinned hashes and verbatim tests
 
 - `tests/backend/harness/harness-prompts.test.ts`: the two React pins (`cb817e8c…`, `d460e316…`) are replaced by the new hashes, computed once by 16b from the final constants. New test "React system prompt is the sheet 16 §7.8.1 text verbatim" reads the ```` ```text ```` block under `#### 7.8.1` of `docs/specs/16-harness-library.md` (same helper shape as today's Angular test).
-- `tests/backend/harness/angular-harness-prompts.test.ts`: `specSystemPrompt()` reads `docs/specs/16-harness-library.md`, heading `#### 7.8.2` (was sheet 15 §5.6.5); the Angular pins (`e9b46516…`, `6d2b5a5f…`) and the React re-pins in "React prompt hashes and the React prompt set are unchanged" are updated to the new values; the test is renamed "React prompt set wraps the React constants".
+- `tests/backend/harness/angular-harness-prompts.test.ts`: `specSystemPrompt()` reads the first ```` ```text ```` block after the heading `#### 7.8.2` of `docs/specs/16-harness-library.md` (was sheet 15 `#### 5.6.5`); the Angular pins (`e9b46516…`, `6d2b5a5f…`) and the React re-pins in "React prompt hashes and the React prompt set are unchanged" are updated to the new values; the test is renamed "React prompt set wraps the React constants".
 - The existing "no placeholders / starts with / ends with / length" assertions stay and must pass.
 - `summary-prompts.test.ts` pins are **unchanged** (16e changes the summary user prompt only).
-- Sheet 15 §5.6.5 stays as history; a note in 00 Revision 9 (§22 item 9) says sheet 16 §7.8 supersedes it.
+- Sheet 15 §5.6.5 stays as history; 00 §21 (Revision 9) item 9 says sheet 16 §7.8 supersedes it.
 
 ### 7.9 Old runs and legacy rows
 
@@ -1487,11 +1522,11 @@ Hashed text (sha256, hex):
 "prvision-fp-v1\n" + framework + "\n" + filePath + "\n" + exportName + "\n" + parts.join("\n")
 ```
 
-- React parts: `component:<sha256(normalized export closure)>` — the closure text of `exportName` in `filePath` normalized exactly as 08 compares closures (`ComponentDetector.normalizedClosure`, built on `normalizeSource`); then, sorted by path, `style:<path>:<sha256(css)>` for every stylesheet the file imports directly that is co-located (08 §5.11.2 rule: a CSS module, or same stem in the same folder). `css` = file text with `/* … */` comments removed and whitespace runs collapsed.
-- Angular parts: `component:<sha256(normalizeSource(class declaration text))>`; `template:<sha256(AngularTemplateScanner fingerprint)>` for the inline or external template; `style:<path>:<sha256(css)>` for each external `styleUrl`/`styleUrls` file (inline styles are inside the class text). Decorator metadata is read with 15b's `AngularDecoratorReader`.
+- React parts: `component:<sha256(normalized export closure)>` — the closure text of `exportName` in `filePath` normalized exactly as 08 compares closures (`ComponentDetector.normalizedClosure(sourceFile, exportName)`, which takes a parsed `ts.SourceFile`; null → the fingerprint is null); then, sorted by path, `style:<path>:<sha256(css)>` for every stylesheet the file imports directly that is co-located (08 §5.11.2 rule: a CSS module, or same stem in the same folder). `css` = file text with `/* … */` comments removed and whitespace runs collapsed.
+- Angular parts: `component:<sha256(normalizeSource(class declaration text))>`; `template:<sha256(fingerprint)>` where `fingerprint` is the field of `AngularTemplateScanner.scan(text, url)`'s result for the inline or external template; `style:<path>:<sha256(css)>` for each external `styleUrl`/`styleUrls` file (inline styles are inside the class text). Decorator metadata is read with 15b's `AngularDecoratorReader`.
 - Formatting-only changes therefore keep the fingerprint (same normalization as change detection).
 
-The fingerprint is computed from the **head** side (E5's status side) when a harness is saved, and for every reused entry of a run's candidate rows (not for `rechecked` rows; their `sourceChangedSinceWrite` is null).
+The fingerprint is computed from the **head** side (E5's status side) when a harness is saved, and for every reused entry of a run's candidate rows (not for `rechecked` rows; their `sourceChangedSinceWrite` is null). A null fingerprint is stored as null; `sourceChangedSinceWrite` is null whenever either fingerprint is null.
 
 ### 8.2 Store (`lib/harness-library-store.ts`, 16c)
 
@@ -1501,11 +1536,11 @@ The fingerprint is computed from the **head** side (E5's status side) when a har
 |---|---|
 | `findByIdentities` | one `selectMany` with `repositoryId` and `filePath in (…)`, filtered in memory by `exportName`; map keyed by `identityKey` |
 | `listForRepository` | ordered by `filePath`, `exportName`; `withHarnessOnly` adds `harnessSource is not null` |
-| `saveWritten` | in one transaction: select by identity. None → insert (`revision 1`). Found and (`expectedRevision === null` or equal) → update all harness fields, `revision + 1`, `written_at = now`. Found and revision differs → `{ saved: false, reason: "revision_changed" }`. A unique-violation on insert (concurrent writer) is retried once as the update path. `notes` capped at 4 000 chars, `last_error` at `RENDER_ERROR_MAX_CHARS`; `cost_usd = usageCostUsd(aiModel, aiUsage).usd` when both are set; `state_count = states.length` (0 when harness null) |
+| `saveWritten` | in one transaction: select by identity. None → insert (`revision 1`). Found and (`expectedRevision === null` or `expectedRevision === revision`) → update all harness fields, `revision + 1`, `written_at = now`. Found and (`expectedRevision === 0` or a different revision) → `{ saved: false, reason: "revision_changed", current }`. A unique violation on insert (a concurrent writer inserted first) re-runs the select once and applies the same rules (so `expectedRevision` 0 then returns `revision_changed`). `notes` capped at 4 000 chars, `last_error` at `RENDER_ERROR_MAX_CHARS`; `cost_usd = usageCostUsd(aiModel, aiUsage).usd` when both are set; `state_count = states.length` (0 when harness null) |
 | `markRenderOutcome` | ok → `status = 'ready'` (only when `harness_source is not null`), `last_rendered_at`, `last_error = null`; failure → `status = 'needs_update'`, `last_error`, `last_failed_visualization_id`. Never touches the harness |
 | `moveIdentity` | update `file_path`, `export_name`, `display_name`; when an entry already exists at the target identity, the call is a no-op (the target wins) |
 | `deleteEntries` | hard delete by ids within the repository |
-| `counts` | four `count` calls |
+| `counts` | five `count` calls (`otherAllowance`: `harness_source is not null and state_allowance <> currentAllowance`) |
 
 Entry → record mapping: generated `HarnessLibraryEntryModel` → `HarnessLibraryEntryRecord` (jsonb arrays filtered defensively like `toRepositoryView`).
 
@@ -1523,6 +1558,8 @@ export interface InventoryRequest {
   angularProject: string | null;
   signal: AbortSignal;
   maxComponents?: number;          // default LIBRARY_INVENTORY_MAX_COMPONENTS
+  budgetMs?: number;               // default LIBRARY_INVENTORY_BUDGET_MS; estimates pass LIBRARY_ESTIMATE_INVENTORY_BUDGET_MS
+  withFingerprints?: boolean;      // default true; estimates pass false (sourceFingerprint null)
 }
 export class ComponentInventoryService {
   constructor(deps?: { detector?: ComponentDetector; fingerprinter?: LibraryFingerprinter; now?: () => number });
@@ -1534,14 +1571,14 @@ export function orderSmallestFirst(nodes: ReadonlyArray<{ key: string; children:
 #### 8.3.1 React
 
 1. `ModuleResolver` for `rootDir` (tsconfig and static Vite alias read, never executed, 08 §5.9).
-2. `ImportGraph.build({ side: "head", rootDir, sourceRoot: <appRoot>/src (08's rule), resolver, detector, priorityPaths: [], maxFiles: LIBRARY_INVENTORY_MAX_FILES, budgetMs: LIBRARY_INVENTORY_BUDGET_MS, signal })`. A truncated or over-budget graph sets `truncated` and a warning.
-3. Components: for every graph path whose `classifySourcePath` role is `source` and `analysable`, every `exportedComponents(path)` entry with `isComponent`. Display name = 08's display name rule (export name, or the file stem for `default`).
-4. Children of component C in file F: for every `importsOf(F)` edge of kind `import`, `reexport` or `dynamic` to a file G, the components of G named by the edge's bindings (`default` for default imports, all of G's components for namespace and star imports). Components of F itself are not children of each other.
+2. `ImportGraph.build({ side: "head", rootDir, sourceRoot: <appRoot>/src (08's rule), resolver, detector, priorityPaths: [], maxFiles: LIBRARY_INVENTORY_MAX_FILES, budgetMs: request.budgetMs, signal, now })`. A truncated or over-budget graph sets `truncated` and a warning.
+3. Components: for every graph path whose `classifySourcePath(path, { sourceRoot })` has `role === "source"` and `analysable`, every `graph.exportedComponents(path)` entry (`ImportGraph` already filters on `isComponent`). Display name = 08's display name rule (export name, or the file stem for `default`).
+4. Children of component C in file F: for every `graph.importsOf(F)` edge of kind `import`, `reexport` or `dynamic` (`side_effect` and `style` edges are ignored) to a file G, the components of G named by the edge's bindings (`default` for default imports, all of G's components for namespace and star imports). Components of F itself are not children of each other.
 
 #### 8.3.2 Angular
 
 1. `AngularComponentIndex.build(...)` for the head layout of `rootDir` (15b), capped at `LIBRARY_INVENTORY_MAX_FILES`.
-2. Components: `index.components()` entries with an `exportName`, excluding spec, story and generated files.
+2. Components: `index.components()` entries with an `entry.cls.exportName`, excluding spec, story and generated files.
 3. Children: invert `usagesOf(key)` (template selector usage): when U uses K, K is a child of U. Standalone `imports` references that resolve to components count as well.
 
 #### 8.3.3 Ordering ("building blocks before screens")
@@ -1551,7 +1588,7 @@ export function orderSmallestFirst(nodes: ReadonlyArray<{ key: string; children:
 3. Sort by `layer` ascending, then `childCount` ascending, then `sourceLines` ascending (lines of the component's closure), then `filePath`, then `exportName` (`default` first).
 4. More than `maxComponents` → keep the first `maxComponents`, `truncated = true`, warning `More than <n> components found; the library covers the first <n> (smallest first).`
 
-Fingerprints are computed in the same pass (§8.1). Inventory never executes repository code.
+Fingerprints are computed in the same pass (§8.1) unless `withFingerprints` is false. Inventory never executes repository code and never writes anything (it is safe on the user's clone).
 
 ### 8.4 Library resolution (`pipeline/library-resolution-service.ts`, 16d)
 
@@ -1574,16 +1611,16 @@ export class LibraryResolutionService {
 Steps:
 
 1. **Identities per row** (`analysis.candidates`, which are now every analysed candidate up to `ANALYSIS_MAX_CANDIDATES`):
-   - `modified`, `affected_parent`, `added`: head identity `(filePath, exportName)`; base identity `(basePath ?? filePath, exportName)` where `basePath` comes from `sourceQueries.componentPaths(filePath)` (rename-aware).
+   - `modified`, `affected_parent`, `added`: head identity `(filePath, exportName)`; base identity `(base ?? filePath, exportName)` where `base` comes from `analysis.sourceQueries.componentPaths(filePath)` (`{ base, head }`, rename-aware). `ComponentCandidate` has no base path field of its own.
    - `removed`: base identity only.
-   - `replaced`: base identity = the predecessor's; head identity = the candidate's.
+   - `replaced`: base identity = the predecessor's (`candidateBasePath(c)`, `candidateBaseExport(c)` from `replaced-components.ts`); head identity = the candidate's.
 2. `store.findByIdentities(repository.id, allIdentities)`.
 3. **Plan per row** (an entry is usable when `harnessSource !== null`, any status, E4):
    - Same-harness rows: the head identity's entry; else the base identity's entry (a renamed component: remember `moveTo = head identity`); else write one harness (sides `["head"]`, or `["base"]` for removed rows — the one harness renders both sides as today).
    - `replaced` rows: the base side uses R's entry or writes R's harness; the head side uses A's entry or writes A's harness, independently.
 4. `newHarnessCount` = number of harnesses to write (a `replaced` row may count 2).
 5. **D9 pause** (E12): when `ctx.componentLimit` is undefined and `newHarnessCount > MAX_COMPONENTS`, return `pause: true` immediately; nothing else is written. Otherwise, with `limit = ctx.componentLimit ?? MAX_COMPONENTS`, walk the rows needing writes in rank order and keep a row while its harness count fits in the remaining limit; the others become `skipped` with `skip_reason = "over_limit: needs a new harness, ranked <n> of <m>; PRVision writes at most <limit> new harnesses per visualization"` (a skipped `replaced` row is skipped whole even if one side is reusable). Rows that only reuse harnesses are never skipped.
-6. **D7 re-check** (§8.5): when a trigger is found, list the library (`withHarnessOnly`), drop entries whose identity is already a row identity (either side), keep entries whose file exists on **both** worktrees (`fileExists`), at most `LIBRARY_RECHECK_MAX_COMPONENTS`, ordered by `filePath`, `exportName`. Each becomes a `rechecked` row: `change_kind 'rechecked'`, `render_status 'pending'`, `rank` after the analysed rows, `change_reason = "Global style changed (<trigger path>); re-checked with the saved harness"`, `code_diff null`, `library_entry_id`, `harness_origin 'library'`. Re-check rows never count toward D9.
+6. **D7 re-check** (§8.5): when a trigger is found, list the library (`withHarnessOnly`), drop entries whose identity is already a row identity (either side), keep entries whose file exists on **both** worktrees (`fileExists`), at most `LIBRARY_RECHECK_MAX_COMPONENTS`, ordered by `filePath`, `exportName`. Each becomes a `rechecked` row: `change_kind 'rechecked'`, `render_status 'pending'`, `rank` after the analysed rows, `change_reason = "Global style changed (<trigger path>); re-checked with the saved harness"`, `code_diff null`, `library_entry_id`, `harness_origin 'library'`, and one plan in `plans` (the entry, rendered on both sides like a same-harness row). Re-check rows never count toward D9. More than `LIBRARY_RECHECK_MAX_COMPONENTS` eligible entries → console warning `Only the first <n> saved harnesses are re-checked.`
 7. **Persist** in one transaction: inserted `rechecked` rows; `skipped` updates; `library_entry_id`/`base_library_entry_id`/`harness_origin`/`base_harness_origin = 'library'` and `source_changed_since_write` (head fingerprint vs the entry's, §8.1) on reused rows; `visualizations.component_count` = all rows, `reused_harness_count`, `new_harness_count` (planned and not skipped), `global_style_trigger`.
 8. Console (stage `analyzing`): `Harness library: <r> component(s) reuse saved harnesses, <w> need a new harness.`; when skipping: `<k> component(s) need a new harness beyond the limit of <limit>; they are skipped.`; triggers per §8.5.
 
@@ -1629,11 +1666,11 @@ The patterns are constants (`GLOBAL_STYLE_TRIGGER_PATTERNS`, §16.2) so tests an
 
 #### 8.5.3 Working-tree runs
 
-`listWorkingTreeChanges` (08, `change-source.ts`) today diffs only `<sourceRoot>`. It additionally passes these pathspecs, so triggers fire for uncommitted changes too: `<A>/tailwind.config.*`, `<A>/postcss.config.*`, `<A>/.postcssrc*`, `<A>/index.html`, `<A>/src/index.html`, `<A>/angular.json`, the same config names at the repository root, and every repo file named by `globalStylePaths`. Those files appear in `changedFiles` only; classification still keeps them out of component analysis.
+`listWorkingTreeChanges` (08, `change-source.ts`) today compares only the two `<side>/<sourceRoot>` directories (`diffNameStatusNoIndex`), so trigger files outside the source root are invisible for working-tree runs. It additionally compares a fixed list of candidate files between the base and head worktrees: for every app-level folder (§8.5.1), the basenames `tailwind.config.{js,cjs,mjs,ts,cts,mts}`, `postcss.config.{js,cjs,mjs,ts,cts,mts,json}`, `.postcssrc`, `.postcssrc.{json,yaml,yml,js,cjs,mjs}`, `index.html`, `src/index.html` and `angular.json`, plus every repo file named by `globalStylePaths`. Each candidate is `lstat`ed on both sides (symlinks and non-files are ignored) and regular files are compared by size, then sha256 of their bytes: present on one side only → `A`/`D`, different content → `M`, else nothing. No git command is added, nothing is written. Those files appear in `changedFiles` only; classification still keeps them out of component analysis. Token files inside `<sourceRoot>` are already covered by the existing directory diff.
 
 #### 8.5.4 What is removed
 
-- React 08: the `componentsFromEntry` representative fallback in `propagate` and the `NON_SRC_WARNING` console warning (08 §5.5 last paragraph, 08 §5.11.3).
+- React 08: the representative fallback in `propagate` (the call to `ImportGraph.componentsFromEntry`; the graph method itself stays) and the `NON_SRC_WARNING` console warning (08 §5.5 last paragraph, 08 §5.11.3).
 - Angular 15b: `addRepresentatives` and its console line (15 §5.5.5); `index.html` is no longer `ignored` for trigger purposes (analysis still produces no candidates from it).
 - Both: `rankAndCap(drafts, ANALYSIS_MAX_CANDIDATES)` replaces `ctx.componentLimit ?? MAX_COMPONENTS`; the skip reason for the analysis ceiling is `over_limit: ranked <n> of <m>; PRVision analyses at most 500 components per visualization`.
 
@@ -1684,11 +1721,11 @@ Stage order is unchanged (00 §11); the new work fits into existing stages:
 1. **analyzing:** `analysis = steps.changeAnalysis().analyze(ctx)`; then `resolution = steps.libraryResolution().resolve(ctx, analysis)`. `PipelineStepFactories` gains `libraryResolution(): LibraryResolutionStage` (`Pick<LibraryResolutionService, "resolve">`), default `new LibraryResolutionService()` for both frameworks (added to `defaultPipelineStepFactories` and `angularStepFactories`).
 2. **Pause:** `if (visualization.componentLimit === null && resolution.pause)` → `awaiting_confirmation` with the §8.4 message, `return "paused"` (no AI spent).
 3. `ctx` is built with `library: { stateAllowance: repo.stateAllowance, buildMode: repo.libraryBuildMode }`.
-4. **generating_harnesses:** `generateAll(resolution.toWrite.map(c => c.candidate), { sides })`. Reused harnesses become `HarnessGenerationResult`s from their entries (`origin: "library"`, `libraryEntryId`, entry `states`, `notes` = entry notes prefixed `From the harness library (revision <r>).`). A `replaced` row with one reused side gets the other side from generation. The worker writes the snapshot columns of reused harnesses (`harness_source`, `harness_notes`, `mocked_modules`, and `base_*` for `replaced` rows) in one update per row (`persistReusedHarness`). Generation failures of written harnesses are persisted by 09 as today (row `failed`/`skipped`).
+4. **generating_harnesses:** `generateAll(resolution.toWrite.map(c => c.candidate), { sides })`. Reused harnesses become `HarnessGenerationResult`s from their entries (`origin: "library"`, `libraryEntryId`, entry `states`, `notes` = entry notes prefixed `From the harness library (revision <r>).`). A `replaced` row with one reused side gets the other side from generation. The worker writes the snapshot columns of reused harnesses, `rechecked` rows included (`harness_source`, `harness_notes`, `mocked_modules`, and `base_*` for `replaced` rows), in one update per row (`persistReusedHarness`). Generation failures of written harnesses are persisted by 09 as today (row `failed`/`skipped`).
 5. **rendering:** `buildRenderInputs(resolution.renderCandidates, [...written, ...reused], analysis.changedFiles)`; `renderAll` (16e) returns per-state results.
 6. **Library save-back** (still `rendering`, right after `renderAll`, before diffing), `saveRunResultsToLibrary(ctx, resolution, harnesses, renders)`:
-   - every written harness side → `store.saveWritten({ origin: "run", status: <status side rendered all states ok ? "ready" : "needs_update">, harness, states, sourceFingerprint, stateAllowance: ctx.library.stateAllowance, aiModel: ctx.aiSettings.model, aiUsage: result.usage, lastError, lastFailedVisualizationId: ctx.visualizationId, expectedRevision: null })`; the row's `library_entry_id`/`base_library_entry_id` and `harness_origin = 'written'` (or `'repaired'` when the kept attempt came from the fix-up) are set;
-   - written harnesses that failed generation (no harness) → `saveWritten` with `harness: null`, `status: "needs_update"`, `lastError` = the generation failure message (the next run tries to write again);
+   - every written harness side → `store.saveWritten({ origin: "run", status: <status side rendered all states ok ? "ready" : "needs_update">, harness, states, sourceFingerprint, stateAllowance: ctx.library.stateAllowance, aiModel: ctx.aiSettings.model, aiUsage: result.usage, lastError, lastFailedVisualizationId: ctx.visualizationId, expectedRevision: <revision of the harness-less entry the resolution saw, else 0> })` (E25; `revision_changed` → the newer entry is kept, info log `library.entry.kept_newer`, and the row keeps its run snapshot); the row's `library_entry_id`/`base_library_entry_id` and `harness_origin = 'written'` (or `'repaired'` when the kept attempt came from the fix-up) are set;
+   - written harnesses that failed generation (no harness) → `saveWritten` with `harness: null`, `status: "needs_update"`, `lastError` = the generation failure message, same `expectedRevision` rule (the next run tries to write again);
    - every reused entry → `markRenderOutcome` from its status side (E4, E5);
    - a renamed component whose base-identity entry rendered on head → `moveIdentity` to the head identity;
    - rows → `harness_needs_update` per E5; `visualizations.needs_update_count`.
@@ -1728,8 +1765,8 @@ baseOrigin?: "library" | "written";
 - Within a group, items run through a pool of `RENDER_ITEM_CONCURRENCY` (2). For each item, states run in ordinal order; for each state, base and head render in parallel (pages in flight ≤ `RENDER_PAGE_CONCURRENCY` = 4). Each (item, state, side, attempt) gets a fresh browser context, as today.
 - `renderSide` passes `stateName` and writes to `artifactStore.componentStateImagePath(v, c, ordinal, side)` via the existing temp-file + rename pattern. A state absent on a side is not requested (`null` side result).
 - The cold-start allowance applies to the first page of each host, not per state.
-- **Stage budget** (replaces the fixed 15 minutes): `budgetMs = min(RENDER_STAGE_TIMEOUT_MAX_MS, max(RENDER_STAGE_TIMEOUT_MS, ceil(plannedPages / RENDER_PAGE_CONCURRENCY) × RENDER_STAGE_MS_PER_PAGE + groups × RENDER_GROUP_STARTUP_ALLOWANCE_MS))`, where `plannedPages` = Σ over items of states × present sides. The run's overall limit (90 minutes) still applies.
-- Persistence per item: `ComponentRenderPayload` gains `states: StateRenderPayload[]` (`{ ordinal, stateName, onBase, onHead, steps, renderStatus, baseImagePath, headImagePath, imageWidth, imageHeight, baseError, headError, baseFailureKind, headFailureKind }`); `QueryHandlerRenderPersistence.saveRenderResult` writes the component row (Default mirrors, as today) and calls `persistComponentStates` (§9.4) in the same transaction. Scans and live never use this persistence (§10.4, §12).
+- **Stage budget** (replaces the fixed 15 minutes): `budgetMs = min(RENDER_STAGE_TIMEOUT_MAX_MS, max(RENDER_STAGE_TIMEOUT_MS, ceil(plannedPages / RENDER_PAGE_CONCURRENCY) × RENDER_STAGE_MS_PER_PAGE + hostStarts × startupAllowance))`, where `plannedPages` = Σ over items of states × present sides, `hostStarts` = Σ over groups of the sides the group renders, and `startupAllowance` = `RENDER_GROUP_STARTUP_ALLOWANCE_MS` (React, Vite warm-up) or `ANGULAR_RENDER_GROUP_STARTUP_ALLOWANCE_MS` (Angular, one build per group and side). The function is pure (`renderStageBudgetMs(framework, items, groups)` in `render-groups.ts`) and table-tested. The run's overall limit (90 minutes) still applies.
+- Persistence per item: `ComponentRenderPayload` (in `render-service.ts`) gains `states: StateRenderPayload[]` (`{ ordinal, stateName, onBase, onHead, steps, renderStatus, baseImagePath, headImagePath, imageWidth, imageHeight, baseError, headError, baseFailureKind, headFailureKind }`); `QueryHandlerRenderPersistence.saveRenderResult` (the default `ComponentRenderPersistence`) writes the component row (Default mirrors, as today) and calls `persistComponentStates` (§9.4) in the same `DrizzleDb.transaction`. Scans use `InMemoryRenderPersistence` (§10.3) and live never persists renders (§12).
 
 ### 9.3 Status per state and per row
 
@@ -1806,7 +1843,8 @@ queued → cancelled | failed          preparing → failed | cancelled
 - Scan commit: `git rev-parse --verify --end-of-options refs/heads/<defaultBranch>^{commit}`, else `refs/remotes/origin/<defaultBranch>^{commit}`; neither → job `failed` "The default branch <b> was not found in the clone." The SHA goes to `scan_sha`.
 - One worktree: `<dataDir>/worktrees/scan-<jobId>/head` (`GitClient.worktreeAdd`), node_modules links through `linkWorkspaceNodeModules(...)`, a behaviour-preserving extraction of 07's link step that 16d exports from `workspace-prepare-service.ts`.
 - `PreparedWorkspace` for the scan: `{ visualizationId: 0, repositoryPath, baseDir: headDir, headDir, baseSha: scanSha, headSha: scanSha, sourceType: "local_branch", dependencyDrift: false }`. Scan items are head-only (`added`), so the base side is never rendered.
-- Scratch renders: `<dataDir>/library-jobs/<jobId>/renders/` through `ScanArtifactStore implements RenderArtifactStore` (same relative layout under that root); deleted after each batch and in `finally`.
+- Scratch renders: `ScanArtifactStore implements RenderArtifactStore` (`lib/scan-render-adapters.ts`) maps `(visualizationId 0, componentId, ordinal, kind)` to `<dataDir>/library-jobs/<jobId>/renders/<componentId>/[s<ordinal>/]<kind>.png`, validates its own paths (`resolveInside`) and never calls `ArtifactStore` (whose path pattern rejects visualization id 0). `InMemoryRenderPersistence implements ComponentRenderPersistence` keeps each payload in a map for step 7.5. Scratch files are deleted after each batch and in `finally`.
+- **Visualization id 0.** Scan contexts carry `visualizationId: 0`. Everything a scan reaches that uses the id is replaced (console → job console, usage → job recorder, render persistence and artifacts → the adapters above, cancel → library flag). 16f audits the remaining uses in 09/10/15 code reachable from a scan (worktree paths, harness and Vite cache folders, Angular output paths, log fields) and passes the job id where a folder name is needed; a test asserts a scan touches no `artifacts/` path and no `visualizations` or `visualization_components` row.
 - Cleanup (`finally`): worktree remove + prune, scratch folder removal; never throws.
 
 ### 10.4 Algorithm (`LibraryScanWorkerService.run(job)`)
@@ -1816,20 +1854,20 @@ queued → cancelled | failed          preparing → failed | cancelled
 3. Inventory: `ComponentInventoryService.inventory({ rootDir: headDir, ... })`. Console info `Found <n> components in <appRoot> (<layers> layers, smallest first).` plus its warnings.
 4. Targets: `scan` → inventory components without any library entry; `rescan` → every inventory component. When the inventory is not truncated, entries whose identity is not in the inventory **and** whose file does not exist at `scan_sha` are deleted (`Removed <k> saved harnesses whose components no longer exist.`).
 5. `preparing → running` with `total_count = targets.length`. Zero targets → `completed` "Nothing to write: every component has a saved harness."
-6. Context: `PipelineContext` with `visualizationId: 0`, `libraryJob: { kind, libraryJobId }`, the workspace, the repository fields (incl. `renderViewport`), provider and AI settings, `console` = `LibraryJobConsole.asPipelineConsole()`, `isCancelled` = library cancel flag, `library: { stateAllowance: job.state_allowance, buildMode: "scan" }`. Source queries: `createWorkspaceSourceQueries(ctx)` (`lib/library-source-queries.ts`, 16f): 08's `createAnalysisState` with empty rows and changed files (React) or 15b's `AngularSourceQueries` (Angular), built over the scan worktree for both sides.
+6. Context: `PipelineContext` with `visualizationId: 0`, `libraryJob: { kind, libraryJobId }`, the workspace, the repository fields (incl. `renderViewport`), provider and AI settings, `console` = `LibraryJobConsole.asPipelineConsole()`, `isCancelled` = library cancel flag, `library: { stateAllowance: job.state_allowance, buildMode: "scan" }`. Source queries: `createWorkspaceSourceQueries(ctx)` (`lib/library-source-queries.ts`, 16f): 08's `createAnalysisState` (`component-source-queries.ts`) with empty rows and changed files (React) or 15b's `createAngularAnalysisState` (Angular), built over the scan worktree for both sides.
 7. Batches of `LIBRARY_SCAN_BATCH_SIZE` (12) targets in inventory order. For each batch:
    1. Cancellation and cap check (§10.5); stop → step 8.
    2. Synthetic candidates: `componentId` = 1-based index within the job (scan-local, never a DB id), `filePath`, `exportName`, `displayName`, `changeKind: "added"`, `rank` = index, `codeDiff: null`, `reason: "whole-app scan"`.
    3. Generation: `stepFactoriesFor(framework).harnessGeneration(ctx, queries)` built with `persistence: NoopHarnessPersistence`, `usageRecorder: LibraryJobUsageRecorder`, `shouldStartCall: capGuard` (§10.5); `generateAll(candidates, { stateAllowance, purpose: "library" })`.
    4. Render: `steps.render({ repairHarness, persistence: InMemoryRenderPersistence, artifactStore: ScanArtifactStore })` (16d extends the factory's deps with the two optional overrides; 16e's services accept them). Only written harnesses exist here, so the single bounded fix-up (D8 default, §9.6) applies. The render context uses a signal that aborts on shutdown only, so a cancel lets the current batch finish verifying (at most one batch).
-   5. Save, per candidate (`expectedRevision` = the entry's revision at job start for `rescan`, `null` for `scan`):
+   5. Save, per candidate (E25: `expectedRevision` = the entry's revision at job start for `rescan` targets that had an entry, else `0`):
       - harness valid and every state rendered on head → `saveWritten(... status: "ready", origin: "scan")`;
       - harness valid, some state failed → `status: "needs_update"`, `lastError` = the first failing state's error — except in a rescan when the existing entry is `ready`: the old harness is kept and the event says `Kept the previous harness for <name>: the rewritten one did not render (<error>).`;
       - `cannot_render` or generation failure → `harness: null`, `status: "needs_update"`, `lastError` = `cannot_render: <notes>` or the failure message (a rescan keeps an existing harness instead);
-      - `revision_changed` (a repair saved a newer revision meanwhile) → `skipped_count + 1`, event info `Kept a newer revision of <name>.`
+      - `revision_changed` (a run or repair saved a newer revision meanwhile) → `skipped_count + 1`, event info `Kept a newer revision of <name>.`
    6. Counters (`written_count`, `failed_count`, `skipped_count`), `current_label`, `spent_usd`, `ai_usage` updated after every candidate; one event per candidate: info `<name>: <k> state(s) saved.` or warn `<name>: harness needs updating (<short error>).`
    7. Scratch renders deleted.
-8. End: stopped by the cap → `cap_reached` "Stopped at the spending cap of $<cap> (spent $<spent>)."; by cancel → `cancelled`; all targets processed → `completed`. On `completed`, when the inventory was not truncated and every inventory component now has an entry, set `repositories.library_scanned_allowance = job.state_allowance`.
+8. End: stopped by the cap → `cap_reached` "Stopped at the spending cap of $<cap> (spent $<spent>)."; by cancel → `cancelled`; all targets processed → `completed`. (The Rescan hint is derived from the entries, E24; nothing is written to the repository row.)
 9. Fatal errors (AI `auth`/`config`, workspace, DB) → `failed` with the user message; everything already saved stays (D12).
 10. `finally`: workspace cleanup, `clearLibraryCancel`.
 
@@ -1838,7 +1876,7 @@ Each batch starts fresh render hosts and a browser (one render run per batch). A
 ### 10.5 Spend accounting and the cap (D12, D13, E16)
 
 - `LibraryJobUsageRecorder implements Pick<AiUsageRecorder, "add">`: serialized read-add-write of `harness_library_jobs.ai_usage`, then `spent_usd = usageCostUsd(job.ai_model, total).usd`. Usage on failed calls counts (00 §14.4).
-- `capGuard()` (`HarnessGenerationDeps.shouldStartCall`, called by 09 before every AI call, including corrections and fix-ups): `true` when `spend_cap_usd` is null; otherwise `spent_usd + expectedCallUsd <= spend_cap_usd`. `expectedCallUsd` = this job's mean cost per call after 3 calls, before that `usageCostUsd(model, LIBRARY_ESTIMATE_DEFAULT_CALL_USAGE)`.
+- `capGuard()` (`HarnessGenerationDeps.shouldStartCall`, called by 09 before every AI call, including corrections and fix-ups): `true` when `spend_cap_usd` is null; otherwise `spent_usd + (inFlight + 1) × expectedCallUsd <= spend_cap_usd`, and on `true` it increments `inFlight`. Every `LibraryJobUsageRecorder.add` decrements `inFlight` (not below 0). A call that fails without reporting usage leaves its reservation in place, which only makes the guard more conservative. `expectedCallUsd` = this job's mean cost per call after 3 calls, before that `usageCostUsd(model, LIBRARY_ESTIMATE_DEFAULT_CALL_USAGE)`. `inFlight` lives in the job processor's memory (one scan worker, concurrency 1).
 - When `shouldStartCall` returns false, 09 stops starting work exactly as on cancellation, and `HarnessGenerationBatchResult` gains `stopReason?: "cancelled" | "spend_cap"`. Candidates not started are not saved (they stay missing, so Continue picks them up).
 - Progress text (frontend, §15.7): `<processed> of <total> harnesses written, about $<spent> spent` where processed = written + failed + skipped.
 
@@ -1846,7 +1884,7 @@ Each batch starts fresh render hosts and a browser (one render run per batch). A
 
 - **Cancel:** `POST /api/library-jobs/:id/cancel`. Queued and removable → `cancelled` at once (200 `{ id, status: "cancelled" }`). Otherwise set the flag (202 `{ id, status: "cancel_requested" }`). Terminal → 409 `already_terminal`. The worker stops at the next AI call; harnesses already written in the current batch are verified and saved, then the job ends `cancelled` (D12: everything written so far is kept).
 - **Continue scan:** a new `scan` job; it writes only what is missing (E15).
-- **Rescan:** a new `rescan` job with the repository's current allowance; it rewrites every component (D4). The repository page offers it for `scan` repositories and highlights it when `state_allowance <> library_scanned_allowance`.
+- **Rescan:** a new `rescan` job with the repository's current allowance; it rewrites every component (D4). The repository page offers it for `scan` repositories and highlights it when saved harnesses exist that were written with another allowance (`counts.otherAllowance > 0`, E24).
 - Changing the allowance never starts a job by itself. Grow repositories use the new allowance for every harness written afterwards (runs read `repositories.state_allowance` at job start).
 
 ### 10.7 Estimate (`lib/library-estimate-service.ts`)
@@ -1865,7 +1903,8 @@ export class LibraryEstimateService { estimate(input: LibraryEstimateInput, sign
   - **history** basis when the repository has at least `LIBRARY_ESTIMATE_MIN_SAMPLES` (5) entries with `ai_usage` written by the same model: the mean usage per entry, with output tokens scaled by `(1 + 0.3·(a − 1)) / (1 + 0.3·(ā − 1))` where `a` is the requested allowance and `ā` the samples' mean `state_allowance`;
   - **default** basis otherwise: `LIBRARY_ESTIMATE_DEFAULT_HARNESS_USAGE` (§16.2) with output tokens `+ LIBRARY_ESTIMATE_OUTPUT_TOKENS_PER_EXTRA_STATE × (a − 1)`.
 - `perHarnessUsd = usageCostUsd(model, usage).usd`; `estimatedUsd = perHarnessUsd × toWriteCount`; `lowUsd = 0.6 ×`, `highUsd = 1.6 ×` (rounded to cents); `estimatedMinutes = ceil(toWriteCount × LIBRARY_ESTIMATE_SECONDS_PER_HARNESS / 60)`.
-- Bounded by `LIBRARY_ESTIMATE_TIMEOUT_MS` (60 s) → 504 `internal_error` "Counting components took too long; the estimate is unavailable." Results are cached in the API process for `LIBRARY_ESTIMATE_CACHE_MS` keyed by `(rootDir, appRoot, angularProject, HEAD sha, dirty flag, allowance, kind, model, repositoryId)`.
+- The inventory runs with `withFingerprints: false` and `budgetMs: LIBRARY_ESTIMATE_INVENTORY_BUDGET_MS` (45 s), so a large app returns a truncated count with a warning instead of timing out. The whole request is still bounded by `LIBRARY_ESTIMATE_TIMEOUT_MS` (60 s) → 504 `internal_error` "Counting components took too long; the estimate is unavailable."
+- Only the count is cached: the inventory result is cached in the API process for `LIBRARY_ESTIMATE_CACHE_MS` keyed by `(rootDir, appRoot, angularProject, HEAD sha)` (`git rev-parse HEAD`; `GitClient` already runs with `GIT_OPTIONAL_LOCKS=0`, so nothing in the clone is touched). Pricing for a given allowance, kind and model is recomputed on every request (cheap), so changing the allowance in the dialog never recounts. `toWriteCount` for a registered repository is recomputed from the store on every request.
 
 ### 10.8 Recovery
 
@@ -1895,25 +1934,28 @@ export class RunWorkspaceRecreator {
 ```
 
 1. Base commit = `visualizations.base_sha` (required; null → error "This run has no base commit to recreate.").
-2. Head commit = `head_sha`; for `working_tree` runs `git rev-parse --verify <head_snapshot_ref>^{commit}` (missing → "The uncommitted changes of this run are no longer available. Start a new visualization.").
+2. Head commit = `head_sha`; for `working_tree` runs the head worktree is created at `base_sha` and `applyWorkingTreeSnapshot(headDir, <dataDir>/snapshots/<id>/)` replays the saved changes (§11.2). `working_tree_snapshot` false or the folder missing → "The uncommitted changes of this run are no longer available. Start a new visualization.".
 3. A commit missing from the clone (`hasCommit`): for `github_pr` runs, fetch `pull/<n>/head` and the PR base into `refs/prvision/pr-<n>` / `-base` as 07 does, then delete the refs after the worktrees exist; otherwise → error "Commit <short> is no longer in the clone."
 4. `worktreeAdd` base and head under `rootDir`, node_modules links (`linkWorkspaceNodeModules`), symlinked app root refused as in 07.
 5. `cleanup()`: worktree remove for both, prune, `rm -r rootDir`; never throws.
 
 ### 11.2 Working-tree snapshot (E18; `workspace-prepare-service.ts`, 16d)
 
-For `working_tree` runs, right after the head worktree has received the uncommitted and untracked files and before any harness file is written:
+07 already builds the head worktree of a `working_tree` run from a `WorkingTreeSnapshot` (`{ baseSha, patch, untracked }`: `git diff --binary HEAD` of the clone plus the list of untracked files) through `applyOverlay`. 16d keeps a copy of that snapshot **in PRVision's data dir**, right after `applyOverlay` succeeded and before any harness file is written:
 
 ```text
-GIT_INDEX_FILE=<dataDir>/worktrees/<id>/snapshot.index   (never the worktree's own index)
-git read-tree HEAD
-git add -A -- . ':(exclude)node_modules' ':(exclude,glob)**/node_modules' ':(exclude,glob)**/.prvision-harness/**'
-tree   = git write-tree
-commit = git -c user.name=PRVision -c user.email=prvision@localhost commit-tree <tree> -p <base_sha> -m "PRVision working-tree snapshot for visualization <id>"
-git update-ref --end-of-options refs/prvision/wt-<id> <commit>
+<dataDir>/snapshots/<visualizationId>/
+  manifest.json        { "version": 1, "baseSha": "<sha>", "untracked": ["<repo-relative path>", ...], "createdAt": "<ISO>" }
+  changes.patch        the patch exactly as applied (absent when empty)
+  untracked/<path>     copies of the untracked files that applyOverlay copied (regular files with their mode; symlinks
+                       re-created only when applyOverlay accepted them)
 ```
 
-`GitClient` gains `snapshotWorktree(cwd, { indexFile, parentSha, message, excludes }): Promise<string>` and `updateRef(cwd, ref, sha)` with the existing hardening (refs after `--end-of-options`, env allow-list, timeouts). The visualization row stores `head_snapshot_ref`. A snapshot failure is a console warning "Could not keep a snapshot of the uncommitted changes; live mode and repair will not be available for this run." and the run continues. `cleanup` keeps the ref. `VisualizationsService.remove` deletes it (`deleteRef`, best effort); `RepositoriesService.remove` deletes the refs of all its runs (best effort).
+- Files are copied from the **head worktree** (what the run rendered), never re-read from the user's clone, with `resolveInside` on every destination. Size is already bounded by 07's limits (64 MB patch, 2 000 untracked files, 200 MB). The folder is written to `snapshots/<id>.tmp/` and renamed when complete.
+- `applyWorkingTreeSnapshot(headDir, snapshotDir, signal)` (exported, used by 16g's recreator): reads the manifest, `git apply`s the patch through the existing `GitClient.applyPatch`, copies `untracked/` into `headDir` with the same rules as `applyOverlay`. The common part of `applyOverlay` is extracted so both paths share it (behaviour-preserving).
+- The visualization row stores `working_tree_snapshot = true`. A snapshot failure is a console warning "Could not keep a snapshot of the uncommitted changes; live mode and repair will not be available for this run." and the run continues.
+- `cleanup` keeps the snapshot. `VisualizationsService.remove` deletes the folder (best effort, like artifacts); `RepositoriesService.remove` deletes the folders of all its runs (best effort). Worker boot recovery removes `<dataDir>/snapshots/*.tmp`.
+- Nothing is written to the user's clone: no commit, no ref, no index change (D1, non-goals).
 
 ### 11.3 Starting a repair
 
@@ -1963,7 +2005,7 @@ Nothing starts a repair automatically (D8). A run with an active live session ca
 
 ### 12.2 Starting (`LiveSessionService.start(visualizationId)`)
 
-1. Run exists and is visible (404); run status terminal (409 `conflict` "Live mode is available once the run has finished."); at least one component row with a harness snapshot (409 `conflict` "This run has no rendered components to show live."); `base_sha` set and, for `working_tree`, `head_snapshot_ref` set (409 `conflict` with the §11.1 messages).
+1. Run exists and is visible (404); run status terminal (409 `conflict` "Live mode is available once the run has finished."); at least one component row with a harness snapshot (409 `conflict` "This run has no rendered components to show live."); `base_sha` set and, for `working_tree`, `working_tree_snapshot` true (409 `conflict` with the §11.1 messages).
 2. An active session for the run → 200 with it (one Live click serves every card, D10).
 3. Active sessions overall ≥ `LIVE_MAX_SESSIONS` (2) → 409 `conflict` "Live mode is already running for 2 other runs. Leave one of them first (it also stops by itself after 10 minutes idle)."
 4. Insert `live_sessions` (`starting`), `QueueService.enqueueLiveSession(id)`, store `job_id`, 202 `LiveSessionView`.
@@ -1971,7 +2013,7 @@ Nothing starts a repair automatically (D8). A run with an active live session ca
 ### 12.3 Session job (`LiveSessionWorkerService.run({ liveSessionId, jobId, signal })`)
 
 1. Load the row (`starting`, else skip) and the run. `RunWorkspaceRecreator.recreate` into `<dataDir>/live/<sessionId>/` within `LIVE_START_TIMEOUT_MS` (5 min; timeout → `failed` "Could not prepare the before and after code in time.").
-2. Plan from the run's component rows with a harness snapshot: render work items (16e's pure planning helpers, exported for reuse: `planLiveItems(rows, layouts)`), render groups (`buildRenderGroups` + `splitLargeGroups`), group membership `componentId → groupKey` per side. Harness workspaces are prepared once per side with every harness file (React: `prepareSide` + `writeComponentHarness`; Angular: workspace writer, files per item).
+2. Plan from the run's component rows with a harness snapshot: render work items (16e's pure planning helper `planLiveItems(rows: ReadonlyArray<{ row: VisualizationComponentModel; states: HarnessStateSpec[]; baseStates: HarnessStateSpec[] | null }>, repository: RepositoryModel): RenderWorkItem[]`, which builds the same items `buildRenderInputs` builds for a run, but from the persisted rows: harness snapshot columns, change kind, paths; 16i passes the states it extracts from the snapshots with 16b's `extractHarnessStates(..., { allowLegacy: true })`, so 16e does not depend on 16b), render groups (`buildRenderGroups` + `splitLargeGroups`), group membership `componentId → groupKey` per side. Harness workspaces are prepared once per side with every harness file (React: `prepareSide` + `writeComponentHarness`; Angular: workspace writer, files per item).
 3. `ready`, `ready_at`.
 4. Loop every `LIVE_POLL_INTERVAL_MS` (500 ms) until a stop condition:
    - row `status = 'stopping'` (API stop) → stop with the row's `stop_reason`;
@@ -1979,14 +2021,14 @@ Nothing starts a repair automatically (D8). A run with an active live session ca
    - `now − last_activity_at > LIVE_IDLE_TIMEOUT_MS` (10 min, D10) → `idle`;
    - `now − created_at > LIVE_MAX_SESSION_MS` (4 h) → `max_duration`;
    - `signal` aborted (worker shutdown) → `shutdown`;
-   - otherwise drain `open_requests`: write the remaining list back with a guarded update on the read `updated_at` (a concurrent append makes the update miss; the next tick re-reads). For each request, `hostManager.ensure(groupKeyOf(componentId))` for both sides where the component exists; the host entry is written as `starting`, then `ready` with `origin` and `harnessUrlPath`, or `failed` with the error.
+   - otherwise drain `open_requests`: write `[]` with `open_requests_version + 1` guarded by the version read in this tick (a concurrent append makes the update miss; the next tick re-reads and nothing is lost). The API's `open` appends with the same guard and retries up to 3 times on a miss (then 409 `conflict` "Live mode is busy; try again."). For each request, `hostManager.ensure(groupKeyOf(componentId))` for both sides where the component exists; the host entry is written as `starting`, then `ready` with `origin` and `harnessUrlPath`, or `failed` with the error.
 5. Stop: `stopping`, stop every host (process-group kill fallback as in 10/15), worktree cleanup, `rm -r <dataDir>/live/<sessionId>`, then `stopped` with `stopped_at` (or `failed` with `error_message` when the job itself failed).
 
 ### 12.4 Hosts (`LiveHostManager`)
 
 - One host per **(side, render group)** (E19), started lazily, at most `LIVE_MAX_HOSTS_PER_SIDE` (4) running per side; starting a fifth stops the least recently used one (its entry becomes `stopped`; opening it again restarts it). `lastUsedAt` is updated on every open.
-- **React:** `ViteHostClient.start({ ...openHost options of 10 for the group, live: true }, harnessUrlPath, signal)`. `ViteHostStartOptions` gains `live?: { frontendOrigins: string[] }`. With `live`, `vite-server-config.ts` appends `createLivePlugin(...)` (§12.5) after the harness plugin; `hmr: false` and the disabled watcher stay. `harnessUrlPath = "/.prvision-harness/index.html"`.
-- **Angular:** one build of the group's harnesses (`outputPath .prvision-harness/dist/live-<groupKey>`, same options as 15 §5.7.6, exclusion loop included), then `AngularStaticHost.start({ ..., live: { frontendOrigins } })`; `harnessUrlPath = "/index.html"`. One `AngularHostClient` per side for the whole session.
+- **React:** `ViteHostClient.start({ ...openHost options of 10 for the group, live: true }, harnessUrlPath, signal)`. `ViteHostStartOptions` gains `live?: { frontendOrigins: string[] }`. With `live`, `vite-server-config.ts` appends `createLivePlugin(...)` (§12.5) after the harness plugin and sets `server.cors: false` (no `Access-Control-Allow-Origin` header, so other local pages cannot read module sources); `hmr: false` and today's watcher setting stay. `harnessUrlPath = "/.prvision-harness/index.html"`.
+- **Angular:** one build of the group's harnesses through the side's `AngularHostClient.build(request, signal)` (`outputPath .prvision-harness/dist/live-<n>`, where `<n>` is the group's index in the session's plan, never the raw group key; same options as 15 §5.7.6, exclusion loop included), then `AngularStaticHost.start({ ..., live: { frontendOrigins } })`; `harnessUrlPath = "/index.html"`. One `AngularHostClient` per side for the whole session.
 - Child processes use `CHILD_PROCESS_BASE_ENV` (00 §14.5); hosts bind `127.0.0.1` on ephemeral ports.
 
 ### 12.5 Live page security (00 §14.5 consistent)
@@ -2008,7 +2050,7 @@ Applied by `live-vite-plugin.ts` (Vite `configureServer` middleware, first in th
 |---|---|
 | `start(visualizationId)` | §12.2 |
 | `get(visualizationId)` | the active session, or the most recent one when none is active, as `LiveSessionView`; 404 when the run never had one |
-| `open(visualizationId, { componentId, stateName })` | active session required (409 `conflict` "Live mode is not running for this run."); the component belongs to the run and has a harness snapshot (404); `stateName` is one of its states (400 `validation_failed`); appends to `open_requests`, sets `last_activity_at`; 202 `LiveSessionView` |
+| `open(visualizationId, { componentId, stateName })` | active session required (409 `conflict` "Live mode is not running for this run."); the component belongs to the run and has a harness snapshot (404); `stateName` is one of its states (400 `validation_failed`); appends to `open_requests` with the version guard of §12.3, sets `last_activity_at`; 202 `LiveSessionView` |
 | `heartbeat(visualizationId, { active })` | active session required (404 otherwise, so the page knows it stopped); `last_heartbeat_at = now`, and `last_activity_at = now` when `active`; 200 `{ status }` |
 | `stop(visualizationId, { reason })` | active session → `stopping` with `stop_reason` (`user` or `left`; missing or unreadable body = `left`, so `navigator.sendBeacon` with a `text/plain` body works); 200 `{ id, status: "stopping" }`; no active session → 200 `{ id: null, status: "stopped" }` (idempotent) |
 
@@ -2041,14 +2083,14 @@ export interface HarnessLibraryExportFile {
   stateAllowance: number;                   // 1–5
   entries: Array<{
     filePath: string; exportName: string; displayName: string; selector: string | null;
-    sourceFingerprint: string; harnessSource: string; mockedModules: MockedModule[]; notes: string;
+    sourceFingerprint: string | null; harnessSource: string; mockedModules: MockedModule[]; notes: string;
     states: HarnessStateSpec[]; stateAllowance: number; status: "ready" | "needs_update";
     revision: number; writtenAt: string | null;
   }>;                                       // sorted by filePath, exportName
 }
 ```
 
-`GET /api/repositories/:id/library/export` returns it as the envelope's `data` (E21). The frontend saves it as `prvision-library-<slugified repository name>-<YYYY-MM-DD>.json` (`application/json`, two-space indentation).
+`GET /api/repositories/:id/library/export` returns it as the envelope's `data` (E21). The service serializes the file once to measure it; above `LIBRARY_EXPORT_MAX_BYTES` (the import limit, so every exported file can be imported) → 409 `conflict` "The harness library is larger than 64 MB and cannot be exported as one file." (2 000 components at a typical 5–15 KB per harness stay well below it.) The frontend saves it as `prvision-library-<slugified repository name>-<YYYY-MM-DD>.json` (`application/json`, two-space indentation).
 
 ### 13.3 Matching and validation on import
 
@@ -2058,7 +2100,7 @@ export interface HarnessLibraryExportFile {
 2. `format` must equal `LIBRARY_EXPORT_FORMAT` (400 `validation_failed` "This is not a PRVision harness library file."); `version` > 1 → 400 "This file was exported by a newer PRVision (format version <v>)."
 3. Repository match: `framework`, `appRoot` and (Angular) `angularProject` must equal the target repository's, else 400 "This library was exported for <framework> app <appRoot>[ · <project>]; this repository is <…>." When both sides know their GitHub remote and `owner/repo` differ → 400 "This library belongs to <owner>/<repo>." A different `name` or `defaultBranch` is only a warning.
 4. At most `LIBRARY_IMPORT_MAX_ENTRIES` (5 000) entries, else 400.
-5. Per entry (invalid ones are counted in `skippedInvalid`, the rest still import): `filePath` relative, normalized, inside the app root; `exportName` ≤ 255; `harnessSource` ≤ 40 000 chars; ≤ 15 mocks of ≤ 20 000 chars with valid specifiers (`validateMockedModules`); `extractHarnessStates(harnessSource, framework, { stateAllowance: 5, allowLegacy: false })` succeeds and equals `states` (names and steps); `sourceFingerprint` 64 hex.
+5. Per entry (invalid ones are counted in `skippedInvalid`, the rest still import): `filePath` relative, normalized, inside the app root; `exportName` ≤ 255; `harnessSource` ≤ 40 000 chars; ≤ 15 mocks of ≤ 20 000 chars with valid specifiers (`validateMockedModules`); `extractHarnessStates(harnessSource, framework, { stateAllowance: 5, allowLegacy: false })` succeeds and equals `states` (names and steps); `sourceFingerprint` 64 hex or null.
 6. Per entry, the file must exist at the default branch tip of the user's clone (`GitClient.listFiles(cwd, <default branch sha>)` once, then set lookups); missing → `skippedMissing`.
 
 Imported harnesses are not rendered during import; like any saved harness they are reused while they render (D2) and this machine renders its own screenshots (D14).
@@ -2066,10 +2108,10 @@ Imported harnesses are not rendered during import; like any saved harness they a
 ### 13.4 Applying (one transaction)
 
 - `add_missing`: insert entries whose identity is not in the library (`origin 'import'`, `revision 1`, the file's status and fingerprint); existing entries are kept (`kept`).
-- `replace_all`: existing entries are replaced (`revision + 1`, `origin 'import'`); new ones inserted. Local entries absent from the file are never deleted.
+- `replace_all`: existing entries are replaced (`revision + 1`, `origin 'import'`, `expectedRevision: null`, E25); new ones inserted. Local entries absent from the file are never deleted.
 - `repositories.state_allowance = file.stateAllowance` in both modes (D14).
 - Result `{ imported, replaced, kept, skippedMissing, skippedInvalid, stateAllowance, warnings }`.
-- Body size: `app.ts` mounts `express.json({ limit: LIBRARY_IMPORT_BODY_LIMIT })` (32 MB) for this route **before** the global 1 MB parser (body-parser skips already-parsed bodies). Larger → 413 `payload_too_large`.
+- Body size: `app.ts` mounts `express.json({ limit: LIBRARY_IMPORT_BODY_LIMIT })` (64 MB) for this route **before** the global 1 MB parser (body-parser skips already-parsed bodies). Larger → 413 `payload_too_large`.
 
 ---
 ## 14. HTTP API
@@ -2106,11 +2148,11 @@ Changed routes:
 | `POST /api/repositories` | new optional fields; response gains `scanJobId`, `scanStartError` (§14.2) |
 | `PATCH /api/repositories/:id` | `stateAllowance` (§14.2) |
 | `GET /api/repositories`, `GET /api/repositories/:id` | `RepositoryView` fields (§14.2) |
-| `DELETE /api/repositories/:id` | 409 `conflict` "A scan or repair is running for this repository. Cancel it first." while a library job is active; stops live sessions of its runs; deletes `refs/prvision/wt-*` of its runs (best effort). Library rows and jobs remain with the soft-deleted repository and are removed by cascade if the row is ever hard-deleted |
+| `DELETE /api/repositories/:id` | 409 `conflict` "A scan or repair is running for this repository. Cancel it first." while a library job is active; stops live sessions of its runs; deletes `<dataDir>/snapshots/<id>/` of its runs (best effort). Library rows and jobs remain with the soft-deleted repository and are removed by cascade if the row is ever hard-deleted |
 | `GET /api/visualizations/:id` | `VisualizationDetailView` and `VisualizationComponentView` fields (§14.5) |
 | `GET /api/visualizations` | `VisualizationSummaryView.checkedCount` |
 | `POST /api/visualizations/:id/continue` | unchanged shape; the limit counts new harnesses (E12) |
-| `DELETE /api/visualizations/:id` | 409 `conflict` "A repair is running for this run." while a repair job is active; stops its live session; deletes the snapshot ref |
+| `DELETE /api/visualizations/:id` | 409 `conflict` "A repair is running for this run." while a repair job is active; stops its live session; deletes its working-tree snapshot folder |
 
 ### 14.2 Repositories
 
@@ -2133,7 +2175,6 @@ interface RepositoryUpdateRequest {     // PATCH; at least one field, else 400 v
 interface RepositoryView {              // gains
   libraryBuildMode: "grow" | "scan";
   stateAllowance: number;
-  libraryScannedAllowance: number | null;
 }
 ```
 
@@ -2146,9 +2187,8 @@ interface HarnessLibrarySummaryView {
   repositoryId: number;
   buildMode: "grow" | "scan";
   stateAllowance: number;
-  scannedAllowance: number | null;
-  rescanSuggested: boolean;             // buildMode "scan" and scannedAllowance !== null and !== stateAllowance
-  counts: { total: number; ready: number; needsUpdate: number; withoutHarness: number };
+  rescanSuggested: boolean;             // buildMode "scan" and counts.otherAllowance > 0 (E24)
+  counts: { total: number; ready: number; needsUpdate: number; withoutHarness: number; otherAllowance: number };
   activeJob: LibraryJobView | null;     // active scan or rescan
   lastScanJob: LibraryJobView | null;   // most recent terminal scan or rescan
   canContinue: boolean;                 // no active job and lastScanJob.status in cancelled | cap_reached | failed
@@ -2219,7 +2259,7 @@ interface VisualizationComponentView {  // gains (changeKind union gains "rechec
 
 interface ComponentStateView {
   ordinal: number; name: string; onBase: boolean; onHead: boolean;
-  steps: HarnessStep[]; stepSummary: string[];   // e.g. 'Click button "More actions"' (describeStep, §7.7.1)
+  steps: HarnessStep[]; stepSummary: string[];   // e.g. 'Click button "More actions"' (describeStep, below)
   renderStatus: RenderStatus; visualChange: VisualChange | null;
   baseImageUrl: string | null; headImageUrl: string | null; diffImageUrl: string | null;
   imageWidth: number | null; imageHeight: number | null; diffPixelRatio: number | null;
@@ -2227,7 +2267,9 @@ interface ComponentStateView {
 }
 ```
 
-`harness-states.ts` also exports `describeStep(step: HarnessStep): string` (pure; used by the mapper and by live banners): `Click button "More actions"`, `Hover link "Docs"`, `Type "abc" into textbox "Search"`, `Press Escape`, `Wait for text "Saved"`.
+`describeStep(step: HarnessStep): string` lives in `pipeline/harness-step-text.ts` (pure, written by 16a so 16b and 16e can both import it in wave 8b; used by the view mapper, whose `stepSummary` the live banners show): `Click button "More actions"`, `Hover link "Docs"`, `Type "abc" into textbox "Search"`, `Press Escape`, `Wait for text "Saved"`.
+
+Exact format: target text is `<role> "<name>"` (role), `text "<text>"`, `field labelled "<label>"`, `field with placeholder "<placeholder>"` or `test id "<testId>"`, followed by ` (match <nth + 1>)` when `nth > 0`. Actions: `Click <target>`, `Hover <target>`, `Focus <target>`, `Type "<text>" into <target>`, `Press <key>` (plus ` in <target>` when a target is given), `Wait for <target>`. Strings longer than 60 characters inside quotes are cut to 57 characters plus `...`.
 
 The synthesized Default for legacy rows copies the row's image URLs, size, ratio, `visualChange`, `renderStatus` and errors, with `onBase`/`onHead` from the change kind and `steps: []`.
 
@@ -2303,7 +2345,7 @@ Conventions of sheets 12 and 13 hold: standalone OnPush components, signals, `Ap
 
 ### 15.2 Add repository dialog: library step (16h)
 
-The dialog flow becomes form → (apps) → **library** → create → detected. The single-app shortcut that created directly from the form now opens the library step instead. Phase `'library'`, popup title "Harness library", icon `library_books`, primary "Add" (grow) or "Add and scan" (scan), secondary "Back".
+The dialog flow becomes form → discovering → (apps) → **library** → creating/creatingApp → detected. `DialogPhase` (today `'form' | 'discovering' | 'creating' | 'apps' | 'creatingApp' | 'detected'`) gains `'library'`. The single-app shortcut that created directly after discovery now opens the library step instead, and choosing an app in the `apps` phase opens it too. Phase `'library'`, popup title "Harness library", icon `library_books`, primary "Add" (grow) or "Add and scan" (scan), secondary "Back".
 
 Controls (`data-testid` in brackets):
 
@@ -2327,10 +2369,10 @@ Controls (`data-testid` in brackets):
 
 - Header "Harness library", chip "Grow as you go" or "Whole app" [`build-mode-chip`].
 - Counts line [`library-counts`]: "<total> saved · <ready> ready · <needsUpdate> need updating" (`withoutHarness` shown as "<n> could not be written" when > 0). Empty library: "No saved harnesses yet. Runs add them as they go, or scan the whole app."
-- Rescan hint [`rescan-hint`] when `rescanSuggested`: "The library was scanned with <scannedAllowance> states per component; Rescan to apply <stateAllowance>."
+- Rescan hint [`rescan-hint`] when `rescanSuggested`: "<otherAllowance> saved harnesses were written with a different number of states; Rescan to apply <stateAllowance> states per component."
 - Active job [`active-job`]: progress bar (processed / total), "84 of 201 harnesses written, about $12 spent" (`$` with 2 decimals under $10, else whole dollars), "View progress" link, "Cancel" (confirm dialog, then `cancelLibraryJob`).
 - Actions [`library-actions`]:
-  - **Scan whole app** — shown when there is no active job and the last scan job is absent or `completed` and the repository is `grow`, or the library is empty;
+  - **Scan whole app** — shown when there is no active job and `canContinue` is false (for a `grow` repository it switches to full coverage, D3; for a `scan` repository it writes components added since the last scan);
   - **Continue scan** — when `canContinue`;
   - **Rescan** — when `buildMode === "scan"` and no active job (primary style when `rescanSuggested`);
   - **Export** and **Import** (16k, §15.8).
@@ -2338,7 +2380,7 @@ Controls (`data-testid` in brackets):
 
 #### 15.3.1 Scan dialog
 
-`ScanDialogComponent` (`app-scan-dialog`, MatDialog data `{ repository: RepositoryView; kind: 'scan' | 'rescan'; label: 'Scan whole app' | 'Continue scan' | 'Rescan' }`, result `LibraryJobView | undefined`). Shows the estimate (`estimateLibrary(id, { kind, stateAllowance })`, same rendering as §15.2 item 3, with "<toWriteCount> of <componentCount> components to write"), the same spending-cap input and No-cap checkbox, and for Rescan the allowance select (pre-filled with the repository's). Primary "Start" → `startLibraryScan`. Errors render inline (`ai_not_configured` shows the Settings link via the existing `promptAction` pattern).
+`ScanDialogComponent` (`app-scan-dialog`, opened with `MatDialog` like the other repository dialogs, data `{ repository: RepositoryView; kind: 'scan' | 'rescan'; label: 'Scan whole app' | 'Continue scan' | 'Rescan' }`, result `LibraryJobView | undefined`). Shows the estimate (`estimateLibrary(id, { kind, stateAllowance })`, same rendering as §15.2 item 3, with "<toWriteCount> of <componentCount> components to write"), the same spending-cap input and No-cap checkbox, and for Rescan the allowance select (pre-filled with the repository's). Primary "Start" → `startLibraryScan`. Errors render inline (`ai_not_configured` shows the Settings link via the existing `promptAction` pattern).
 
 ### 15.4 Repository page: settings card (16h)
 
@@ -2375,7 +2417,7 @@ In `ComponentCardComponent`:
 
 #### 15.5.4 Filters
 
-`COMPONENT_FILTER_PREDICATES.changed` also counts rows with `changedStateCount > 0`. Unchanged `rechecked` rows appear under "unchanged" and "all" only (D7: results show only what changed by default).
+`COMPONENT_FILTER_PREDICATES.changed` also counts rows with `changedStateCount > 0`. Unchanged `rechecked` rows appear under "unchanged" and "all" only. `VisualizationDetailStore.defaultFilter` (today: `changed` if any changed, else `failed` if any failed, else `all`) becomes: `changed` if any changed; else `failed` if any failed; else `changed` when the run has `rechecked` rows (D7: results show only what changed, so a clean global-style re-check opens on an empty list whose empty state reads "No component changed visually. <checkedCount> checked."); else `all`.
 
 ### 15.6 Live mode (16j)
 
@@ -2387,8 +2429,8 @@ In `ComponentCardComponent`:
   - `ready`: `ensureOpen(componentId, selected state name)`, then `<app-live-compare>` [`live-compare`] with two iframes labelled Before and After, each with a **Reload** button that reloads only that side; a side that does not exist shows "Not in the base version" / "Not in the head version";
   - `stopped` with `stopReason = idle`: "Live mode stopped after 10 minutes idle." with **Start again**; `failed`: the error with **Try again**.
 - Switching the state tab while in Live opens the new state on both sides (D10: Live starts from the open state tab).
-- `LiveCompareComponent` listens to `message` events; accepted only when `event.origin` equals that iframe's origin and `data.source === "prvision-live"`. A `state` message with skipped steps shows a banner "Some steps can't be replayed live (hover). Do them yourself: <stepSummary>." An `error` message shows "The <side> side threw: <message>".
-- Heartbeat: every `heartbeatIntervalMs` (30 s) while a session is active, `heartbeatLive({ active })`, where `active` is true when the user pressed a key, clicked, scrolled or wheeled on the page, or focus moved into a live iframe (`window` `blur` with `document.activeElement` being one of the iframes), during the last interval. A 404 heartbeat marks the session stopped.
+- `LiveCompareComponent` listens to `message` events; accepted only when `event.origin` equals that iframe's origin and `data.source === "prvision-live"`. A `state` message with skipped steps shows a banner "Some steps can't be replayed live (hover). Do them yourself: <stepSummary>." An `error` message shows "The <side> side threw: <message>". An `activity` message calls `LiveSessionStore.markActivity()` (§15.6 heartbeat).
+- Heartbeat: every `heartbeatIntervalMs` (30 s) while a session is active, `heartbeatLive({ active })`, where `active` is true when, during the last interval and while `document.visibilityState === 'visible'`, the user pressed a key, clicked, scrolled or wheeled on the PRVision page, focus moved into a live iframe (`window` `blur` with `document.activeElement` being one of the iframes), or an accepted `activity` message arrived from a live iframe (§7.6.1 step 6; input inside the cross-origin iframe never reaches the page's own listeners). A 404 heartbeat marks the session stopped.
 - Leaving: `ngOnDestroy` of the detail component → `stopLive(id, { reason: 'left' })`; `pagehide` → `navigator.sendBeacon(<api>/visualizations/<id>/live/stop, new Blob(['{}'], { type: 'text/plain' }))` (D10: leave the run stops the servers).
 
 ### 15.7 Library job page (16h)
@@ -2399,12 +2441,12 @@ Route `library-jobs/:id` → `LibraryJobDetailComponent` (`app-library-job-detai
 - Progress card [`job-progress`]: bar, "84 of 201 harnesses written, about $12 spent" (D12), "Cap $20" when set, counts (saved, need updating, skipped), current label, "<n> states per component".
 - Actions: **Cancel** while active (confirm); **Continue scan** for terminal `scan`/`rescan` jobs that are not `completed` (opens the scan dialog with kind `scan`).
 - Terminal messages: `cap_reached` warning "Paused at the spending cap. Continue the scan to write the rest."; `failed` error with `errorMessage`; `completed` success "Done: <written> saved, <failed> need updating, <skipped> skipped."
-- Console: `<app-console-panel>` fed with the job events mapped to `ConsoleEventView` (`stage` = the job kind).
+- Console: `<app-console-panel>` (reused from `features/visualizations/components/console-panel`; its `ConsoleEventView.stage` is a plain string) fed with the job events mapped to `ConsoleEventView` (`stage` = the job kind).
 
 ### 15.8 Export and import (16k)
 
 - **Export** on the library card: `exportLibrary(id)` → `Blob([JSON.stringify(file, null, 2)], { type: 'application/json' })` → anchor download with the §13.2 file name. Disabled when the library is empty.
-- **Import** opens `ImportLibraryDialogComponent` (`app-import-library-dialog`, data `{ repository }`): file input (`.json`, ≤ 32 MB), parsed in the browser; shows the file's repository name, framework, app root, entry count and state allowance, and a client-side mismatch warning (framework/app root) before sending; mode radio "Add missing harnesses" (default) / "Replace saved harnesses with the file's"; note "Screenshots are not part of the file; this machine renders its own."; primary **Import** → result summary "<imported> added, <replaced> replaced, <kept> kept, <skippedMissing> skipped (component not found), <skippedInvalid> skipped (invalid). States per component set to <n>."
+- **Import** opens `ImportLibraryDialogComponent` (`app-import-library-dialog`, data `{ repository }`): file input (`.json`, ≤ 64 MB), parsed in the browser; shows the file's repository name, framework, app root, entry count and state allowance, and a client-side mismatch warning (framework/app root) before sending; mode radio "Add missing harnesses" (default) / "Replace saved harnesses with the file's"; note "Screenshots are not part of the file; this machine renders its own."; primary **Import** → result summary "<imported> added, <replaced> replaced, <kept> kept, <skippedMissing> skipped (component not found), <skippedInvalid> skipped (invalid). States per component set to <n>."
 
 ---
 ## 16. Configuration constants (16a)
@@ -2427,7 +2469,8 @@ Values below are binding. `render.config.ts` stays pure (no env, imported by the
 | `RENDER_ITEM_CONCURRENCY` | `2` | §9.2 |
 | `RENDER_PAGE_CONCURRENCY` | `4` | §9.2 |
 | `RENDER_STAGE_MS_PER_PAGE` | `2_500` | §9.2 budget |
-| `RENDER_GROUP_STARTUP_ALLOWANCE_MS` | `20_000` | §9.2 budget |
+| `RENDER_GROUP_STARTUP_ALLOWANCE_MS` | `20_000` | §9.2 budget (React, per group and side) |
+| `ANGULAR_RENDER_GROUP_STARTUP_ALLOWANCE_MS` | `ANGULAR_BUILD_TIMEOUT_MS` (240 000) | §9.2 budget (Angular, per group and side) |
 | `RENDER_STAGE_TIMEOUT_MAX_MS` | `60 * 60_000` | §9.2 budget (`RENDER_STAGE_TIMEOUT_MS` stays the 15-minute floor) |
 | `RENDER_GROUP_MAX_ITEMS` | `40` | §9.2 |
 | `GLOBAL_STYLE_TRIGGER_PATTERNS` | `{ tailwindConfig: "^tailwind\\.config\\.[cm]?[jt]s$", postcssConfig: ["^postcss\\.config\\.([cm]?[jt]s|json)$", "^\\.postcssrc(\\.(json|ya?ml|[cm]?js))?$"], tokenBasenames: ["^(design-)?tokens?\\.(css|scss|sass|less|json)$", "^design-tokens\\.[cm]?[jt]s$", "^_?(variables|tokens|theme)\\.(css|scss|sass|less)$"], tokenFolders: ["tokens", "design-tokens"] } as const` | §8.5 |
@@ -2498,17 +2541,19 @@ The price table is a maintenance item: the default estimate constants are uncali
 |---|---|
 | `LIBRARY_JOBS_DIR_NAME` | `"library-jobs"` (`<dataDir>/library-jobs/<jobId>/`) |
 | `LIVE_DIR_NAME` | `"live"` (`<dataDir>/live/<sessionId>/`) |
-| `WORKING_TREE_SNAPSHOT_REF_PREFIX` | `"refs/prvision/wt-"` |
-| `LIBRARY_IMPORT_BODY_LIMIT` | `"32mb"` |
+| `WORKING_TREE_SNAPSHOT_DIR_NAME` | `"snapshots"` (`<dataDir>/snapshots/<visualizationId>/`) |
+| `LIBRARY_IMPORT_BODY_LIMIT` | `"64mb"` |
+| `LIBRARY_EXPORT_MAX_BYTES` | `64 * 1024 * 1024` (equals the import limit) |
 | `LIBRARY_IMPORT_MAX_ENTRIES` | `5_000` |
 | `LIBRARY_EXPORT_FORMAT` | `"prvision-harness-library"` |
 | `LIBRARY_EXPORT_VERSION` | `1` |
 | `LIBRARY_ESTIMATE_TIMEOUT_MS` | `60_000` |
+| `LIBRARY_ESTIMATE_INVENTORY_BUDGET_MS` | `45_000` |
 | `LIBRARY_ESTIMATE_CACHE_MS` | `60_000` |
 
 ### 16.5 Frontend constants
 
-`core/constants/polling.constants.ts`: `LIBRARY_SUMMARY_POLL_MS = 3000`, `LIBRARY_JOB_POLL_MS = 2000`, `LIBRARY_JOB_EVENTS_POLL_MS = 1500`, `LIVE_POLL_FAST_MS = 1000`, `LIVE_POLL_SLOW_MS = 10000`. `ui.constants.ts`: `STATE_ALLOWANCE_OPTIONS = [1, 2, 3, 4, 5]`, `STATE_ALLOWANCE_DEFAULT = 3`, `LIBRARY_IMPORT_MAX_BYTES = 32 * 1024 * 1024`. (16h owns the polling and ui constant edits.)
+`core/constants/polling.constants.ts`: `LIBRARY_SUMMARY_POLL_MS = 3000`, `LIBRARY_JOB_POLL_MS = 2000`, `LIBRARY_JOB_EVENTS_POLL_MS = 1500`, `LIVE_POLL_FAST_MS = 1000`, `LIVE_POLL_SLOW_MS = 10000`. `ui.constants.ts`: `STATE_ALLOWANCE_OPTIONS = [1, 2, 3, 4, 5]`, `STATE_ALLOWANCE_DEFAULT = 3`, `LIBRARY_IMPORT_MAX_BYTES = 64 * 1024 * 1024`. (16h owns the polling and ui constant edits.)
 
 ### 16.6 Boot validation (`config-validation.ts`)
 
@@ -2519,7 +2564,7 @@ Added checks (each a message in `collectConfigValidationErrors`):
 - `LIVE_IDLE_TIMEOUT_MS === 600_000` (D10); `LIVE_HEARTBEAT_LOSS_MS ≥ 2 × LIVE_HEARTBEAT_INTERVAL_MS`; `LIVE_IDLE_TIMEOUT_MS > LIVE_HEARTBEAT_LOSS_MS`; `LIVE_MAX_SESSIONS` between 1 and 4.
 - `RENDER_PAGE_CONCURRENCY === 2 × RENDER_ITEM_CONCURRENCY`; `RENDER_STAGE_TIMEOUT_MS ≤ RENDER_STAGE_TIMEOUT_MAX_MS < VISUALIZATION_MAX_RUNTIME_MS`.
 - Every price entry has four finite positive numbers; `AI_PRICE_FALLBACK_MODEL` and `AI_DEFAULT_MODEL` are keys of the table.
-- `0 < LIBRARY_SPEND_CAP_MIN_USD < LIBRARY_SPEND_CAP_MAX_USD`; `LIBRARY_EXPORT_VERSION === 1`; positive integers for every new size, count and timeout.
+- `0 < LIBRARY_SPEND_CAP_MIN_USD < LIBRARY_SPEND_CAP_MAX_USD`; `LIBRARY_EXPORT_VERSION === 1`; `LIBRARY_EXPORT_MAX_BYTES` equals the byte value of `LIBRARY_IMPORT_BODY_LIMIT`; `LIBRARY_ESTIMATE_INVENTORY_BUDGET_MS < LIBRARY_ESTIMATE_TIMEOUT_MS`; positive integers for every new size, count and timeout.
 
 ---
 
@@ -2550,7 +2595,7 @@ Added checks (each a message in `collectConfigValidationErrors`):
 | Scan: default branch missing | Job `failed` "The default branch <b> was not found in the clone." |
 | Scan: worker restarted | Job `failed` by recovery; Continue scan writes the rest |
 | Scan and repair touch the same entry | Optimistic `expectedRevision`; the scan keeps the newer revision (`skipped`) |
-| Repair or live mode of a working-tree run without a snapshot | `head_snapshot_ref` null → 409 `conflict` at start; ref deleted since → the job or session fails in `preparing` with the §11.1 message |
+| Repair or live mode of a working-tree run without a snapshot | `working_tree_snapshot` false → 409 `conflict` at start; folder deleted since → the job or session fails in `preparing` with the §11.1 message |
 | Repair finds a component defect | Card note; needs-update cleared; library unchanged |
 | Live: two sessions already running | 409 with the message of §12.2 |
 | Live: user leaves the run | Stop via destroy hook or beacon; else heartbeat loss after 90 s |
@@ -2559,7 +2604,7 @@ Added checks (each a message in `collectConfigValidationErrors`):
 | Live: commit missing from the clone | Session `failed` with §11.1 message |
 | Import: wrong repository | 400 with a clear message (§13.3) |
 | Import while scanning | 409 |
-| Import file > 32 MB | 413 `payload_too_large` |
+| Import file > 64 MB | 413 `payload_too_large` |
 | Repository removed while a job is active | 409 (cancel first) |
 | Run deleted while live is running | Session stopped; artifacts removed as today |
 | Repository removed and registered again | The new repository row starts with an empty library (the old rows stay with the soft-deleted row); the remove confirmation says "Export the harness library first if you want to keep it." |
@@ -2593,14 +2638,14 @@ Structured logs (pino, 04): `library.resolve` (visualizationId, reused, toWrite,
 
 ## 19. Security notes
 
-- **Nothing is written to the user's working copy** (D1, non-goal). The only writes into the clone's git data are worktree metadata (as today), the snapshot commit objects and `refs/prvision/wt-<id>` refs (E18, under the namespace 00 §4 already reserves), and PR refs as today. A test asserts the working copy, index and branches are untouched after a working-tree run.
+- **Nothing is written to the user's repository** (D1, non-goal). The library, the working-tree snapshots (E18) and every job's scratch files live in PRVision's database and data dir. The only writes into the clone's git data are the ones that exist today: worktree metadata, and the temporary PR refs `refs/prvision/pr-<n>`/`-base` (00 §14.7), which live mode and repair may re-create for a re-fetch and always delete again (§11.1 step 3). A test asserts the working copy, index, refs and branches are untouched after a working-tree run.
 - **Saved harnesses are AI-written, untrusted code** with the same containment as today: statically validated before saving (§7.7), compiled by the repo's toolchain in child processes, executed only in Chromium with network routing (screenshots) or under a blocking CSP (live). Imported harnesses are untrusted input too: size limits, structure checks and state extraction run before saving (§13.3); they execute only inside the same sandboxes.
 - **Live hosts** bind `127.0.0.1`, enforce the Host guard (DNS rebinding) and GET/HEAD only, send `frame-ancestors` limited to the PRVision frontend, and block off-origin connections. Their origins are never allowed by the API's CORS or Origin guard, so a live page cannot call PRVision's API. postMessage is origin-checked on both sides.
 - **Steps** are literal data, executed by PRVision's own runtime; a harness cannot inject Playwright actions. Step targets are matched with DOM queries only (`querySelectorAll`, text comparison), never with selectors taken from the harness except `data-testid` values used as exact attribute matches (escaped with `CSS.escape`).
 - **Spending** is bounded: the scan cap guard runs before every AI call; runs pause above 12 new harnesses; repairs are manual (D8).
 - **Child environment**: every new child (Vite and Angular live hosts, git snapshot commands) uses `CHILD_PROCESS_BASE_ENV` (00 §14.5); `GIT_INDEX_FILE` and the fixed author variables are added explicitly.
-- **Import body** has its own size limit (32 MB) and entry cap; JSON only.
-- **Paths**: every entry `file_path` (from runs, scans and imports) is normalized and confined to the app root; derived filesystem paths go through `assertInside`/`resolveSafe`.
+- **Import body** has its own size limit (64 MB) and entry cap; JSON only.
+- **Paths**: every entry `file_path` (from runs, scans and imports) is normalized and confined to the app root; derived filesystem paths go through `resolveInside`/`isPathInside` (`utilities/helpers/paths.ts`) or `ArtifactStore.resolveSafe`.
 
 ---
 ## 20. Tests
@@ -2610,19 +2655,21 @@ Backend tests use `node:test` with the preload of 00 §14.10 and need no databas
 ### 20.1 16a
 
 - `tests/backend/database/schema.test.ts` (extend): new tables and columns exist with the §6 names; CHECK names; `rechecked` in the change-kind CHECK; partial unique index predicates.
-- `tests/backend/database/migrations.integration.test.ts` (DB-gated, extend): `0009` applies on a database holding rows from `0008`; defaults (`grow`, 3, false, 0); rejected rows: `state_allowance` 0 and 6, a second active scan for one repository, a second active live session for one run, `base_library_entry_id` on a non-`replaced` row, ordinal 0 not named `Default`, `status = 'ready'` without harness, `spend_cap_usd` on a repair job.
+- `tests/backend/database/migrations.integration.test.ts` (DB-gated, extend): `0009` applies on a database holding rows from `0008`; defaults (`grow`, 3, false, 0); rejected rows: `state_allowance` 0 and 6, `working_tree_snapshot = true` on a non-`working_tree` run, a malformed `source_fingerprint`, a second active scan for one repository, a second active live session for one run, `base_library_entry_id` on a non-`replaced` row, ordinal 0 not named `Default`, `status = 'ready'` without harness, `spend_cap_usd` on a repair job.
 - `tests/backend/database/model-generator.test.ts` (extend): the eight `JSON_COLUMN_TYPES` entries; generated files import from both type modules.
 - `tests/backend/database/table-registry.test.ts`, `tests/backend/enums/enums.test.ts` (extend).
 - `tests/backend/utilities/ai-cost.test.ts` (new): `usageCostUsd("claude-opus-5-5", { inputTokens: 26000, cacheReadInputTokens: 4500, cacheWriteInputTokens: 0, outputTokens: 9000, calls: 1 })` = `{ usd: 0.2669, exact: true }`; cache writes priced at 1.25× input; unknown model → fallback, `exact: false`; missing cache fields = 0; rounding to 4 decimals.
 - `tests/backend/ai/anthropic-api-provider.test.ts`, `tests/backend/harness/ai-usage-recorder.test.ts` (extend): `cacheWriteInputTokens` mapped, summed and stored; old rows without it still parse.
-- `tests/backend/utilities/artifact-store.test.ts` (extend): `componentStateImagePath` for ordinals 0, 1, 9; 10 and −1 rejected; public URL and `resolveSafe` for `s<n>` paths; traversal attempts rejected.
+- `tests/backend/utilities/artifact-store.test.ts` (extend): `componentStateImagePath` for ordinals 0, 1, 9; 10 and −1 rejected; public URL and `resolveSafe` for `s<n>` paths; traversal attempts rejected. `tests/backend/http/artifacts-route.test.ts` (extend): `/artifacts/<v>/<c>/s2/head.png` served, `s0` and `s10` rejected.
+- Compile-shim check: the existing 08–15 suites pass unchanged except fixtures that construct the extended types.
 - `tests/backend/utilities/queue-service.test.ts` (extend): queue, job names and ids per kind; library cancel key; `close()` closes every worker and queue and aborts active library jobs with `"shutdown"`.
 - `tests/backend/config/config-validation.test.ts` (extend): one failing override per §16.6 rule.
+- `tests/backend/pipeline/harness-step-text.test.ts` (new): `describeStep` for every action and target form (exact strings of §14.5).
 - `tests/backend/types/harness-library.test.ts` (new): `identityKey`; a compile-time check that `RenderFailureKindValue` and 10's `RenderFailureKind` are mutually assignable.
 
 ### 20.2 16b
 
-- `tests/backend/harness/harness-states.test.ts` (new): React three-state harness → specs; legacy harness with and without `allowLegacy`; every §7.7.2 code with its exact message; names (valid: `Zero balance`, `Long name (40 chars)`, `Menu open`; invalid: leading space, trailing space, 41 chars, emoji, `Default` twice, `default` vs `Default`); steps (each action, every target form, `nth` 21, text 201 chars, unknown key, non-literal value); Angular without `states`, with a state named `Default`, over the allowance; `describeStep` strings.
+- `tests/backend/harness/harness-states.test.ts` (new): React three-state harness → specs; legacy harness with and without `allowLegacy`; every §7.7.2 code with its exact message; names (valid: `Zero balance`, `Long name (40 chars)`, `Menu open`; invalid: leading space, trailing space, 41 chars, emoji, `Default` twice, `default` vs `Default`); steps (each action, every target form, `nth` 21, text 201 chars, unknown key, non-literal value); Angular without `states`, with a state named `Default`, over the allowance.
 - `tests/backend/harness/harness-validator.test.ts` (extend): new-shape positive case; legacy shape → `harness_shape`; `import "../prvision-steps"` → `forbidden_import`; `Math.random` inside a state's render → `nondeterministic_api`; allowance respected. Existing fixtures that used the legacy shape are ported to the new shape with identical expectations.
 - `tests/backend/harness/angular-harness-validator.test.ts` (extend): states inputs checked with `unknown_input`; forbidden providers inside a state; state named `Default`.
 - `tests/backend/harness/harness-prompts.test.ts`, `angular-harness-prompts.test.ts`: §7.8.5 (verbatim against this sheet, new pins); user prompt lines for both purposes and the allowance; reminders; repair prompt `state:` line.
@@ -2630,13 +2677,13 @@ Backend tests use `node:test` with the preload of 00 §14.10 and need no databas
 - `tests/backend/render/page-scripts.test.ts` (new or extend): `READ_HARNESS_STATE_SCRIPT` shape; `buildMarkStepTargetScript` escapes its JSON argument.
 - `tests/backend/render/render-errors.test.ts` (extend): `step_failed` repairable, headline.
 - `tests/backend/render/harness-workspace.test.ts`, `tests/backend/render/angular/angular-harness-workspace.test.ts` (extend): `harness-api.ts` and `prvision-steps.ts` copied.
-- `tests/backend/integration/steps-runtime.integration.test.ts` (new, gated): loads `prvision-steps.ts` (compiled with esbuild from the backend's toolchain) into Chromium over static HTML fixtures; every target form, implicit roles, accessible-name sources, innermost text match, visibility rules (`display:none`, `aria-hidden`, `inert`, zero-size), `nth`, portals; live replay of click/focus/type/press and the hover skip report.
+- `tests/backend/integration/steps-runtime.integration.test.ts` (new, gated): loads `prvision-steps.ts` (transpiled with `typescript.transpileModule` to an ES module; the backend has no esbuild dependency) into Chromium over static HTML fixtures; every target form, implicit roles, accessible-name sources, innermost text match, visibility rules (`display:none`, `aria-hidden`, `inert`, zero-size), `nth`, portals; live replay of click/focus/type/press and the hover skip report.
 - `tests/backend/integration/render-engine.integration.test.ts` (extend, gated): a three-state harness on fixture branch `qa/states` produces three PNG pairs; a hover step changes the pixels of its state only; a missing target fails only that state with `step_failed`.
 
 ### 20.3 16c
 
 - `tests/backend/harness-library/library-fingerprint.test.ts` (new): formatting-only edits keep the fingerprint; a JSX or prop change changes it; a co-located CSS module change changes it; an unrelated stylesheet does not; Angular template whitespace keeps it, a template text change and an external style change alter it.
-- `tests/backend/harness-library/harness-library-store.test.ts` (new, query-handler stub): insert; replace with `expectedRevision` null and equal; `revision_changed`; unique-violation retry; caps of notes and errors; `markRenderOutcome` never sets `ready` without a harness; `moveIdentity` no-op when the target exists; counts.
+- `tests/backend/harness-library/harness-library-store.test.ts` (new, query-handler stub): insert; replace with `expectedRevision` null and equal; `revision_changed` for a different revision and for `0` on an existing entry; `0` inserts when absent; unique-violation retry; `otherAllowance` count; caps of notes and errors; `markRenderOutcome` never sets `ready` without a harness; `moveIdentity` no-op when the target exists; counts.
 - `tests/backend/harness-library/component-inventory.test.ts` (new, temp worktrees as in 08's tests): fixture-like React app orders `Button`, `Badge` (layer 0) before `Card` before `Dashboard` before `App`; cycles collapsed into one layer; stories, tests and generated files excluded; two components in one file; truncation warning; Angular layout with selector usage.
 - `orderSmallestFirst` table tests.
 
@@ -2645,14 +2692,14 @@ Backend tests use `node:test` with the preload of 00 §14.10 and need no databas
 - `tests/backend/pipeline/library/library-resolution-service.test.ts` (new): every plan case of §8.4 step 3; `newHarnessCount` with `replaced` rows; pause at 13 new harnesses, no pause at 12, no pause when `componentLimit` is set; over-limit skip reason text; reused rows never skipped; re-check rows (rank, reason, origin, entry id, both-sides existence filter, the 2 000 cap); counts persisted; console lines.
 - `tests/backend/pipeline/library/global-style-triggers.test.ts` (new): table-driven, one case per §8.5.1 row, including app roots in sub-folders, `src/app/tokens.ts` (no trigger), `src/styles/_variables.scss` (trigger), a React Vite root in a sub-folder, `angular.json` (Angular only), deleted and renamed paths.
 - `tests/backend/pipeline/change-analysis/change-analysis-service.test.ts` and `pipeline/angular/angular-change-analysis-service.test.ts` (rewrite the representative cases): a global stylesheet change yields `globalStyleChanges` and no representative rows; the 500 ceiling; no non-src warning.
-- `tests/backend/pipeline/change-analysis/change-source.git.test.ts` (extend): working-tree changes include the trigger files outside `src`.
+- `tests/backend/pipeline/change-analysis/change-source.git.test.ts` (extend): working-tree changes include the trigger files outside `src` (added, modified, deleted, at the repo root and in the app root); an unchanged `tailwind.config.js` produces no entry; a symlinked candidate is ignored.
 - `tests/backend/harness/harness-generation-service.test.ts` (extend): `sides` for `replaced` rows (head only, base only, placeholders); `states`, `origin`, `usage` on results; `shouldStartCall` false → `stopReason: "spend_cap"` and no further calls; `NoopHarnessPersistence` writes nothing; library purpose prompt.
-- `tests/backend/visualizations/visualization-worker-service.test.ts` (extend): pause decided by resolution; reused snapshot persisted; save-back outcomes (ready, needs_update, no-harness entry, rename move); save-back failure is a warning; `checked_count`; completion line.
-- `tests/backend/visualizations/workspace-prepare-service.test.ts`, `tests/backend/utilities/git-client.test.ts` (extend): snapshot uses `GIT_INDEX_FILE` and the exclude pathspecs; the worktree index and the user's clone status are unchanged; failure is a warning; cleanup keeps the ref; `linkWorkspaceNodeModules` extraction keeps today's link set (existing tests unchanged).
+- `tests/backend/visualizations/visualization-worker-service.test.ts` (extend): pause decided by resolution; reused snapshot persisted (`rechecked` rows too); save-back outcomes (ready, needs_update, no-harness entry, rename move, `revision_changed` keeps the newer entry); save-back failure is a warning; `checked_count`; completion line.
+- `tests/backend/visualizations/workspace-prepare-service.test.ts` (extend): a working-tree run writes `snapshots/<id>/` (manifest, patch, untracked copies taken from the head worktree) atomically through `.tmp`; `applyWorkingTreeSnapshot` on a fresh worktree at `base_sha` reproduces the head worktree's files; no ref, commit or index change in the clone (`git for-each-ref`, `git status` before and after); failure is a warning and leaves `working_tree_snapshot` false; cleanup keeps the folder; `linkWorkspaceNodeModules` extraction keeps today's link set (existing tests unchanged).
 
 ### 20.5 16e
 
-- `tests/backend/render/render-service.test.ts`, `render/angular/angular-render-service.test.ts` (extend, existing fakes): per-state pages and paths; one-sided states; at most 4 pages in flight and 2 items; dynamic budget formula; `splitLargeGroups`; library-origin items never repaired; written items repaired on a non-Default state failure with `stateName`; `chooseAttempt` over states; §9.3 status table; payload state rows.
+- `tests/backend/render/render-service.test.ts`, `render/angular/angular-render-service.test.ts` (extend, existing fakes): per-state pages and paths; one-sided states; at most 4 pages in flight and 2 items; `renderStageBudgetMs` table (React and Angular allowances, floor and ceiling); `splitLargeGroups`; library-origin items never repaired; written items repaired on a non-Default state failure with `stateName`; `chooseAttempt` over states; §9.3 status table; payload state rows.
 - `tests/backend/pipeline/diff-summary/component-state-persistence.test.ts` (new).
 - `tests/backend/pipeline/diff-summary/image-diff-service.test.ts` (extend): per-state diffs and paths; aggregates; `added`/`removed` rows keep `new`/`deleted`; empty `states` fallback.
 - `tests/backend/pipeline/diff-summary/summary-service.test.ts`, `summary-prompts.test.ts` (extend): the `states:` line, image choice and label, re-check overview; system prompt pins unchanged.
@@ -2661,15 +2708,15 @@ Backend tests use `node:test` with the preload of 00 §14.10 and need no databas
 ### 20.6 16f
 
 - `tests/backend/harness-library/harness-library-service.test.ts` (new): `startScan` (404, `ai_not_configured`, 409 running, allowance update, build mode switch, enqueue failure); summary flags (`rescanSuggested`, `canContinue`); cancel 200/202/409; events paging.
-- `tests/backend/harness-library/library-estimate-service.test.ts` (new): default basis numbers for `claude-opus-5-5` at allowance 1 and 3; history basis with scaling; unknown model; truncation; timeout → 504; cache hit and invalidation on HEAD or dirty change.
-- `tests/backend/harness-library/library-scan-worker-service.test.ts` (new, fakes for inventory, generation, render, store, git): batch order; every save rule of §10.4 step 7.5 (rescan keeps the old ready harness); cap → `cap_reached` with the message and no new calls; cancel finishes the batch; vanished entries deleted only when not truncated; `library_scanned_allowance` set only on a complete scan; counters and events; cleanup on success, failure and shutdown; 8-hour limit message.
+- `tests/backend/harness-library/library-estimate-service.test.ts` (new): default basis numbers for `claude-opus-5-5` at allowance 1 and 3; history basis with scaling; unknown model; truncation through the inventory budget; timeout → 504; count cache hit across allowance changes and invalidation on a HEAD change; no fingerprints computed.
+- `tests/backend/harness-library/library-scan-worker-service.test.ts` (new, fakes for inventory, generation, render, store, git): batch order; no `artifacts/` path and no visualization rows touched (visualization id 0); cap guard counts in-flight calls (4 concurrent guard calls near the cap admit only what fits) and releases them on usage; every save rule of §10.4 step 7.5 (rescan keeps the old ready harness); cap → `cap_reached` with the message and no new calls; cancel finishes the batch; vanished entries deleted only when not truncated; `expectedRevision` 0 for new targets and the start revision for rescans; counters and events; cleanup on success, failure and shutdown; 8-hour limit message.
 - `tests/backend/harness-library/library-job-state.test.ts`, `library-job-recovery.test.ts` (new).
 - `tests/backend/harness-library/harness-library-routes.test.ts` (new, app fixture): every route of §14.1 for 16f behind `requireLocal`; DTO errors; `library-estimate` not captured by `:id`.
 - `tests/backend/repositories/repositories-service.test.ts`, `repository-create-dto.test.ts` (extend): create with scan (job id), AI not ready → 201 with `scanStartError`; cap without scan → 400; PATCH allowance; PATCH empty → 400; remove → 409 with an active library job.
 
 ### 20.7 16g
 
-- `tests/backend/visualizations/run-workspace-recreator.test.ts` (new, temp git repos): base and head at the run's SHAs; working-tree head from the snapshot ref; missing ref message; missing commit with PR re-fetch (fake GitHub port) and without; cleanup.
+- `tests/backend/visualizations/run-workspace-recreator.test.ts` (new, temp git repos): base and head at the run's SHAs; working-tree head from `snapshots/<id>/` (§11.2); missing snapshot message; missing commit with PR re-fetch (fake GitHub port) and without; cleanup.
 - `tests/backend/harness-library/harness-repair-worker-service.test.ts` (new): ok path (snapshot, render, diff, entry revision + 1, origin `repaired`, flags); `component_defect`; failure outcomes; `replaced` per side; run counts recomputed; console event; cancel between components; usage on both recorders.
 - `tests/backend/harness-library/harness-library-service.repair.test.ts` (new): all §11.3 checks and messages.
 
@@ -2677,23 +2724,23 @@ Backend tests use `node:test` with the preload of 00 §14.10 and need no databas
 
 - `add-repository-dialog.component.spec.ts` (extend): library step for single- and multi-app flows; estimate on open and after allowance change (debounced, stale responses dropped); payloads for grow and scan, with and without cap; estimate error does not block; `scanStarted` link; `scanStartError` warning.
 - `harness-library-card.component.spec.ts`, `scan-dialog.component.spec.ts`, `repository-settings-card.component.spec.ts`, `library-job-detail.component.spec.ts`, `library-job-detail.store.spec.ts` (new): texts of §15.3–§15.7 exactly ("84 of 201 harnesses written, about $12 spent"), button matrix, polling start/stop, cancel confirmation, continue.
-- `state-tabs.component.spec.ts` (new); `component-card.component.spec.ts`, `image-compare.component.spec.ts`, `visualization-detail.component.spec.ts`, `visualization-detail.store.spec.ts`, `component-filters.spec.ts` (extend): first changed state selected; state URLs passed down; steps line; harness chips; needs-update alert and Repair; `rechecked` pill; "201 checked, 14 changed"; trigger chip; Repair all broken; polling while a repair is active; new pause wording.
+- `state-tabs.component.spec.ts` (new); `component-card.component.spec.ts`, `image-compare.component.spec.ts`, `visualization-detail.component.spec.ts`, `visualization-detail.store.spec.ts`, `component-filters.spec.ts` (extend): default filter rule of §15.5.4 (a clean re-check opens on `changed` with the empty-state text); first changed state selected; state URLs passed down; steps line; harness chips; needs-update alert and Repair; `rechecked` pill; "201 checked, 14 changed"; trigger chip; Repair all broken; polling while a repair is active; new pause wording.
 - The existing repository spec builders get every `RepositoryView` field (they currently miss `renderViewport` and do not type-check under `tsc -p tsconfig.spec.json`); 16h fixes them while adding the library fields.
-- 16j: `live-session.store.spec.ts` (start, polling cadence, heartbeat `active` detection, 404 heartbeat, stop on destroy, beacon on `pagehide`), `live-compare.component.spec.ts` (origin-checked messages, per-side reload, absent side, banners), `image-compare` Live option enablement.
+- 16j: `live-session.store.spec.ts` (start, polling cadence, heartbeat `active` detection including `activity` messages and hidden tabs, 404 heartbeat, stop on destroy, beacon on `pagehide`), `live-compare.component.spec.ts` (origin-checked messages, per-side reload, absent side, banners), `image-compare` Live option enablement. 16b's `browser-session`/steps-runtime tests cover the page side of `activity` (throttled to one per 5 s, only to a valid parent origin).
 - 16k: `import-library-dialog.component.spec.ts` (parse, mismatch warning, modes, result text), export download in the card spec.
 
 ### 20.9 16i and 16k (backend)
 
-- `tests/backend/live/live-session-service.test.ts` (new): start rules and messages; reuse of the active session; the 2-session limit; open validation; heartbeat; stop idempotence and bodyless stop = `left`.
-- `tests/backend/live/live-session-worker-service.test.ts` (new, fake host manager and clock): ready; request draining with the guarded update; each stop condition (stopping, 90 s heartbeat loss, 10 min idle, 4 h, shutdown); cleanup on every path; failure → `failed`.
+- `tests/backend/live/live-session-service.test.ts` (new): start rules and messages; reuse of the active session; the 2-session limit; open validation; open retry on a version miss and 409 after 3; heartbeat; stop idempotence and bodyless or `text/plain` stop = `left`.
+- `tests/backend/live/live-session-worker-service.test.ts` (new, fake host manager and clock): ready; request draining with the `open_requests_version` guard (a concurrent append between read and write is kept for the next tick); each stop condition (stopping, 90 s heartbeat loss, 10 min idle, 4 h, shutdown); cleanup on every path; failure → `failed`.
 - `tests/backend/live/live-host-manager.test.ts` (new): lazy start per (side, group); LRU at 4; React start options carry `live`; Angular output path per group.
 - `tests/backend/live/live-page-headers.test.ts`, `live-vite-plugin.test.ts`, `live-init-script.test.ts` (new): exact CSP with the frontend twin origin; Host guard 403; non-GET 405; script injected as the first child of `<head>`; random sequence equals the screenshot init script's for the same seed; `Date.now()` starts at `RENDER_FIXED_TIME_ISO`.
 - `tests/backend/render/angular/angular-static-host.test.ts` (extend): live option headers, guard and injection.
-- `tests/backend/harness-library/library-transfer-service.test.ts` (new): export content, order and exclusions; every §13.3 rejection message; invalid and missing counters; `add_missing` vs `replace_all`; allowance applied; 409 during a scan; rollback on failure. Route test: 413 above 32 MB and the route parser placed before the global one.
+- `tests/backend/harness-library/library-transfer-service.test.ts` (new): export content, order and exclusions; every §13.3 rejection message; invalid and missing counters; `add_missing` vs `replace_all`; allowance applied; 409 during a scan; rollback on failure. Route test: 413 above 64 MB; export of a library above `LIBRARY_EXPORT_MAX_BYTES` → 409 and the route parser placed before the global one.
 
 ### 20.10 16l: fixtures and integration
 
-Fixture changes (branches appended **after** the existing ones so earlier SHAs stay stable; `FIXTURE_VERSION` 2 → 3 in both generators, which makes `fixture:create` rebuild):
+Fixture changes (branches appended **after** the existing ones so earlier SHAs stay stable; `FIXTURE_VERSION` 2 → 3 in both `tools/fixture-repo/sample-app-files.mjs` and `sample-angular-app-files.mjs`, which makes `fixture:create` rebuild):
 
 - React `tools/fixture-repo/sample-app-files.mjs`:
   - `qa/global-style`: `src/index.css` changes the base font size and the card radius custom property;
@@ -2704,8 +2751,8 @@ Fixture changes (branches appended **after** the existing ones so earlier SHAs s
 
 Integration tests (gated; AI through the existing scripted provider helpers, so no key is needed):
 
-1. `harness-library.integration.test.ts`: run on `feature/button-restyle` writes and saves harnesses; a second run of the same branch makes **0 AI calls** and reports `reusedHarnessCount` = candidates; `qa/global-style` adds `rechecked` rows for every entry, `checked_count` = all rows, only changed ones under the changed filter; `qa/library-break` flags `Card` "Harness needs updating" with no AI call; a repair job with a scripted fixed harness clears it and stores revision 2; `working_tree` run creates `refs/prvision/wt-<id>` and leaves `git status` of the clone unchanged.
-2. `library-scan.integration.test.ts`: scan of `main` saves entries in smallest-first order; a scripted usage per call makes a $0.50 cap end `cap_reached`; Continue writes only the rest; cancel ends `cancelled` with the current batch saved; Rescan at a new allowance rewrites every entry and sets `library_scanned_allowance`.
+1. `harness-library.integration.test.ts`: run on `feature/button-restyle` writes and saves harnesses; a second run of the same branch makes **0 AI calls** and reports `reusedHarnessCount` = candidates; `qa/global-style` adds `rechecked` rows for every entry, `checked_count` = all rows, only changed ones under the changed filter; `qa/library-break` flags `Card` "Harness needs updating" with no AI call; a repair job with a scripted fixed harness clears it and stores revision 2; `working_tree` run saves `<dataDir>/snapshots/<id>/`, adds no ref to the clone and leaves `git status` of the clone unchanged; repairing that run after the clone's working copy was reset still recreates the head side from the snapshot.
+2. `library-scan.integration.test.ts`: scan of `main` saves entries in smallest-first order; a scripted usage per call makes a $0.50 cap end `cap_reached`; Continue writes only the rest; cancel ends `cancelled` with the current batch saved; Rescan at a new allowance rewrites every entry, after which `rescanSuggested` is false.
 3. `live-mode.integration.test.ts`: session on a finished fixture run; open a component; both origins serve the page with the CSP; `Host: evil.example` → 403; POST → 405; stop leaves no child processes, worktrees or `<dataDir>/live/<id>`.
 4. `library-transfer.integration.test.ts`: export from one registration of the fixture, import into another registration of a second clone of it; a run there makes 0 AI calls.
 5. `angular-pipeline.integration.test.ts` (extend): a scripted Angular harness with `states` renders every state; `qa/tailwind-config` re-checks the library.
@@ -2720,7 +2767,7 @@ Integration tests (gated; AI through the existing scripted provider helpers, so 
 6. Cancel a rescan midway; Continue; check counts.
 7. Export, delete and re-register the repository (or use a second clone), import, run again: 0 AI calls, same screenshots.
 8. Acme (Angular, about 465 components): estimate only, then a capped scan of $10; record timings, failures by kind and per-harness usage to calibrate §16.2.
-9. Check that no file in either clone changed (`git status`, `git stash list`) and that only `refs/prvision/*` refs were added.
+9. Check that no file in either clone changed (`git status`, `git stash list`) and that `git for-each-ref` lists no new refs after the runs, scans, repairs and live sessions above.
 
 ---
 
@@ -2745,7 +2792,7 @@ Integration tests (gated; AI through the existing scripted provider helpers, so 
 ### 16d
 - [ ] A second run of the same branch makes no AI calls; a global style change re-checks the whole library; pause only above 12 **new** harnesses.
 - [ ] Representative-component behaviour is gone in both frameworks; Tailwind config, PostCSS config, tokens and `index.html` changes trigger the re-check (including working-tree runs).
-- [ ] Working-tree runs keep a snapshot ref; the user's working copy is unchanged.
+- [ ] Working-tree runs keep a snapshot in `<dataDir>/snapshots/<id>/`; the user's working copy, index and refs are unchanged.
 
 ### 16e
 - [ ] Each state has its own images and diff; rows aggregate per §9.3/§9.5; fix-up never runs for library harnesses.
@@ -2783,18 +2830,18 @@ The lead appends the following to `docs/specs/00-overview-and-contracts.md` as s
 Source: sheet 16 (decisions in `docs/plans/harness-library-decisions.md`). Where this section and earlier sections disagree, this section wins. Sheet 16 is authoritative for the detailed design.
 
 1. **00 §1:** harnesses are saved per repository in PRVision's database (the harness library) and reused on both sides of later runs; each harness has 1–5 named states; a global style change re-checks every saved harness; finished runs can be explored live. Nothing is written to the user's working copy.
-2. **00 §4:** new data-dir paths `<dataDir>/worktrees/scan-<jobId>/`, `<dataDir>/worktrees/repair-<jobId>/`, `<dataDir>/library-jobs/<jobId>/` (scratch renders) and `<dataDir>/live/<sessionId>/`. New state artifacts `artifacts/<v>/<c>/s<ordinal>/{base,head,diff}.png` (ordinal 1–9; ordinal 0 keeps the existing path). New git ref `refs/prvision/wt-<visualizationId>` (working-tree snapshot, deleted with the run). New harness files `.prvision-harness/harness-api.ts` (React) and `.prvision-harness/prvision-steps.ts` (both frameworks).
+2. **00 §4:** new data-dir paths `<dataDir>/worktrees/scan-<jobId>/`, `<dataDir>/worktrees/repair-<jobId>/`, `<dataDir>/library-jobs/<jobId>/` (scratch renders) and `<dataDir>/live/<sessionId>/`. New state artifacts `artifacts/<v>/<c>/s<ordinal>/{base,head,diff}.png` (ordinal 1–9; ordinal 0 keeps the existing path). New data-dir path `<dataDir>/snapshots/<visualizationId>/` (the working-tree run's uncommitted changes, deleted with the run). No new git ref: nothing is written to the user's clone beyond today's worktree metadata and temporary PR refs. New harness files `.prvision-harness/harness-api.ts` (React) and `.prvision-harness/prvision-steps.ts` (both frameworks).
 3. **00 §5:** new enums `HarnessLibraryStatus`, `HarnessLibraryOrigin`, `LibraryBuildMode`, `LibraryJobKind`, `LibraryJobStatus` (+ `ACTIVE_`/`TERMINAL_LIBRARY_JOB_STATUSES`), `ComponentHarnessOrigin`, `LiveSessionStatus` (+ `ACTIVE_LIVE_SESSION_STATUSES`), `LiveStopReason` (sheet 16 §6.1). `ComponentChangeKind` gains `rechecked`. `Table` gains `harness_library_entries`, `harness_library_jobs`, `harness_library_job_events`, `visualization_component_states`, `live_sessions`. `ErrorReason` is unchanged.
-4. **00 §6 / §14.3:** migration `0009_harness_library`. New tables `harness_library_entries`, `harness_library_jobs`, `harness_library_job_events`, `visualization_component_states`, `live_sessions`; new columns `repositories.{library_build_mode, state_allowance, library_scanned_allowance}`, `visualizations.{checked_count, reused_harness_count, new_harness_count, needs_update_count, global_style_trigger, head_snapshot_ref}`, `visualization_components.{library_entry_id, base_library_entry_id, harness_origin, base_harness_origin, harness_needs_update, source_changed_since_write, state_count, changed_state_count}` (sheet 16 §6.2–§6.9). `visualizations.component_limit` now limits **new harnesses** per run.
-5. **00 §8 / §14.7:** new contract file `types/harness-library.ts` (sheet 16 §6.11). `HarnessGenerationResult` and `SideHarness` gain `states`, `origin`, `libraryEntryId` (result also `usage?`); `HarnessGenerationBatchResult` gains `stopReason?`; `HarnessRenderError` gains `stateName?`; `ComponentRenderResult` gains `states: StateRenderResult[]`; `RenderSideResult` gains `failureKind`; `ImageDiffResult` gains `states`; `ChangeAnalysisResult` gains `globalStyleChanges`; `PipelineContext` gains `library` and `libraryJob?`; `AiUsage` gains `cacheWriteInputTokens?` (sheet 16 §6.12, §6.13). `PipelineStepFactories` gains `libraryResolution()`, and `render(deps)` accepts optional `persistence` and `artifactStore`. `HarnessGenerationDeps` gains `persistence`, `shouldStartCall`, and `usageRecorder` becomes `Pick<AiUsageRecorder, "add">`. `RenderFailureKind` gains `step_failed` (repairable).
-6. **00 §9 / §14.4:** new routes and shapes of sheet 16 §14: library summary, estimates (registered and unregistered), scans, library jobs (get, events, cancel), repair and repair-broken, live (start, get, open, heartbeat, stop), export and import. Changed: `RepositoryCreateRequest` (`libraryBuildMode`, `stateAllowance`, `scanSpendCapUsd`; response adds `scanJobId`, `scanStartError`), `PATCH /api/repositories/:id` (`stateAllowance`; both fields optional, at least one), `RepositoryView` (`libraryBuildMode`, `stateAllowance`, `libraryScannedAllowance`), `VisualizationSummaryView.checkedCount`, `VisualizationDetailView` (`checkedCount`, `reusedHarnessCount`, `newHarnessCount`, `needsUpdateCount`, `globalStyleTrigger`, `activeRepairJob`, `liveAvailable`), `VisualizationComponentView` (`states`, `stateCount`, `changedStateCount`, `harness`). `DELETE` of a repository or visualization returns 409 while a library job of it is active.
+4. **00 §6 / §14.3:** migration `0009_harness_library`. New tables `harness_library_entries`, `harness_library_jobs`, `harness_library_job_events`, `visualization_component_states`, `live_sessions`; new columns `repositories.{library_build_mode, state_allowance}`, `visualizations.{checked_count, reused_harness_count, new_harness_count, needs_update_count, global_style_trigger, working_tree_snapshot}`, `visualization_components.{library_entry_id, base_library_entry_id, harness_origin, base_harness_origin, harness_needs_update, source_changed_since_write, state_count, changed_state_count}` (sheet 16 §6.2–§6.9). `visualizations.component_limit` now limits **new harnesses** per run.
+5. **00 §8 / §14.7:** new contract file `types/harness-library.ts` (sheet 16 §6.11). `HarnessGenerationResult` and `SideHarness` gain `states`, `origin`, `libraryEntryId` (result also `usage?`); `HarnessGenerationBatchResult` gains `stopReason?`; `HarnessRenderError` gains `stateName?` and its `kind` gains `step_failed`; `ComponentRenderResult` gains `states: StateRenderResult[]`; `RenderSideResult` gains `failureKind`; `ImageDiffResult` gains `states`; `ChangeAnalysisResult` gains `globalStyleChanges`; `PipelineContext` gains `library` and `libraryJob?`; `AiUsage` gains `cacheWriteInputTokens?` (sheet 16 §6.12, §6.13). `PipelineStepFactories` gains `libraryResolution()`, and `render(deps)` accepts optional `persistence` and `artifactStore`. `HarnessGenerationDeps` gains `persistence`, `shouldStartCall`, and `usageRecorder` becomes `Pick<AiUsageRecorder, "add">`. `RenderFailureKind` gains `step_failed` (repairable). Library writes use optimistic revisions (sheet 16 E25).
+6. **00 §9 / §14.4:** new routes and shapes of sheet 16 §14: library summary, estimates (registered and unregistered), scans, library jobs (get, events, cancel), repair and repair-broken, live (start, get, open, heartbeat, stop), export and import. Changed: `RepositoryCreateRequest` (`libraryBuildMode`, `stateAllowance`, `scanSpendCapUsd`; response adds `scanJobId`, `scanStartError`), `PATCH /api/repositories/:id` (`stateAllowance`; both fields optional, at least one), `RepositoryView` (`libraryBuildMode`, `stateAllowance`), `VisualizationSummaryView.checkedCount`, `VisualizationDetailView` (`checkedCount`, `reusedHarnessCount`, `newHarnessCount`, `needsUpdateCount`, `globalStyleTrigger`, `activeRepairJob`, `liveAvailable`), `VisualizationComponentView` (`states`, `stateCount`, `changedStateCount`, `harness`). `DELETE` of a repository or visualization returns 409 while a library job of it is active. A timed-out library estimate returns 504 `internal_error` (a second use of 504 next to 00 §14.12's settings test).
 7. **00 §10 / §14.6:** three more BullMQ queues with prefix `prvision`: `harness-scans` (job `scan`, id `scan-<id>`, concurrency 1), `harness-repairs` (job `repair`, id `repair-<id>`, concurrency 1), `live-sessions` (job `live`, id `live-<id>`, concurrency `LIVE_MAX_SESSIONS` = 2). Library cancel flag `prvision:library-cancel:<id>`. `VISUALIZATION_MAX_RUNTIME_MS` becomes 90 minutes.
 8. **00 §11:** stage order unchanged. `analyzing` ends with library resolution (reuse, D9 pause on new harnesses, whole-library re-check rows); the library save-back runs at the end of `rendering`. Change analysis persists up to 500 candidates (`ANALYSIS_MAX_CANDIDATES`) instead of capping at 12; the representative-component fallback for global stylesheets (08 §5.11.3, 15 §5.5.5) and the non-src console warning are removed.
 9. **09 / 15c:** the harness format is multi-state (sheet 16 §7). React harnesses default-export `definePrvisionHarness({ wrapper?, states })` from `../harness-api`; Angular harnesses gain `states`. The React and Angular system prompts are replaced by sheet 16 §7.8.1/§7.8.2 (the verbatim tests read sheet 16; sheet 15 §5.6.5 is superseded).
 10. **10 / 15d:** one page per (component, state, side); URL parameter `s=<state>`; page globals `__PRVISION_STATE__`, `__PRVISION_SETTLE__`, `__PRVISION_MARK_STEP_TARGET__`; scripted steps run with Playwright input after the first settle; render concurrency `RENDER_ITEM_CONCURRENCY` = 2 / `RENDER_PAGE_CONCURRENCY` = 4; render stage budget is dynamic (15–60 min); groups are split at 40 items. The single bounded fix-up applies only to harnesses written in the same run.
 11. **00 §12:** new frontend route `/library-jobs/:id`.
 12. **00 §14.5:** live hosts bind `127.0.0.1`, accept only `GET`/`HEAD` with a `Host` of `127.0.0.1:<port>` or `localhost:<port>`, and send a CSP whose `frame-ancestors` lists only `FRONTEND_URL` and its twin; live origins are never allowed by the API's CORS or Origin guard.
-13. **00 §14.8:** `ArtifactStore` gains `componentStateImagePath` and `ensureComponentStateDir`; `GitClient` gains `snapshotWorktree` and `updateRef`; `QueueService` gains the library and live methods (sheet 16 §6.15). Config constants of sheet 16 §16, including the AI price table `AI_MODEL_PRICES_USD_PER_MTOK`.
+13. **00 §14.8:** `ArtifactStore` gains `componentStateImagePath` and `ensureComponentStateDir`; `QueueService` gains the library and live methods (sheet 16 §6.15). Config constants of sheet 16 §16, including the AI price table `AI_MODEL_PRICES_USD_PER_MTOK`.
 ```
 
 ---
@@ -2810,10 +2857,12 @@ Source: sheet 16 (decisions in `docs/plans/harness-library-decisions.md`). Where
 | R5 | Step targets based on accessible names may differ between base and head | Prompt rule (names on both versions); failures show as `step_failed` per state, not per component |
 | R6 | Live mode runs repository code in the reviewer's browser | Same code the developer runs with their dev server; CSP blocks egress; separate origin; frame-ancestors restricted |
 | R7 | Synthetic events in live replay do not trigger default actions (keyboard) | Replay is best effort and reported; screenshots use real input |
-| R8 | Snapshot refs and worktree commits add git objects to the user's clone | Only under `refs/prvision/`; deleted with the run; objects become unreachable and are collected by git gc |
+| R8 | Working-tree snapshots use disk in the data dir (up to 64 MB patch + 200 MB untracked per run, 07's limits) | Deleted with the run or the repository; typical snapshots are a few KB |
 | R9 | PR head commits can be garbage-collected after their refs are deleted, so old PR runs may not go live | Re-fetch from GitHub (§11.1 step 3); clear message when that fails |
 | R10 | Library and run snapshots diverge after a repair (E2) | Deliberate; the card says which harness origin it shows; live of an old run uses its own snapshot |
 | R11 | `tokens.ts`-style names in apps mean different things | Script files are excluded from token triggers (§8.5.1); repository-level overrides are a possible follow-up |
 | R12 | Concurrent worker load: one run, one scan, one repair and two live sessions can run together | Each queue is bounded; documented 16 GB machine prerequisite (15 R7) still applies; live host LRU |
 | R13 | Prices change | `AI_PRICES_AS_OF` documents the date; unknown models priced conservatively (E17) |
 | R14 | Removing representative components (D7) means a grow-as-you-go repository with an empty library gets no coverage for global style changes | Console line points to Scan whole app; decision D7 accepted this |
+| R15 | A scan deletes entries whose file is missing on the default branch (§10.4 step 4), including harnesses a run saved for a component that exists only on an unmerged branch | The next run on that branch writes it again (one harness of AI cost); deletion only when the inventory is complete |
+| R16 | Live hosts are heavy: up to `LIVE_MAX_SESSIONS` × 2 sides × `LIVE_MAX_HOSTS_PER_SIDE` = 16 Vite processes or Angular builds | Hosts start lazily per group (most runs have one to three groups), LRU per side, 10-minute idle stop; tune `LIVE_MAX_HOSTS_PER_SIDE` from the 16l QA measurements |
