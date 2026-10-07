@@ -29,7 +29,7 @@ import { sourceLabel } from '../../../core/utils/labels.util';
 import { parseRouteId } from '../../../core/utils/route-params.util';
 import { PIPELINE_STAGES } from '../../../core/utils/visualization-status.util';
 
-/** Default components per run and the most a user can choose (backend MAX_COMPONENTS / COMPONENT_LIMIT_MAX). */
+/** New harnesses written per run by default and the most a user can choose (backend MAX_COMPONENTS / COMPONENT_LIMIT_MAX). */
 const DEFAULT_COMPONENT_LIMIT = 12;
 const MAX_COMPONENT_LIMIT = 100;
 
@@ -55,7 +55,14 @@ import { ComponentCardComponent } from '../components/component-card/component-c
 import { ConsolePanelComponent } from '../components/console-panel/console-panel.component';
 import { PipelineStepperComponent } from '../components/pipeline-stepper/pipeline-stepper.component';
 import { SummaryCardComponent } from '../components/summary-card/summary-card.component';
-import { frameworkChipLabel, noComponentsCopy, refWithSha, summaryLine } from '../visualization-format';
+import {
+  frameworkChipLabel,
+  globalStyleTriggerText,
+  noComponentsCopy,
+  refWithSha,
+  repairAllMessage,
+  summaryLine,
+} from '../visualization-format';
 import { type ComponentFilter } from './component-filters';
 import { type DetailView, defaultDetailView, parseDetailView } from './detail-views';
 import { VisualizationDetailStore } from './visualization-detail.store';
@@ -79,6 +86,15 @@ interface DetailHeaderView {
   errorMessage: string;
   noComponentsTitle: string;
   noComponentsMessage: string;
+  /** "Global style change: <path> — every saved harness was re-checked" (16 §15.5.1). */
+  globalStyleTrigger: string | null;
+}
+
+/** Repair all broken (16 §15.5.1): shown on finished runs with broken harnesses. */
+interface RepairAllView {
+  disabled: boolean;
+  label: string;
+  message: string;
 }
 
 /** Base and head refs for the header; one branch name when both sides are on the same branch. */
@@ -156,7 +172,25 @@ export class VisualizationDetailComponent {
       // An empty message falls back too (13 §5.9.4 uses `||`).
       errorMessage: v.errorMessage?.length ? v.errorMessage : DEFAULT_ERROR_MESSAGE,
       ...noComponentsCopy(v.status, v.framework),
+      globalStyleTrigger: v.globalStyleTrigger ? globalStyleTriggerText(v.globalStyleTrigger) : null,
     };
+  });
+  protected readonly repairAll = computed<RepairAllView | null>(() => {
+    const v = this.store.detail();
+    if (!v || !this.store.isTerminal() || v.needsUpdateCount <= 0) return null;
+    const job = v.activeRepairJob;
+    return {
+      disabled: job !== null || this.store.repairAllRequesting(),
+      label: job ? `Repairing… ${String(job.processedCount)} of ${String(job.totalCount)}` : 'Repair all broken',
+      message: repairAllMessage(v.needsUpdateCount, v.repairEstimateUsd),
+    };
+  });
+  /** A clean global-style re-check opens on "changed" with nothing in it (16 §15.5.4, D7). */
+  protected readonly emptyFilterCopy = computed(() => {
+    const checked = this.store.detail()?.checkedCount ?? 0;
+    return this.store.filter() === 'changed' && this.store.hasRechecked()
+      ? { title: 'No component changed visually.', message: `${String(checked)} checked.` }
+      : { title: 'Nothing in this filter', message: 'Choose another filter to see the remaining components.' };
   });
   protected readonly filterOptions = computed<SegmentOption<ComponentFilter>[]>(() => {
     const c = this.store.counts();
@@ -174,6 +208,13 @@ export class VisualizationDetailComponent {
       { key: 'changed', label: 'Changed', value: c.changed, icon: 'difference' },
       { key: 'unchanged', label: 'Unchanged', value: c.unchanged, icon: 'check_circle' },
       { key: 'failed', label: 'Failed', value: c.failed, icon: 'error' },
+      {
+        key: 'reused',
+        label: 'Reused harnesses',
+        value: this.store.detail()?.reusedHarnessCount ?? 0,
+        icon: 'inventory_2',
+      },
+      { key: 'new', label: 'New harnesses', value: this.store.detail()?.newHarnessCount ?? 0, icon: 'auto_fix_high' },
     ];
   });
   /** The user's pick: follows `?view=` (reloads, links, back/forward) and is set at once on click. */
@@ -186,22 +227,22 @@ export class VisualizationDetailComponent {
     { value: 'summary', label: 'Summary', icon: 'auto_awesome' },
     { value: 'console', label: 'Console', icon: 'terminal' },
   ]);
-  /** Set while the run is paused because analysis found more components than the default limit. */
+  /** Set while the run is paused because it needs more new harnesses than the default limit (16 E12). */
   protected readonly limitChoice = computed<LimitChoice | null>(() => {
     const v = this.store.detail();
     if (v?.status !== 'awaiting_confirmation') return null;
-    const total = v.componentCount;
+    // The pause persists newHarnessCount; older or partial rows fall back to the rows without a saved harness.
+    const total = v.newHarnessCount > 0 ? v.newHarnessCount : Math.max(0, v.componentCount - v.reusedHarnessCount);
     const all = Math.min(total, MAX_COMPONENT_LIMIT);
     return {
       total,
       all,
-      title: `${String(total)} components changed`,
+      title: `${String(total)} new harnesses needed`,
       message:
-        `PRVision renders ${String(DEFAULT_COMPONENT_LIMIT)} components by default. Rendering ` +
-        `${all === total ? 'all ' : ''}${String(all)} needs about ${String(all)} AI calls and takes longer. ` +
-        'Nothing has used AI yet.',
-      allLabel: all === total ? `Render all ${String(total)}` : `Render top ${String(all)}`,
-      topLabel: `Render top ${String(DEFAULT_COMPONENT_LIMIT)}`,
+        `${String(v.reusedHarnessCount)} components reuse saved harnesses. ` +
+        `PRVision writes ${String(DEFAULT_COMPONENT_LIMIT)} new harnesses by default.`,
+      allLabel: all === total ? `Write all ${String(total)}` : `Write top ${String(all)}`,
+      topLabel: `Write top ${String(DEFAULT_COMPONENT_LIMIT)}`,
     };
   });
   private promptedFor: number | null = null;
@@ -231,7 +272,7 @@ export class VisualizationDetailComponent {
         this.confirm
           .confirm({
             title: choice.title,
-            message: `${choice.message} You can also render just the top ${String(DEFAULT_COMPONENT_LIMIT)}, or cancel the run.`,
+            message: `${choice.message} You can also write just the top ${String(DEFAULT_COMPONENT_LIMIT)}, or cancel the run.`,
             confirmText: choice.allLabel,
             cancelText: 'Decide below',
           })
@@ -265,6 +306,26 @@ export class VisualizationDetailComponent {
   }
 
   protected readonly defaultComponentLimit = DEFAULT_COMPONENT_LIMIT;
+
+  protected repairComponent(componentId: number): void {
+    this.store.repairComponent(componentId);
+  }
+
+  protected confirmRepairAll(): void {
+    const view = this.repairAll();
+    if (!view || view.disabled) return;
+    this.confirm
+      .confirm({
+        title: 'Repair all broken harnesses?',
+        message: view.message,
+        confirmText: 'Repair all',
+        cancelText: 'Not now',
+      })
+      .pipe(filter(Boolean), takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => {
+        this.store.repairBroken();
+      });
+  }
 
   protected confirmCancel(): void {
     this.confirm

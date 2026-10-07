@@ -34,6 +34,9 @@
     </div>
     <div class="flex flex-wrap items-center gap-2">
       <app-status-pill kind="change" [value]="component().changeKind" />
+      @if (harnessLabel(); as hl) {
+        <span class="dd-pill dd-pill--outline" data-testid="harness-origin">{{ hl }}</span>
+      }
       @if (component().visualChange) {
         <app-status-pill kind="visual" [value]="component().visualChange" [label]="visualLabel()" />
       }
@@ -94,6 +97,35 @@
     </section>
   }
 
+  @if (needsUpdate()) {
+    <app-inline-alert class="mt-4" tone="warning" title="Harness needs updating" data-testid="needs-update">
+      {{ needsUpdateText() }}
+      @if (!runActive()) {
+        <button
+          inlineAlertAction
+          mat-stroked-button
+          type="button"
+          class="!rounded-xl"
+          data-testid="repair"
+          [disabled]="repairing()"
+          (click)="requestRepair()"
+        >
+          @if (repairing()) {
+            <mat-spinner diameter="18" class="!inline-block align-middle mr-2" />
+          } @else {
+            <mat-icon aria-hidden="true">build</mat-icon>
+          }
+          {{ repairing() ? 'Repairing…' : 'Repair' }}
+        </button>
+      }
+    </app-inline-alert>
+  }
+  @if (sourceChanged()) {
+    <p class="mt-3 text-xs text-[var(--color-text-tertiary)]" data-testid="harness-source-changed">
+      The component changed since this harness was written.
+    </p>
+  }
+
   <div class="mt-4">
     @switch (component().renderStatus) {
       @case ('pending') {
@@ -135,18 +167,29 @@
               </button>
             </div>
           }
-          <app-image-compare
-            [label]="title()"
-            [baseUrl]="component().baseImageUrl"
-            [headUrl]="component().headImageUrl"
-            [diffUrl]="component().diffImageUrl"
-            [width]="component().imageWidth"
-            [height]="component().imageHeight"
-            [diffPixelRatio]="component().diffPixelRatio"
-            [visualChange]="component().visualChange"
-            [baseError]="component().baseError"
-            [headError]="component().headError"
-          />
+          <app-state-tabs class="mb-2" [states]="states()" [(selected)]="selectedState" [idPrefix]="stateTabsId()" />
+          @if (stepsText(); as steps) {
+            <p class="mb-2 text-sm text-[var(--color-text-tertiary)]" data-testid="state-steps">{{ steps }}</p>
+          }
+          <div
+            [attr.id]="multiState() ? stateTabsId() + '-panel' : null"
+            [attr.role]="multiState() ? 'tabpanel' : null"
+            [attr.aria-labelledby]="multiState() ? stateTabsId() + '-tab-' + state().ordinal : null"
+          >
+            <app-image-compare
+              [label]="title()"
+              [stateName]="multiState() ? state().name : null"
+              [baseUrl]="state().baseImageUrl"
+              [headUrl]="state().headImageUrl"
+              [diffUrl]="state().diffImageUrl"
+              [width]="state().imageWidth"
+              [height]="state().imageHeight"
+              [diffPixelRatio]="state().diffPixelRatio"
+              [visualChange]="state().visualChange"
+              [baseError]="state().baseError"
+              [headError]="state().headError"
+            />
+          </div>
         }
       }
     }

@@ -42,6 +42,11 @@ export class ImageCompareComponent {
   readonly visualChange = input<VisualChange | null>(null);
   readonly baseError = input<string | null>(null);
   readonly headError = input<string | null>(null);
+  /**
+   * 16h state input: the state these images belong to (16 §15.5.2). Set by multi-state cards; adds the state to the
+   * image labels and words one-sided states as "Not in the base/head version". null = the component as a whole.
+   */
+  readonly stateName = input<string | null>(null);
 
   protected readonly mode = signal<CompareMode>('side');
   protected readonly zoom = signal<ZoomMode>('actual');
@@ -50,11 +55,12 @@ export class ImageCompareComponent {
   protected readonly diffOpacity = signal(75);
   protected readonly diffOnly = signal(false);
   protected readonly dragging = signal(false);
-  private readonly failedLoads = signal<ReadonlySet<Side>>(new Set());
+  /** Raw URLs that failed to load; keyed by URL so switching to another state's images starts clean. */
+  private readonly failedLoads = signal<ReadonlySet<string>>(new Set());
 
-  protected readonly baseSrc = computed(() => (this.failedLoads().has('base') ? null : artifactUrl(this.baseUrl())));
-  protected readonly headSrc = computed(() => (this.failedLoads().has('head') ? null : artifactUrl(this.headUrl())));
-  protected readonly diffSrc = computed(() => (this.failedLoads().has('diff') ? null : artifactUrl(this.diffUrl())));
+  protected readonly baseSrc = computed(() => this.loadableSrc(this.baseUrl()));
+  protected readonly headSrc = computed(() => this.loadableSrc(this.headUrl()));
+  protected readonly diffSrc = computed(() => this.loadableSrc(this.diffUrl()));
   protected readonly canSlide = computed(() => !!this.baseSrc() && !!this.headSrc());
   protected readonly canDiff = computed(() => !!this.diffSrc() && !!this.headSrc());
   protected readonly effectiveMode = computed<CompareMode>(() =>
@@ -77,8 +83,13 @@ export class ImageCompareComponent {
     { value: 'fit', label: 'Fit', icon: 'fit_screen' },
   ];
 
-  protected readonly baseAlt = computed(() => `Base render of ${this.label()}`);
-  protected readonly headAlt = computed(() => `Head render of ${this.label()}`);
+  /** "CartSummary" or, for a named state, "CartSummary · Menu open". */
+  private readonly subject = computed(() => {
+    const state = this.stateName();
+    return state && state !== 'Default' ? `${this.label()} · ${state}` : this.label();
+  });
+  protected readonly baseAlt = computed(() => `Base render of ${this.subject()}`);
+  protected readonly headAlt = computed(() => `Head render of ${this.subject()}`);
   protected readonly sides = computed(() => [
     {
       key: 'base' as const,
@@ -104,7 +115,7 @@ export class ImageCompareComponent {
   protected readonly sliderValueText = computed(() => `${this.split()}% base, ${100 - this.split()}% head`);
   protected readonly diffImageOpacity = computed(() => (this.diffOnly() ? 1 : this.diffOpacity() / 100));
   protected readonly diffOpacityText = computed(() => `${this.diffOpacity()}%`);
-  protected readonly diffAlt = computed(() => `Pixel differences for ${this.label()}`);
+  protected readonly diffAlt = computed(() => `Pixel differences for ${this.subject()}`);
   protected readonly diffLegend = computed(() => {
     const r = this.diffPixelRatio();
     return r === null
@@ -113,7 +124,8 @@ export class ImageCompareComponent {
   });
 
   protected markFailed(side: Side): void {
-    this.failedLoads.update((s) => new Set(s).add(side));
+    const url = side === 'base' ? this.baseUrl() : side === 'head' ? this.headUrl() : this.diffUrl();
+    if (url) this.failedLoads.update((s) => new Set(s).add(url));
   }
 
   /** Range inputs: read the value in the class (templates may not use $any, 01 template/no-any). */
@@ -152,15 +164,24 @@ export class ImageCompareComponent {
     this.split.set(Math.round(Math.min(100, Math.max(0, pct))));
   }
 
+  private loadableSrc(url: string | null): string | null {
+    return url && this.failedLoads().has(url) ? null : artifactUrl(url);
+  }
+
   /** Reads signals, so `sides` tracks them. */
   private placeholderFor(side: 'base' | 'head'): Placeholder {
     const change = this.visualChange();
     const url = side === 'base' ? this.baseUrl() : this.headUrl();
     const error = side === 'base' ? this.baseError() : this.headError();
-    if (side === 'base' && change === 'new') return { icon: 'add_box', text: 'Not present on base — new component' };
-    if (side === 'head' && change === 'deleted') return { icon: 'delete', text: 'Removed in head — deleted component' };
+    const state = this.stateName() !== null;
+    if (side === 'base' && change === 'new') {
+      return { icon: 'add_box', text: state ? 'Not in the base version' : 'Not present on base — new component' };
+    }
+    if (side === 'head' && change === 'deleted') {
+      return { icon: 'delete', text: state ? 'Not in the head version' : 'Removed in head — deleted component' };
+    }
     if (error) return { icon: 'error', text: 'Render failed — see Render errors below' };
-    if (url && this.failedLoads().has(side)) return { icon: 'broken_image', text: 'Image unavailable' };
+    if (url && this.failedLoads().has(url)) return { icon: 'broken_image', text: 'Image unavailable' };
     return { icon: 'hourglass_empty', text: 'Not rendered' };
   }
 }

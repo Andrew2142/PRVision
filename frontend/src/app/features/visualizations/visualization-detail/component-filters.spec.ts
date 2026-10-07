@@ -1,5 +1,11 @@
 import { componentView, consoleEvent } from '../testing/visualization-fixtures';
-import { COMPONENT_FILTER_PREDICATES, countComponents, isFailed, resolveStoppedStageIndex } from './component-filters';
+import {
+  COMPONENT_FILTER_PREDICATES,
+  countComponents,
+  defaultComponentFilter,
+  isFailed,
+  resolveStoppedStageIndex,
+} from './component-filters';
 
 describe('component-filters', () => {
   it('changed includes new/deleted', () => {
@@ -75,5 +81,38 @@ describe('component-filters', () => {
       unchanged: 1,
       failed: 0,
     });
+  });
+
+  it('a row with a changed state counts as changed even when its Default looks the same (16 §15.5.4)', () => {
+    const row = componentView({ visualChange: 'unchanged', stateCount: 3, changedStateCount: 1 });
+    expect(COMPONENT_FILTER_PREDICATES.changed(row)).toBeTrue();
+    expect(COMPONENT_FILTER_PREDICATES.unchanged(row)).toBeFalse();
+  });
+
+  it('unchanged re-check rows appear under unchanged and all only', () => {
+    const recheck = componentView({ changeKind: 'rechecked', visualChange: 'unchanged' });
+    expect(COMPONENT_FILTER_PREDICATES.changed(recheck)).toBeFalse();
+    expect(COMPONENT_FILTER_PREDICATES.failed(recheck)).toBeFalse();
+    expect(COMPONENT_FILTER_PREDICATES.unchanged(recheck)).toBeTrue();
+    expect(COMPONENT_FILTER_PREDICATES.all(recheck)).toBeTrue();
+    const changedRecheck = componentView({ changeKind: 'rechecked', visualChange: 'changed' });
+    expect(COMPONENT_FILTER_PREDICATES.changed(changedRecheck)).toBeTrue();
+  });
+
+  it('defaultComponentFilter: changed, else failed, else changed for a re-check run, else all', () => {
+    const changed = [
+      componentView({ id: 1, visualChange: 'changed' }),
+      componentView({ id: 2, renderStatus: 'failed' }),
+    ];
+    expect(defaultComponentFilter(countComponents(changed), changed)).toBe('changed');
+    const failed = [componentView({ id: 1, visualChange: null, renderStatus: 'failed', headError: 'x' })];
+    expect(defaultComponentFilter(countComponents(failed), failed)).toBe('failed');
+    const cleanRecheck = [
+      componentView({ id: 1, visualChange: 'unchanged' }),
+      componentView({ id: 2, changeKind: 'rechecked', visualChange: 'unchanged' }),
+    ];
+    expect(defaultComponentFilter(countComponents(cleanRecheck), cleanRecheck)).toBe('changed');
+    const plain = [componentView({ id: 1, visualChange: 'unchanged' })];
+    expect(defaultComponentFilter(countComponents(plain), plain)).toBe('all');
   });
 });

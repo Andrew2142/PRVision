@@ -8,7 +8,13 @@ import { CONSOLE_BATCH_LIMIT, CONSOLE_MAX_EVENTS } from '../../../core/constants
 import { errorInterceptor } from '../../../core/interceptors/error.interceptor';
 import { type ConsoleEventView, type VisualizationDetailView } from '../../../core/models/visualization.model';
 import { NotificationService } from '../../../core/services/notification.service';
-import { componentView, consoleEvent, consoleEvents, detailView } from '../testing/visualization-fixtures';
+import {
+  componentView,
+  consoleEvent,
+  consoleEvents,
+  detailView,
+  repairJobView,
+} from '../testing/visualization-fixtures';
 import { VisualizationDetailStore } from './visualization-detail.store';
 
 const BASE = environment.apiBaseUrl;
@@ -329,6 +335,30 @@ describe('VisualizationDetailStore', () => {
     tick(0);
     flushDetail({ status: 'completed', components: [componentView({ id: 1, visualChange: 'unchanged' })] });
     expect(store.filter()).toBe('all');
+    // 16 §15.5.4: a clean global-style re-check opens on "changed" (results show only what changed).
+    store.refreshNow();
+    tick(0);
+    flushDetail({
+      status: 'completed',
+      components: [
+        componentView({ id: 1, visualChange: 'unchanged' }),
+        componentView({ id: 2, changeKind: 'rechecked', visualChange: 'unchanged' }),
+      ],
+    });
+    expect(store.filter()).toBe('changed');
+    expect(store.filteredComponents()).toEqual([]);
+    expect(store.hasRechecked()).toBeTrue();
+    // A failed row still wins over the re-check rule.
+    store.refreshNow();
+    tick(0);
+    flushDetail({
+      status: 'completed',
+      components: [
+        componentView({ id: 1, renderStatus: 'failed', visualChange: null }),
+        componentView({ id: 2, changeKind: 'rechecked', visualChange: 'unchanged' }),
+      ],
+    });
+    expect(store.filter()).toBe('failed');
     drainConsole();
     finish();
   }));
@@ -473,4 +503,80 @@ describe('VisualizationDetailStore', () => {
     expect(store.deleting()).toBeFalse();
     finish();
   }));
+
+  describe('repair (16 §15.5)', () => {
+    it('keeps polling a finished run while a repair job runs, and stops when it ends', fakeAsync(() => {
+      store.start(7);
+      tick(0);
+      flushDetail({ status: 'completed', activeRepairJob: repairJobView() });
+      drainConsole();
+      tick(VISUALIZATION_POLL_MS);
+      flushDetail({ status: 'completed', activeRepairJob: repairJobView({ processedCount: 2 }) });
+      drainConsole();
+      tick(VISUALIZATION_POLL_MS);
+      flushDetail({ status: 'completed', activeRepairJob: null });
+      drainConsole();
+      tick(VISUALIZATION_POLL_MS * 3);
+      expect(detailReqs().length).toBe(0);
+      drainConsole();
+      finish();
+    }));
+
+    it('repairComponent: POST, "Repair started." and a fresh detail', fakeAsync(() => {
+      store.start(7);
+      tick(0);
+      flushDetail({ status: 'completed' });
+      drainConsole();
+      store.repairComponent(11);
+      expect(store.repairRequests().has(11)).toBeTrue();
+      store.repairComponent(11); // a second click while in flight sends nothing
+      const req = httpMock.expectOne(`${BASE}/visualizations/7/components/11/repair`);
+      expect(req.request.method).toBe('POST');
+      req.flush({ status: 202, data: repairJobView({ componentIds: [11] }) }, { status: 202, statusText: 'Accepted' });
+      expect(store.repairRequests().has(11)).toBeFalse();
+      expect(notifications.success.calls.allArgs()).toEqual([['Repair started.']]);
+      tick(0);
+      flushDetail({ status: 'completed', activeRepairJob: repairJobView({ componentIds: [11] }) });
+      drainConsole();
+      finish();
+    }));
+
+    it('repair errors are toasted with the server message and refresh the detail', fakeAsync(() => {
+      store.start(7);
+      tick(0);
+      flushDetail({ status: 'completed' });
+      drainConsole();
+      store.repairComponent(11);
+      httpMock
+        .expectOne(`${BASE}/visualizations/7/components/11/repair`)
+        .flush(
+          { status: 409, error: "This component's harness does not need repair.", error_reason: 'conflict' },
+          { status: 409, statusText: 'Conflict' },
+        );
+      expect(notifications.error.calls.allArgs()).toEqual([["This component's harness does not need repair."]]);
+      tick(0);
+      flushDetail({ status: 'completed' });
+      drainConsole();
+      finish();
+    }));
+
+    it('repairBroken: one request at a time, none while a repair job runs', fakeAsync(() => {
+      store.start(7);
+      tick(0);
+      flushDetail({ status: 'completed', needsUpdateCount: 2 });
+      drainConsole();
+      store.repairBroken();
+      store.repairBroken();
+      const req = httpMock.expectOne(`${BASE}/visualizations/7/repair-broken`);
+      req.flush({ status: 202, data: repairJobView() }, { status: 202, statusText: 'Accepted' });
+      tick(0);
+      flushDetail({ status: 'completed', needsUpdateCount: 2, activeRepairJob: repairJobView() });
+      drainConsole();
+      store.repairBroken();
+      expect(store.repairAllRequesting()).toBeFalse();
+      expect(store.activeRepairJob()?.kind).toBe('repair');
+      httpMock.expectNone(`${BASE}/visualizations/7/repair-broken`);
+      finish();
+    }));
+  });
 });

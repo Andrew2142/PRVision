@@ -10,7 +10,7 @@ import { errorInterceptor } from '../../../core/interceptors/error.interceptor';
 import { type VisualizationDetailView } from '../../../core/models/visualization.model';
 import { ConfirmDialogService } from '../../../core/services/confirm-dialog.service';
 import { NotificationService } from '../../../core/services/notification.service';
-import { componentView, detailView } from '../testing/visualization-fixtures';
+import { componentView, detailView, harnessView, repairJobView } from '../testing/visualization-fixtures';
 import { VisualizationDetailComponent } from './visualization-detail.component';
 
 const BASE = environment.apiBaseUrl;
@@ -71,6 +71,13 @@ describe('VisualizationDetailComponent', () => {
   function activePanel(): string | null {
     return el.querySelector('[role="tabpanel"]')?.getAttribute('data-view') ?? null;
   }
+  /** Visible text of an element without its Material icon ligatures ("folder_open", "commit"). */
+  function textWithoutIcons(node: Element | null): string {
+    if (!node) return '';
+    const copy = node.cloneNode(true) as Element;
+    for (const icon of Array.from(copy.querySelectorAll('mat-icon'))) icon.remove();
+    return (copy.textContent ?? '').replace(/\s+/g, ' ').trim();
+  }
   function button(text: string): HTMLButtonElement | undefined {
     return Array.from(el.querySelectorAll<HTMLButtonElement>('button')).find((b) => b.textContent?.includes(text));
   }
@@ -90,10 +97,8 @@ describe('VisualizationDetailComponent', () => {
     expect(el.querySelector('h1')?.textContent?.trim()).toBe('Fix cart totals');
     expect(el.textContent).toContain('PR #42');
     const repoLink = el.querySelector<HTMLAnchorElement>('a[href="/repositories/1"]');
-    expect(repoLink?.textContent?.trim()).toBe('sample-react-app');
-    expect(el.querySelector('[data-testid="refs"]')?.textContent?.replace(/\s+/g, ' ').trim()).toBe(
-      'commit main @ a1b2c3d to fix/cart @ d4e5f6a',
-    );
+    expect(textWithoutIcons(repoLink)).toBe('sample-react-app');
+    expect(textWithoutIcons(el.querySelector('[data-testid="refs"]'))).toBe('main @ a1b2c3d to fix/cart @ d4e5f6a');
     expect(el.querySelector('[aria-label="Status: Rendering"]')).not.toBeNull();
     expect(el.querySelector('app-pipeline-stepper')).not.toBeNull();
     expect(el.querySelector('app-console-panel')).not.toBeNull();
@@ -142,9 +147,7 @@ describe('VisualizationDetailComponent', () => {
 
   it('working_tree head shows "working tree"', fakeAsync(() => {
     load({ sourceType: 'working_tree', headRef: 'working-tree', headSha: null });
-    expect(el.querySelector('[data-testid="refs"]')?.textContent?.replace(/\s+/g, ' ').trim()).toBe(
-      'commit main @ a1b2c3d to working tree',
-    );
+    expect(textWithoutIcons(el.querySelector('[data-testid="refs"]'))).toBe('main @ a1b2c3d to working tree');
     done();
   }));
 
@@ -322,7 +325,15 @@ describe('VisualizationDetailComponent', () => {
       expect(activePanel()).toBe('summary');
       expect(tabs()[1]?.getAttribute('aria-selected')).toBe('true');
       expect(el.querySelector('app-summary-card')?.textContent).toContain('The cart total is easier to read.');
-      expect(el.querySelectorAll('[data-tile]').length).toBe(4);
+      // Components, Changed, Unchanged, Failed, plus the harness library tiles (16 §15.5.1).
+      expect(Array.from(el.querySelectorAll('[data-tile]')).map((t) => t.getAttribute('data-tile'))).toEqual([
+        'all',
+        'changed',
+        'unchanged',
+        'failed',
+        'reused',
+        'new',
+      ]);
       for (const icon of Array.from(el.querySelectorAll('[data-tile] mat-icon'))) {
         const style = getComputedStyle(icon);
         expect(style.lineHeight).toBe(style.fontSize); // glyph centred in its badge
@@ -420,4 +431,161 @@ describe('VisualizationDetailComponent', () => {
     expect(notifications.error.calls.count()).toBe(0);
     done();
   }));
+
+  describe('harness library (16 §15.5)', () => {
+    it('the summary line reads "201 checked, 14 changed" and the global style trigger chip shows', fakeAsync(() => {
+      load({ checkedCount: 201, changedCount: 14, globalStyleTrigger: 'src/index.css' });
+      expect(el.querySelector('[data-testid="summary-line"]')?.textContent?.trim()).toMatch(
+        /^201 checked, 14 changed · Started /,
+      );
+      expect(textWithoutIcons(el.querySelector('[data-testid="global-style-trigger"]'))).toBe(
+        'Global style change: src/index.css — every saved harness was re-checked',
+      );
+      done();
+    }));
+
+    it('no trigger chip and no counts prefix for an older run', fakeAsync(() => {
+      load({ checkedCount: 0 });
+      expect(el.querySelector('[data-testid="global-style-trigger"]')).toBeNull();
+      expect(el.querySelector('[data-testid="summary-line"]')?.textContent).not.toContain('checked');
+      done();
+    }));
+
+    it('stat tiles count reused and new harnesses', fakeAsync(() => {
+      load({ status: 'completed', reusedHarnessCount: 187, newHarnessCount: 3 }, '7', 'summary');
+      expect(el.querySelector('[data-tile="reused"]')?.textContent).toContain('Reused harnesses');
+      expect(el.querySelector('[data-tile="reused"]')?.textContent).toContain('187');
+      expect(el.querySelector('[data-tile="new"]')?.textContent).toContain('New harnesses');
+      expect(el.querySelector('[data-tile="new"]')?.textContent).toContain('3');
+      done();
+    }));
+
+    it('a clean global-style re-check opens on Changed with "No component changed visually. <n> checked."', fakeAsync(() => {
+      load(
+        {
+          status: 'completed',
+          checkedCount: 201,
+          changedCount: 0,
+          globalStyleTrigger: 'src/index.css',
+          components: [
+            componentView({ id: 1, visualChange: 'unchanged' }),
+            componentView({ id: 2, changeKind: 'rechecked', visualChange: 'unchanged' }),
+          ],
+        },
+        '7',
+        'components',
+      );
+      const group = el.querySelector('[aria-label="Filter components"]');
+      expect(group?.querySelector('[aria-pressed="true"]')?.textContent?.replace(/\s+/g, '')).toBe('Changed0');
+      expect(el.querySelectorAll('app-component-card').length).toBe(0);
+      expect(el.querySelector('app-empty-state')?.textContent).toContain('No component changed visually.');
+      expect(el.querySelector('app-empty-state')?.textContent).toContain('201 checked.');
+      done();
+    }));
+
+    it('Repair all broken: shown on finished runs with broken harnesses; confirm names the cost', fakeAsync(() => {
+      load({ status: 'completed', needsUpdateCount: 3, repairEstimateUsd: 0.84 });
+      const repairAll = el.querySelector<HTMLButtonElement>('[data-testid="repair-all"]');
+      expect(textWithoutIcons(repairAll)).toBe('Repair all broken');
+      repairAll?.click();
+      expect(confirm.confirm.calls.mostRecent().args[0].message).toBe(
+        'Ask the AI to write new harnesses for 3 components? This uses AI credits, about $0.84.',
+      );
+      const req = httpMock.expectOne(`${BASE}/visualizations/7/repair-broken`);
+      expect(req.request.method).toBe('POST');
+      req.flush({ status: 202, data: repairJobView() }, { status: 202, statusText: 'Accepted' });
+      expect(notifications.success.calls.allArgs()).toEqual([['Repair started.']]);
+      done();
+    }));
+
+    it('Repair all broken without an estimate leaves the cost clause out', fakeAsync(() => {
+      confirm.confirm.and.returnValue(of(false));
+      load({ status: 'completed', needsUpdateCount: 1, repairEstimateUsd: null });
+      el.querySelector<HTMLButtonElement>('[data-testid="repair-all"]')?.click();
+      expect(confirm.confirm.calls.mostRecent().args[0].message).toBe(
+        'Ask the AI to write new harnesses for 1 component? This uses AI credits.',
+      );
+      httpMock.expectNone(`${BASE}/visualizations/7/repair-broken`);
+      done();
+    }));
+
+    it('while a repair runs the button is disabled with its progress', fakeAsync(() => {
+      load({
+        status: 'completed',
+        needsUpdateCount: 2,
+        activeRepairJob: repairJobView({ processedCount: 1, totalCount: 2 }),
+      });
+      const repairAll = el.querySelector<HTMLButtonElement>('[data-testid="repair-all"]');
+      expect(repairAll?.disabled).toBeTrue();
+      expect(textWithoutIcons(repairAll)).toBe('Repairing… 1 of 2');
+      done();
+    }));
+
+    it('no Repair all broken while running or without broken harnesses', fakeAsync(() => {
+      load({ status: 'rendering', needsUpdateCount: 2 });
+      expect(el.querySelector('[data-testid="repair-all"]')).toBeNull();
+      done();
+    }));
+
+    it('no Repair all broken on a clean finished run', fakeAsync(() => {
+      load({ status: 'completed', needsUpdateCount: 0 });
+      expect(el.querySelector('[data-testid="repair-all"]')).toBeNull();
+      done();
+    }));
+
+    it('a card Repair starts the repair of that component', fakeAsync(() => {
+      load(
+        {
+          status: 'completed',
+          needsUpdateCount: 1,
+          components: [
+            componentView({
+              id: 11,
+              renderStatus: 'partial',
+              headError: 'boom',
+              harness: harnessView({ origin: 'library', needsUpdate: true }),
+            }),
+          ],
+        },
+        '7',
+        'components',
+      );
+      el.querySelector<HTMLButtonElement>('app-component-card [data-testid="repair"]')?.click();
+      fixture.detectChanges();
+      expect(el.querySelector<HTMLButtonElement>('app-component-card [data-testid="repair"]')?.disabled).toBeTrue();
+      const req = httpMock.expectOne(`${BASE}/visualizations/7/components/11/repair`);
+      expect(req.request.method).toBe('POST');
+      req.flush({ status: 202, data: repairJobView({ componentIds: [11] }) }, { status: 202, statusText: 'Accepted' });
+      expect(notifications.success.calls.allArgs()).toEqual([['Repair started.']]);
+      done();
+    }));
+
+    it('the pause asks how many new harnesses to write (16 E12)', fakeAsync(() => {
+      confirm.confirm.and.returnValue(of(false));
+      load({ status: 'awaiting_confirmation', componentCount: 40, newHarnessCount: 30, reusedHarnessCount: 10 });
+      const popup = confirm.confirm.calls.mostRecent().args[0];
+      expect(popup.title).toBe('30 new harnesses needed');
+      expect(popup.confirmText).toBe('Write all 30');
+      expect(popup.message).toContain(
+        '10 components reuse saved harnesses. PRVision writes 12 new harnesses by default.',
+      );
+      const alert = el.querySelector('[data-testid="limit-choice"]');
+      expect(alert?.textContent).toContain('30 new harnesses needed');
+      expect(textWithoutIcons(el.querySelector('[data-testid="render-all"]'))).toBe('Write all 30');
+      expect(textWithoutIcons(el.querySelector('[data-testid="render-top"]'))).toBe('Write top 12');
+      expect(alert?.textContent).toContain('Cancel run');
+      el.querySelector<HTMLButtonElement>('[data-testid="render-top"]')?.click();
+      const req = httpMock.expectOne(`${BASE}/visualizations/7/continue`);
+      expect(req.request.body).toEqual({ componentLimit: 12 });
+      req.flush({ status: 202, data: { id: 7, componentLimit: 12, jobId: 'viz-7' } });
+      done();
+    }));
+
+    it('more than 100 new harnesses offers the top 100', fakeAsync(() => {
+      confirm.confirm.and.returnValue(of(false));
+      load({ status: 'awaiting_confirmation', componentCount: 300, newHarnessCount: 240, reusedHarnessCount: 60 });
+      expect(textWithoutIcons(el.querySelector('[data-testid="render-all"]'))).toBe('Write top 100');
+      done();
+    }));
+  });
 });
