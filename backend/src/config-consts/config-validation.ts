@@ -78,7 +78,144 @@ export function collectConfigValidationErrors(overrides: ConfigValidationOverrid
     errors.push("DEFAULT_PAGE_SIZE must be <= MAX_PAGE_SIZE <= 100.");
   }
   // [05]/[10] append assertions for ai.config.ts / render.config.ts constants here.
+  collectHarnessLibraryErrors(errors, c);
   return errors;
+}
+
+/** Sheet 16 §16.6: harness library, states, live mode, prices and export/import constants. */
+function collectHarnessLibraryErrors(errors: string[], c: ConfigSnapshot): void {
+  // Queues of 00 §21 item 7 are part of the queue contract, like the visualization queue.
+  assertEquals(errors, "LIBRARY_SCAN_QUEUE", c.LIBRARY_SCAN_QUEUE, "harness-scans");
+  assertEquals(errors, "LIBRARY_SCAN_JOB", c.LIBRARY_SCAN_JOB, "scan");
+  assertEquals(errors, "LIBRARY_SCAN_JOB_ID_PREFIX", c.LIBRARY_SCAN_JOB_ID_PREFIX, "scan-");
+  assertEquals(errors, "LIBRARY_REPAIR_QUEUE", c.LIBRARY_REPAIR_QUEUE, "harness-repairs");
+  assertEquals(errors, "LIBRARY_REPAIR_JOB", c.LIBRARY_REPAIR_JOB, "repair");
+  assertEquals(errors, "LIBRARY_REPAIR_JOB_ID_PREFIX", c.LIBRARY_REPAIR_JOB_ID_PREFIX, "repair-");
+  assertEquals(errors, "LIVE_SESSION_QUEUE", c.LIVE_SESSION_QUEUE, "live-sessions");
+  assertEquals(errors, "LIVE_SESSION_JOB", c.LIVE_SESSION_JOB, "live");
+  assertEquals(errors, "LIVE_SESSION_JOB_ID_PREFIX", c.LIVE_SESSION_JOB_ID_PREFIX, "live-");
+  assertEquals(errors, "LIBRARY_CANCEL_KEY_PREFIX", c.LIBRARY_CANCEL_KEY_PREFIX, "prvision:library-cancel:");
+  assertEquals(errors, "LIBRARY_SCAN_WORKER_CONCURRENCY", c.LIBRARY_SCAN_WORKER_CONCURRENCY, 1);
+  assertEquals(errors, "LIBRARY_REPAIR_WORKER_CONCURRENCY", c.LIBRARY_REPAIR_WORKER_CONCURRENCY, 1);
+
+  // State allowance and ordinals are literals in DB CHECKs (16 §6.2, §6.6).
+  if (c.STATE_ALLOWANCE_MIN !== 1 || c.STATE_ALLOWANCE_MAX !== 5) {
+    errors.push("STATE_ALLOWANCE_MIN must be 1 and STATE_ALLOWANCE_MAX must be 5 (they are literals in DB CHECKs).");
+  }
+  if (c.STATE_ALLOWANCE_DEFAULT < c.STATE_ALLOWANCE_MIN || c.STATE_ALLOWANCE_DEFAULT > c.STATE_ALLOWANCE_MAX) {
+    errors.push("STATE_ALLOWANCE_DEFAULT must be between STATE_ALLOWANCE_MIN and STATE_ALLOWANCE_MAX.");
+  }
+  if (c.MAX_STATE_ORDINALS !== 10) {
+    errors.push("MAX_STATE_ORDINALS must be 10 (the DB CHECK allows ordinals 0–9).");
+  }
+
+  // Live mode (D10).
+  if (c.LIVE_IDLE_TIMEOUT_MS !== 600_000) {
+    errors.push("LIVE_IDLE_TIMEOUT_MS must be 600000 (10 minutes, D10).");
+  }
+  if (c.LIVE_HEARTBEAT_LOSS_MS < 2 * c.LIVE_HEARTBEAT_INTERVAL_MS) {
+    errors.push("LIVE_HEARTBEAT_LOSS_MS must be at least 2 × LIVE_HEARTBEAT_INTERVAL_MS.");
+  }
+  if (c.LIVE_IDLE_TIMEOUT_MS <= c.LIVE_HEARTBEAT_LOSS_MS) {
+    errors.push("LIVE_IDLE_TIMEOUT_MS must be greater than LIVE_HEARTBEAT_LOSS_MS.");
+  }
+  if (!Number.isInteger(c.LIVE_MAX_SESSIONS) || c.LIVE_MAX_SESSIONS < 1 || c.LIVE_MAX_SESSIONS > 4) {
+    errors.push("LIVE_MAX_SESSIONS must be an integer between 1 and 4.");
+  }
+
+  // Render budget (16 §9.2).
+  if (c.RENDER_PAGE_CONCURRENCY !== 2 * c.RENDER_ITEM_CONCURRENCY) {
+    errors.push("RENDER_PAGE_CONCURRENCY must be 2 × RENDER_ITEM_CONCURRENCY.");
+  }
+  if (
+    c.RENDER_STAGE_TIMEOUT_MS > c.RENDER_STAGE_TIMEOUT_MAX_MS ||
+    c.RENDER_STAGE_TIMEOUT_MAX_MS >= c.VISUALIZATION_MAX_RUNTIME_MS
+  ) {
+    errors.push("RENDER_STAGE_TIMEOUT_MS ≤ RENDER_STAGE_TIMEOUT_MAX_MS < VISUALIZATION_MAX_RUNTIME_MS must hold.");
+  }
+
+  // Prices (16 §6.13, E17).
+  const prices: Record<string, Record<string, number>> = c.AI_MODEL_PRICES_USD_PER_MTOK;
+  for (const [model, price] of Object.entries(prices)) {
+    const fields = ["input", "output", "cacheRead", "cacheWrite"].map((field) => price[field]);
+    if (!fields.every((value) => typeof value === "number" && Number.isFinite(value) && value > 0)) {
+      errors.push(
+        `AI_MODEL_PRICES_USD_PER_MTOK["${model}"] must have finite positive input, output, cacheRead and cacheWrite.`
+      );
+    }
+  }
+  if (!Object.prototype.hasOwnProperty.call(prices, c.AI_PRICE_FALLBACK_MODEL)) {
+    errors.push("AI_PRICE_FALLBACK_MODEL must be a model of AI_MODEL_PRICES_USD_PER_MTOK.");
+  }
+  if (!Object.prototype.hasOwnProperty.call(prices, c.AI_DEFAULT_MODEL)) {
+    errors.push("AI_DEFAULT_MODEL must be a model of AI_MODEL_PRICES_USD_PER_MTOK.");
+  }
+
+  // Spending cap, export/import and estimates.
+  if (!(c.LIBRARY_SPEND_CAP_MIN_USD > 0 && c.LIBRARY_SPEND_CAP_MIN_USD < c.LIBRARY_SPEND_CAP_MAX_USD)) {
+    errors.push("0 < LIBRARY_SPEND_CAP_MIN_USD < LIBRARY_SPEND_CAP_MAX_USD must hold.");
+  }
+  if (c.LIBRARY_EXPORT_VERSION !== 1) {
+    errors.push("LIBRARY_EXPORT_VERSION must be 1.");
+  }
+  if (c.LIBRARY_EXPORT_MAX_BYTES !== bodyLimitBytes(c.LIBRARY_IMPORT_BODY_LIMIT)) {
+    errors.push("LIBRARY_EXPORT_MAX_BYTES must equal LIBRARY_IMPORT_BODY_LIMIT in bytes.");
+  }
+  if (c.LIBRARY_ESTIMATE_INVENTORY_BUDGET_MS >= c.LIBRARY_ESTIMATE_TIMEOUT_MS) {
+    errors.push("LIBRARY_ESTIMATE_INVENTORY_BUDGET_MS must be less than LIBRARY_ESTIMATE_TIMEOUT_MS.");
+  }
+
+  const positiveIntegers: Array<[string, number]> = [
+    ["ANALYSIS_MAX_CANDIDATES", c.ANALYSIS_MAX_CANDIDATES],
+    ["STATE_NAME_MAX_CHARS", c.STATE_NAME_MAX_CHARS],
+    ["STATE_MAX_STEPS", c.STATE_MAX_STEPS],
+    ["STATE_STEP_TEXT_MAX_CHARS", c.STATE_STEP_TEXT_MAX_CHARS],
+    ["STATE_STEP_NTH_MAX", c.STATE_STEP_NTH_MAX],
+    ["STATE_STEP_TIMEOUT_MS", c.STATE_STEP_TIMEOUT_MS],
+    ["RENDER_ITEM_CONCURRENCY", c.RENDER_ITEM_CONCURRENCY],
+    ["RENDER_PAGE_CONCURRENCY", c.RENDER_PAGE_CONCURRENCY],
+    ["RENDER_STAGE_MS_PER_PAGE", c.RENDER_STAGE_MS_PER_PAGE],
+    ["RENDER_GROUP_STARTUP_ALLOWANCE_MS", c.RENDER_GROUP_STARTUP_ALLOWANCE_MS],
+    ["ANGULAR_RENDER_GROUP_STARTUP_ALLOWANCE_MS", c.ANGULAR_RENDER_GROUP_STARTUP_ALLOWANCE_MS],
+    ["RENDER_STAGE_TIMEOUT_MAX_MS", c.RENDER_STAGE_TIMEOUT_MAX_MS],
+    ["RENDER_GROUP_MAX_ITEMS", c.RENDER_GROUP_MAX_ITEMS],
+    ["LIBRARY_INVENTORY_MAX_COMPONENTS", c.LIBRARY_INVENTORY_MAX_COMPONENTS],
+    ["LIBRARY_INVENTORY_MAX_FILES", c.LIBRARY_INVENTORY_MAX_FILES],
+    ["LIBRARY_INVENTORY_BUDGET_MS", c.LIBRARY_INVENTORY_BUDGET_MS],
+    ["LIBRARY_RECHECK_MAX_COMPONENTS", c.LIBRARY_RECHECK_MAX_COMPONENTS],
+    ["LIBRARY_SCAN_BATCH_SIZE", c.LIBRARY_SCAN_BATCH_SIZE],
+    ["LIBRARY_ESTIMATE_MIN_SAMPLES", c.LIBRARY_ESTIMATE_MIN_SAMPLES],
+    ["LIBRARY_ESTIMATE_OUTPUT_TOKENS_PER_EXTRA_STATE", c.LIBRARY_ESTIMATE_OUTPUT_TOKENS_PER_EXTRA_STATE],
+    ["LIBRARY_ESTIMATE_SECONDS_PER_HARNESS", c.LIBRARY_ESTIMATE_SECONDS_PER_HARNESS],
+    ["VISUALIZATION_MAX_RUNTIME_MS", c.VISUALIZATION_MAX_RUNTIME_MS],
+    ["LIBRARY_SCAN_MAX_RUNTIME_MS", c.LIBRARY_SCAN_MAX_RUNTIME_MS],
+    ["LIBRARY_REPAIR_MAX_RUNTIME_MS", c.LIBRARY_REPAIR_MAX_RUNTIME_MS],
+    ["LIVE_IDLE_TIMEOUT_MS", c.LIVE_IDLE_TIMEOUT_MS],
+    ["LIVE_HEARTBEAT_INTERVAL_MS", c.LIVE_HEARTBEAT_INTERVAL_MS],
+    ["LIVE_HEARTBEAT_LOSS_MS", c.LIVE_HEARTBEAT_LOSS_MS],
+    ["LIVE_POLL_INTERVAL_MS", c.LIVE_POLL_INTERVAL_MS],
+    ["LIVE_MAX_SESSION_MS", c.LIVE_MAX_SESSION_MS],
+    ["LIVE_START_TIMEOUT_MS", c.LIVE_START_TIMEOUT_MS],
+    ["LIVE_MAX_HOSTS_PER_SIDE", c.LIVE_MAX_HOSTS_PER_SIDE],
+    ["LIBRARY_EXPORT_MAX_BYTES", c.LIBRARY_EXPORT_MAX_BYTES],
+    ["LIBRARY_IMPORT_MAX_ENTRIES", c.LIBRARY_IMPORT_MAX_ENTRIES],
+    ["LIBRARY_ESTIMATE_TIMEOUT_MS", c.LIBRARY_ESTIMATE_TIMEOUT_MS],
+    ["LIBRARY_ESTIMATE_INVENTORY_BUDGET_MS", c.LIBRARY_ESTIMATE_INVENTORY_BUDGET_MS],
+    ["LIBRARY_ESTIMATE_CACHE_MS", c.LIBRARY_ESTIMATE_CACHE_MS]
+  ];
+  for (const [name, value] of positiveIntegers) {
+    assertPositiveInteger(errors, name, value);
+  }
+}
+
+/** Bytes of an express/body-parser limit string such as "64mb" or "512kb"; NaN when malformed. */
+function bodyLimitBytes(limit: string): number {
+  const match = /^(\d+)(b|kb|mb|gb)$/i.exec(limit.trim());
+  if (!match?.[1] || !match[2]) {
+    return Number.NaN;
+  }
+  const units: Record<string, number> = { b: 1, kb: 1024, mb: 1024 * 1024, gb: 1024 * 1024 * 1024 };
+  return Number(match[1]) * (units[match[2].toLowerCase()] ?? Number.NaN);
 }
 
 /**

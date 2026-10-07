@@ -225,7 +225,7 @@ test("renamed component: base harness file imports the previous path, head file 
   const results = await h.service.renderAll(h.env.handle.context, [
     renderInput(5, "src/NewButton.tsx", { basePath: "src/OldButton.tsx" })
   ]);
-  assert.equal(deriveRenderStatus(results[0] ?? { componentId: 5, base: null, head: null }), "rendered");
+  assert.equal(deriveRenderStatus(results[0] ?? { componentId: 5, base: null, head: null, states: [] }), "rendered");
   const baseFile = fs.readFileSync(path.join(h.env.baseDir, ".prvision-harness/components/5.tsx"), "utf8");
   const headFile = fs.readFileSync(path.join(h.env.headDir, ".prvision-harness/components/5.tsx"), "utf8");
   assert.match(baseFile, /from "\.\.\/\.\.\/src\/OldButton"/);
@@ -304,7 +304,7 @@ test("both sides failing with module_load trigger one repair with a HarnessRende
   const session = h.sessions[0] ?? new FakeBrowserSession();
   assert.deepEqual(rendersOf(session, 9, "base"), [0, 1]);
   assert.deepEqual(rendersOf(session, 9, "head"), [0, 1]);
-  assert.equal(deriveRenderStatus(results[0] ?? { componentId: 9, base: null, head: null }), "rendered");
+  assert.equal(deriveRenderStatus(results[0] ?? { componentId: 9, base: null, head: null, states: [] }), "rendered");
   assert.ok(
     h.env.handle.console.has("info", "Repairing the harness for Cart after a render failure (head: module_load).")
   );
@@ -843,14 +843,14 @@ test("persisted errors and console events contain no secrets and no absolute dat
 test("deriveRenderStatus maps side outcomes to rendered, partial and failed", () => {
   const ok = okSide("head");
   const fail = failedSide("head");
-  assert.equal(deriveRenderStatus({ componentId: 1, base: okSide("base"), head: ok }), "rendered");
-  assert.equal(deriveRenderStatus({ componentId: 1, base: okSide("base"), head: fail }), "partial");
-  assert.equal(deriveRenderStatus({ componentId: 1, base: failedSide("base"), head: ok }), "partial");
-  assert.equal(deriveRenderStatus({ componentId: 1, base: failedSide("base"), head: fail }), "failed");
-  assert.equal(deriveRenderStatus({ componentId: 1, base: null, head: ok }), "rendered");
-  assert.equal(deriveRenderStatus({ componentId: 1, base: null, head: fail }), "failed");
-  assert.equal(deriveRenderStatus({ componentId: 1, base: okSide("base"), head: null }), "rendered");
-  assert.equal(deriveRenderStatus({ componentId: 1, base: null, head: null }), "failed");
+  assert.equal(deriveRenderStatus({ componentId: 1, base: okSide("base"), head: ok, states: [] }), "rendered");
+  assert.equal(deriveRenderStatus({ componentId: 1, base: okSide("base"), head: fail, states: [] }), "partial");
+  assert.equal(deriveRenderStatus({ componentId: 1, base: failedSide("base"), head: ok, states: [] }), "partial");
+  assert.equal(deriveRenderStatus({ componentId: 1, base: failedSide("base"), head: fail, states: [] }), "failed");
+  assert.equal(deriveRenderStatus({ componentId: 1, base: null, head: ok, states: [] }), "rendered");
+  assert.equal(deriveRenderStatus({ componentId: 1, base: null, head: fail, states: [] }), "failed");
+  assert.equal(deriveRenderStatus({ componentId: 1, base: okSide("base"), head: null, states: [] }), "rendered");
+  assert.equal(deriveRenderStatus({ componentId: 1, base: null, head: null, states: [] }), "failed");
 });
 
 test("chooseAttempt prefers a primary-side success and breaks ties toward the repaired attempt", () => {
@@ -887,7 +887,8 @@ function okSide(side: RenderSide): RenderSideResult {
     height: 10,
     error: null,
     consoleErrors: [],
-    durationMs: 1
+    durationMs: 1,
+    failureKind: null
   };
 }
 
@@ -900,6 +901,7 @@ function failedSide(side: RenderSide): RenderSideResult {
     height: null,
     error: "[module_load] x",
     consoleErrors: [],
-    durationMs: 1
+    durationMs: 1,
+    failureKind: "module_load"
   };
 }

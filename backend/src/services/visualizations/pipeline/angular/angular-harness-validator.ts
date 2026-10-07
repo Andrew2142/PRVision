@@ -31,6 +31,7 @@ import {
   locationOf,
   moduleReferences,
   runtimeExports,
+  singleDefaultState,
   type HarnessIssueCode,
   type HarnessValidationInput,
   type HarnessValidationIssue,
@@ -583,7 +584,8 @@ export class AngularHarnessValidator {
       },
       "Angular harness validated"
     );
-    return { ok: errors.length === 0, errors, warnings };
+    const ok = errors.length === 0;
+    return { ok, errors, warnings, states: ok ? singleDefaultState() : null }; // 16a shim until 16b
   }
 
   private async run(input: HarnessValidationInput, report: Report): Promise<void> {

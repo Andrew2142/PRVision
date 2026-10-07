@@ -79,6 +79,8 @@ function pkg(
     directImports: { base: [], head: [] },
     sections,
     estimatedTokens: 0,
+    purpose: "change",
+    stateAllowance: 1,
     angular: {
       className: "NotificationItemComponent",
       selector: "app-notification-item",
@@ -128,10 +130,30 @@ test("React prompt hashes and the React prompt set are unchanged", () => {
   assert.equal(
     REACT_HARNESS_PROMPTS.buildRepair(
       react,
-      { componentId: 7, harnessSource: "h", mockedModules: [], notes: "n" },
+      {
+        componentId: 7,
+        harnessSource: "h",
+        mockedModules: [],
+        notes: "n",
+        states: [{ name: "Default", steps: [] }],
+        origin: "written",
+        libraryEntryId: null
+      },
       renderError
     ),
-    buildRepairPrompt(react, { componentId: 7, harnessSource: "h", mockedModules: [], notes: "n" }, renderError)
+    buildRepairPrompt(
+      react,
+      {
+        componentId: 7,
+        harnessSource: "h",
+        mockedModules: [],
+        notes: "n",
+        states: [{ name: "Default", steps: [] }],
+        origin: "written",
+        libraryEntryId: null
+      },
+      renderError
+    )
   );
 });
 
@@ -309,7 +331,10 @@ test("repair prompt carries the previous harness, file replacements, render fail
       componentId: 7,
       harnessSource: "export default definePrvisionHarness({ component: X });",
       mockedModules: [{ specifier: "../../flags", source: "export const FLAGS = {};" }],
-      notes: "Shows the unread state."
+      notes: "Shows the unread state.",
+      states: [{ name: "Default", steps: [] }],
+      origin: "written",
+      libraryEntryId: null
     },
     {
       sides: ["base", "head"],

@@ -7,18 +7,34 @@ import { VisualizationModel } from "../../../models";
 import type { AiUsage } from "../../../types/visualization-pipeline";
 import { QueryHandler, ZERO_USAGE, addUsage } from "../../../utilities";
 
-/** The stored shape of `visualizations.ai_usage` (matches VisualizationDetailView.aiUsage). */
+/**
+ * The stored shape of `visualizations.ai_usage`. VisualizationDetailView.aiUsage exposes the first three counts;
+ * the two optional cache counts (16 §6.13) are stored when present so costs can be computed later.
+ */
 export interface StoredAiUsage {
   inputTokens: number;
   outputTokens: number;
   calls: number;
+  cacheReadInputTokens?: number;
+  cacheWriteInputTokens?: number;
 }
 
 function isCount(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value >= 0;
 }
 
-/** Null or malformed jsonb → ZERO_USAGE. */
+/** The three required counts plus each optional cache count that is present. */
+function storedFrom(usage: AiUsage): StoredAiUsage {
+  return {
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+    calls: usage.calls,
+    ...(usage.cacheReadInputTokens !== undefined ? { cacheReadInputTokens: usage.cacheReadInputTokens } : {}),
+    ...(usage.cacheWriteInputTokens !== undefined ? { cacheWriteInputTokens: usage.cacheWriteInputTokens } : {})
+  };
+}
+
+/** Null or malformed jsonb → ZERO_USAGE. Rows written before 16a have no cache counts and still parse. */
 export function toStoredUsage(value: unknown): StoredAiUsage {
   const zero: StoredAiUsage = {
     inputTokens: ZERO_USAGE.inputTokens,
@@ -28,11 +44,20 @@ export function toStoredUsage(value: unknown): StoredAiUsage {
   if (typeof value !== "object" || value === null) {
     return zero;
   }
-  const { inputTokens, outputTokens, calls } = value as Record<string, unknown>;
+  const { inputTokens, outputTokens, calls, cacheReadInputTokens, cacheWriteInputTokens } = value as Record<
+    string,
+    unknown
+  >;
   if (!isCount(inputTokens) || !isCount(outputTokens) || !isCount(calls)) {
     return zero;
   }
-  return { inputTokens, outputTokens, calls };
+  return {
+    inputTokens,
+    outputTokens,
+    calls,
+    ...(isCount(cacheReadInputTokens) ? { cacheReadInputTokens } : {}),
+    ...(isCount(cacheWriteInputTokens) ? { cacheWriteInputTokens } : {})
+  };
 }
 
 /** Serialized read-add-write accumulation of AI usage for one visualization. */
@@ -62,12 +87,7 @@ export class AiUsageRecorder {
         Table.VISUALIZATIONS
       );
       const current = toStoredUsage(row?.aiUsage ?? null);
-      const next = addUsage(current, usage);
-      const stored: StoredAiUsage = {
-        inputTokens: next.inputTokens,
-        outputTokens: next.outputTokens,
-        calls: next.calls
-      };
+      const stored = storedFrom(addUsage(current, usage));
       const response = await this.queryHandler.update(
         { aiUsage: stored },
         { id: this.visualizationId },

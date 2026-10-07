@@ -226,6 +226,16 @@ export class FakeQueueStatics {
     return Promise.resolve({ jobId: this.visualizationJobId(id), alreadyQueued });
   }
 
+  /** Like QueueService.requeueVisualization: a finished job is removed first, then the run is enqueued again. */
+  requeueVisualization(id: number): Promise<{ jobId: string; alreadyQueued: boolean }> {
+    this.calls.push(`requeue:${id}`);
+    const state = this.jobStates.get(id);
+    if (state === "completed" || state === "failed") {
+      this.jobStates.delete(id);
+    }
+    return this.enqueueVisualization(id);
+  }
+
   removeQueuedVisualization(id: number): Promise<boolean> {
     this.calls.push(`remove:${id}`);
     if (this.removeResult !== null) {
@@ -422,7 +432,15 @@ export function candidate(componentId: number, overrides: Partial<ComponentCandi
 
 /** A harness for a candidate. */
 export function harness(componentId: number): HarnessGenerationResult {
-  return { componentId, harnessSource: "export default function PRVisionHarness() {}", mockedModules: [], notes: "" };
+  return {
+    componentId,
+    harnessSource: "export default function PRVisionHarness() {}",
+    mockedModules: [],
+    notes: "",
+    states: [{ name: "Default", steps: [] }],
+    origin: "written",
+    libraryEntryId: null
+  };
 }
 
 /** An ok render of both sides. */
@@ -435,9 +453,10 @@ export function render(componentId: number, ok = true): ComponentRenderResult {
     height: ok ? 50 : null,
     error: ok ? null : "boom",
     consoleErrors: [],
-    durationMs: 1
+    durationMs: 1,
+    failureKind: ok ? null : "render_error"
   });
-  return { componentId, base: side("base"), head: side("head") };
+  return { componentId, base: side("base"), head: side("head"), states: [] };
 }
 
 /** Behaviour of one fake step: return a value, throw, or run custom code (e.g. wait for the abort). */
@@ -473,7 +492,8 @@ export function analysisWith(candidates: ComponentCandidate[]): ChangeAnalysisRe
     candidates,
     skipped: [],
     changedFiles: candidates.map((c) => ({ path: c.filePath, status: "M" as const })),
-    sourceQueries: marker as ComponentSourceQueries
+    sourceQueries: marker as ComponentSourceQueries,
+    globalStyleChanges: []
   };
 }
 

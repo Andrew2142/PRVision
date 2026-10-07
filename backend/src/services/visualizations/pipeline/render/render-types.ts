@@ -292,6 +292,7 @@ export type RenderFailureKind =
   | "module_load" // a module in the harness graph failed to resolve/transform/evaluate
   | "render_error" // React render/mount threw (error boundary or mount)
   | "timeout" // never became ready within the budget
+  | "step_failed" // a state's scripted step could not run (16 §7.2; repairable; produced from 16b on)
   | "browser" // Chromium crashed or disconnected
   | "screenshot" // capture or PNG write failed
   | "file_missing" // component file absent on this side although the change kind implies it exists
@@ -349,6 +350,8 @@ export interface PageRenderInput {
     | "side"
   >;
   componentId: number;
+  /** 16 §6.12: the harness state to render (render services pass "Default"; the page uses it from 16b on). */
+  stateName: string;
   timeoutMs: number; // budget for this attempt (goto → PNG written)
   outputPath: string; // absolute temp path; written atomically
   signal: AbortSignal; // ctx.signal

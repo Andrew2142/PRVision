@@ -1,4 +1,5 @@
 import type { AiEffort, ComponentChangeKind, VisualizationSourceType } from "../enums";
+import type { HarnessStateSpec } from "./harness-library";
 
 // 00 §14.7: PipelineStepError lives in pipeline-errors.ts and is re-exported from here.
 export * from "./pipeline-errors";
@@ -141,6 +142,8 @@ export interface ChangeAnalysisResult {
   skipped: Array<Omit<ComponentCandidate, "componentId"> & { skipReason: string }>;
   changedFiles: Array<{ path: string; status: "A" | "M" | "D" | "R"; previousPath?: string }>;
   sourceQueries: ComponentSourceQueries; // 00 §14.7
+  /** NEW (16 §6.12): changed stylesheets analysis classifies as global, head paths, sorted (§8.5.2). */
+  globalStyleChanges: string[];
 }
 
 /** Produced by HarnessGenerationService (09). */
@@ -158,6 +161,14 @@ export interface HarnessGenerationResult {
    * fields above are then the head harness of the added component (A). Absent or null for every other row.
    */
   baseHarness?: SideHarness | null;
+  /** NEW (16 §6.12): states of the head harness (or the only harness), extracted by §7.7. Default first. */
+  states: HarnessStateSpec[];
+  /** NEW: where the head harness came from; `library` results were not generated in this run. */
+  origin: "library" | "written";
+  /** NEW: library entry the head harness came from or was saved to; null until saved. */
+  libraryEntryId: number | null;
+  /** NEW (16 §8.6.1): usage of every call made for this result (generation + correction, or repair calls). */
+  usage?: AiUsage;
 }
 
 /** One side's harness of a `replaced` row (00 §17). */
@@ -165,6 +176,9 @@ export interface SideHarness {
   harnessSource: string;
   mockedModules: MockedModule[];
   notes: string;
+  states: HarnessStateSpec[]; // NEW (16 §6.12)
+  origin: "library" | "written"; // NEW
+  libraryEntryId: number | null; // NEW
 }
 
 // ---- Sheet 09 §5.1 types (00 §14.12: this file is their home). Added by sheet 07 in wave 3 because the
@@ -173,11 +187,13 @@ export interface SideHarness {
 /** Built by sheet 10 (10 §5.13.6) from the failing side results of the attempt that triggered repair. */
 export interface HarnessRenderError {
   sides: Array<"base" | "head">; // every present side; all of them failed (repair trigger, 00 §14.7)
-  kind: "module_load" | "render_error" | "timeout"; // 10's RenderFailureKind of the primary side (only repairable kinds)
+  kind: "module_load" | "render_error" | "timeout" | "step_failed"; // 10's RenderFailureKind of the primary side (only repairable kinds; step_failed: 16 §6.12)
   message: string; // 10's formatRenderError output for the primary side (10 §5.12.3), ≤ RENDER_ERROR_MAX_CHARS
   otherSideMessage: string | null; // formatted error of the other present side, ≤ 1 000 chars; null when only one side
   /** 00 §17: `replaced` rows only — the side whose own harness is repaired (`sides` is then `[targetSide]`). */
   targetSide?: "base" | "head";
+  /** NEW (16 §6.12): the failing state (§9.6); absent = Default. */
+  stateName?: string;
 }
 
 export interface HarnessGenerationFailure {
@@ -192,6 +208,8 @@ export interface HarnessGenerationBatchResult {
   failures: HarnessGenerationFailure[];
   usage: AiUsage; // usage spent in this stage only
   cancelled: boolean; // true when the loop stopped because of cancellation
+  /** NEW (16 §6.12): set when the loop stopped early (§10.5). */
+  stopReason?: "cancelled" | "spend_cap";
 }
 
 /** Returned by repairHarness. Never persisted by 09 (00 §14.7). */
@@ -210,13 +228,47 @@ export interface RenderSideResult {
   error: string | null;
   consoleErrors: string[];
   durationMs: number;
+  failureKind: RenderFailureKindValue | null; // NEW (16 §6.12): 10's RenderFailureKind (incl. "step_failed"); null when ok
 }
+/** NEW (16 §6.12): 10's RenderFailureKind as a contract type (a type-level test asserts both are equal). */
+export type RenderFailureKindValue =
+  | "vite_unavailable"
+  | "navigation"
+  | "module_load"
+  | "render_error"
+  | "timeout"
+  | "step_failed"
+  | "browser"
+  | "screenshot"
+  | "file_missing"
+  | "budget_exceeded"
+  | "cancelled";
+
+/** NEW (16 §9): one state's render on both sides. ordinal 0 = Default. */
+export interface StateRenderResult {
+  ordinal: number;
+  stateName: string;
+  base: RenderSideResult | null; // null when the state does not exist on that side or the side is absent
+  head: RenderSideResult | null;
+}
+/** ComponentRenderResult (10); `base`/`head` stay and mirror state 0 (Default) (16 §6.12). */
 export interface ComponentRenderResult {
   componentId: number;
   base: RenderSideResult | null; // null when the component does not exist on that side
   head: RenderSideResult | null;
+  states: StateRenderResult[]; // NEW, ordinal order; [] only for rows that never reached rendering
 }
 
+/** NEW (16 §9.5): per-state diff result. */
+export interface StateDiffResult {
+  ordinal: number;
+  stateName: string;
+  visualChange: "changed" | "unchanged" | "new" | "deleted" | null;
+  diffImagePath: string | null;
+  diffPixelRatio: number | null;
+  width: number | null;
+  height: number | null;
+}
 /** Produced by ImageDiffService (11). */
 export interface ImageDiffResult {
   componentId: number;
@@ -224,6 +276,7 @@ export interface ImageDiffResult {
   diffPixelRatio: number; // 0..1
   width: number;
   height: number;
+  states: StateDiffResult[]; // NEW (16 §6.12)
 }
 
 /** Produced by StructuralDiffService (11). Stored in visualization_components.structural_diff. */
@@ -258,6 +311,7 @@ export interface AiUsage {
   outputTokens: number;
   calls: number;
   cacheReadInputTokens?: number; // 00 §14.4
+  cacheWriteInputTokens?: number; // 16 §6.13: already included in inputTokens, like cacheReadInputTokens
 }
 export interface AiStructuredResult<T> {
   data: T;
@@ -333,4 +387,8 @@ export interface PipelineContext {
   isCancelled(): Promise<boolean>;
   /** Aborts on cancel, shutdown or overall timeout; `signal.reason` is "cancelled" | "shutdown" | a TimeoutError (00 §14.6). */
   signal: AbortSignal;
+  /** NEW (16 §6.12): library settings of the repository for this run (snapshot at job start). */
+  library: { stateAllowance: number; buildMode: "grow" | "scan" };
+  /** NEW: set for library jobs (scan, repair); absent for visualization runs. visualizationId is then 0 for scans. */
+  libraryJob?: { kind: "scan" | "rescan" | "repair"; libraryJobId: number };
 }

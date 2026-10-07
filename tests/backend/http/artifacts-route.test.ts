@@ -15,6 +15,7 @@ let testApp: TestApp;
 before(async () => {
   testApp = await startTestApp();
   await testApp.store.write(testApp.store.componentImagePath(1, 2, "base"), PNG);
+  await testApp.store.write(testApp.store.componentStateImagePath(1, 2, 2, "head"), PNG); // 16 §6.14
   await fs.writeFile(path.join(testApp.store.componentDir(1, 2), ".secret"), "dot");
   await fs.writeFile(path.join(testApp.store.componentDir(1, 2), "notes.txt"), "txt");
   await fs.writeFile(path.join(testApp.store.dataDir, "outside.txt"), "outside");
@@ -85,4 +86,30 @@ test("artifacts: a POST with a foreign Origin → 403 forbidden_origin", async (
   });
   assert.equal(response.status, 403);
   assert.equal(((await response.json()) as { error_reason: string }).error_reason, "forbidden_origin");
+});
+
+test("artifacts: serves a state image /artifacts/<v>/<c>/s2/head.png (16 §6.14)", async () => {
+  const response = await fetch(`${testApp.baseUrl}/artifacts/1/2/s2/head.png`);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("content-type"), "image/png");
+  assert.equal(response.headers.get("cache-control"), "private, no-cache");
+  assert.deepEqual(Buffer.from(await response.arrayBuffer()), PNG);
+  const missing = await fetch(`${testApp.baseUrl}/artifacts/1/2/s3/head.png`);
+  assert.equal(missing.status, 404);
+  assert.deepEqual(await missing.json(), NOT_FOUND);
+});
+
+test("artifacts: s0, s10 and other state folder shapes are rejected (16 §6.14)", async () => {
+  for (const attempt of [
+    "/artifacts/1/2/s0/head.png",
+    "/artifacts/1/2/s10/head.png",
+    "/artifacts/1/2/s/head.png",
+    "/artifacts/1/2/S2/head.png",
+    "/artifacts/1/2/s2/s2/head.png",
+    "/artifacts/1/2/s2/../s2/head.png",
+    "/artifacts/1/2/s2%2fhead.png"
+  ]) {
+    const response = await rawRequest(testApp.baseUrl, { path: attempt });
+    assert.ok(response.status === 404 || response.status === 400, `${attempt} → ${response.status}`);
+  }
 });

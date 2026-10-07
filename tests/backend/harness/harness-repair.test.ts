@@ -58,7 +58,10 @@ test("repair with ok status returns the new harness with appended notes and writ
       harnessSource: fixed,
       mockedModules: [],
       notes:
-        "Shows Button.\n\nRepaired after base and head render failure (render_error): Wrapped in the auth provider."
+        "Shows Button.\n\nRepaired after base and head render failure (render_error): Wrapped in the auth provider.",
+      states: [{ name: "Default", steps: [] }],
+      origin: "written",
+      libraryEntryId: null
     }
   });
   assert.equal(setup.componentUpdates(), before);

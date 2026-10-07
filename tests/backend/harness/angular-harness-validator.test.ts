@@ -156,6 +156,7 @@ function inputFor(
     sidesPresent: { base: true, head: true },
     entryFilePath: ENTRY,
     targetImportStatement: `import { ${exportName} } from "${targetImportPath}";`,
+    stateAllowance: 1,
     ...overrides
   };
 }

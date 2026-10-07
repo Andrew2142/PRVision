@@ -105,7 +105,17 @@ test("HarnessGenerationService.generateAll builds a head harness for A and a bas
       harnessSource: validHarness(NEW),
       mockedModules: [],
       notes: `Shows ${NEW}.`,
-      baseHarness: { harnessSource: validHarness(OLD), mockedModules: [], notes: `Shows ${OLD}.` }
+      baseHarness: {
+        harnessSource: validHarness(OLD),
+        mockedModules: [],
+        notes: `Shows ${OLD}.`,
+        states: [{ name: "Default", steps: [] }],
+        origin: "written",
+        libraryEntryId: null
+      },
+      states: [{ name: "Default", steps: [] }],
+      origin: "written",
+      libraryEntryId: null
     }
   ]);
   // two AI calls: head first (A from head sources), then base (R from base sources)
@@ -194,7 +204,15 @@ const BASE_RENDER_ERROR: HarnessRenderError = {
 };
 
 function sideResult(name: string): HarnessGenerationResult {
-  return { componentId: 1, harnessSource: validHarness(name), mockedModules: [], notes: `Shows ${name}.` };
+  return {
+    componentId: 1,
+    harnessSource: validHarness(name),
+    mockedModules: [],
+    notes: `Shows ${name}.`,
+    states: [{ name: "Default", steps: [] }],
+    origin: "written",
+    libraryEntryId: null
+  };
 }
 
 test("HarnessGenerationService.repairHarness repairs the side named by targetSide with that side's package and budget", async (t) => {
@@ -215,7 +233,10 @@ test("HarnessGenerationService.repairHarness repairs the side named by targetSid
       componentId: 1,
       harnessSource: fixedBase,
       mockedModules: [],
-      notes: `Shows ${OLD}.\n\nRepaired after base render failure (render_error): Wrapped in a form provider.`
+      notes: `Shows ${OLD}.\n\nRepaired after base render failure (render_error): Wrapped in a form provider.`,
+      states: [{ name: "Default", steps: [] }],
+      origin: "written",
+      libraryEntryId: null
     }
   });
   const request = s.handle.ai.callsFor("harness_repair")[0];

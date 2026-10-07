@@ -16,6 +16,7 @@ import type {
   MockedModule,
   WorktreeSide
 } from "../../../types/visualization-pipeline";
+import { DEFAULT_STATE_NAME, type HarnessStateSpec } from "../../../types/harness-library";
 import { getErrorMessage } from "../../../utilities";
 import { harnessDirRel } from "./harness-prompts";
 import { classifySpecifier, packageNameOf, validateMockedModules } from "./mock-rules";
@@ -84,12 +85,24 @@ export interface HarnessValidationInput {
   entryFilePath: string | null; // repository.entryFilePath
   /** The statement given to the model (HarnessContextPackage.targetImportStatement), quoted in messages. */
   targetImportStatement?: string;
+  /** 16 §6.12: the repository's state allowance (ctx.library.stateAllowance); unused until 16b's state rules. */
+  stateAllowance: number;
 }
 
 export interface HarnessValidationReport {
   ok: boolean; // no error-severity issues
   errors: HarnessValidationIssue[];
   warnings: HarnessValidationIssue[];
+  /** 16 §6.12: states extracted from a valid harness, Default first; null when not ok. */
+  states: HarnessStateSpec[] | null;
+}
+
+/**
+ * 16a compile shim (16 §6.12): the states of every valid harness until 16b extracts them (`extractHarnessStates`):
+ * one Default state without steps.
+ */
+export function singleDefaultState(): HarnessStateSpec[] {
+  return [{ name: DEFAULT_STATE_NAME, steps: [] }];
 }
 
 /** Size limits (09 §5.8), stricter than 10's defensive MOCK_SOURCE_MAX_CHARS. */
@@ -503,7 +516,13 @@ export class HarnessValidator {
       report("syntax_error", "error", `The harness could not be checked: ${getErrorMessage(error)}`);
     }
     const errors = issues.filter((issue) => issue.severity === "error");
-    return { ok: errors.length === 0, errors, warnings: issues.filter((issue) => issue.severity === "warning") };
+    const ok = errors.length === 0;
+    return {
+      ok,
+      errors,
+      warnings: issues.filter((issue) => issue.severity === "warning"),
+      states: ok ? singleDefaultState() : null
+    };
   }
 
   private async run(input: HarnessValidationInput, report: Report): Promise<void> {

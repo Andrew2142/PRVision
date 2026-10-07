@@ -89,7 +89,14 @@ function replacedHarness(componentId: number): HarnessGenerationResult {
   const base = harnessFor(componentId, OLD, [BASE_MOCK], "Base notes.");
   return {
     ...harnessFor(componentId, NEW, [HEAD_MOCK], "Head notes."),
-    baseHarness: { harnessSource: base.harnessSource, mockedModules: base.mockedModules, notes: base.notes }
+    baseHarness: {
+      harnessSource: base.harnessSource,
+      mockedModules: base.mockedModules,
+      notes: base.notes,
+      states: base.states,
+      origin: base.origin,
+      libraryEntryId: base.libraryEntryId
+    }
   };
 }
 
@@ -113,7 +120,7 @@ test("buildRenderInputs gives a replaced row R's file as its base path", () => {
 test("RenderService renders R's harness on base and A's on head, each with its own mocks", async (t) => {
   const s = setup(t);
   const results = await s.service.renderAll(s.env.handle.context, [replacedInput(3)]);
-  assert.equal(deriveRenderStatus(results[0] ?? { componentId: 3, base: null, head: null }), "rendered");
+  assert.equal(deriveRenderStatus(results[0] ?? { componentId: 3, base: null, head: null, states: [] }), "rendered");
   assert.match(harnessFile(s.env.baseDir, 3), /from "\.\.\/\.\.\/src\/components\/NoteForm"/);
   assert.doesNotMatch(harnessFile(s.env.baseDir, 3), /NoteFormModal/);
   assert.match(harnessFile(s.env.headDir, 3), /from "\.\.\/\.\.\/src\/components\/NoteFormModal"/);
@@ -137,7 +144,15 @@ test("RenderService repairs only the failed side's own harness of a replaced row
     { "3:base:0": { ok: false, kind: "render_error", error: "[render_error] NoteForm needs a provider" } },
     (side) => ({
       ok: true,
-      result: { componentId: 3, harnessSource: fixedBase, mockedModules: [], notes: `Repaired ${side}.` }
+      result: {
+        componentId: 3,
+        harnessSource: fixedBase,
+        mockedModules: [],
+        notes: `Repaired ${side}.`,
+        states: [{ name: "Default", steps: [] }],
+        origin: "written",
+        libraryEntryId: null
+      }
     })
   );
   const results = await s.service.renderAll(s.env.handle.context, [replacedInput(3)]);
@@ -153,7 +168,7 @@ test("RenderService repairs only the failed side's own harness of a replaced row
   assert.match(s.repairCalls[0].previous.harnessSource, /src\/components\/NoteForm"/);
   assert.match(harnessFile(s.env.baseDir, 3), /\/\/ repaired base/);
   assert.doesNotMatch(harnessFile(s.env.headDir, 3), /repaired/);
-  assert.equal(deriveRenderStatus(results[0] ?? { componentId: 3, base: null, head: null }), "rendered");
+  assert.equal(deriveRenderStatus(results[0] ?? { componentId: 3, base: null, head: null, states: [] }), "rendered");
   const payload = s.persistence.latest(3);
   assert.deepEqual(payload?.baseHarness, {
     harnessSource: fixedBase,

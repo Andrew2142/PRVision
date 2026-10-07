@@ -146,3 +146,66 @@ test("ArtifactStore.toPublicUrl maps relative paths and rejects others", () => {
     assert.throws(() => store.toPublicUrl(bad), ArtifactPathError);
   }
 });
+
+// ---------------------------------------------------------------------------------------------------------------
+// Sheet 16 §6.14: state image paths
+// ---------------------------------------------------------------------------------------------------------------
+
+test("ArtifactStore.componentStateImagePath: ordinal 0 keeps the component path, 1–9 use s<ordinal>/", () => {
+  const store = new ArtifactStore("/data");
+  assert.equal(store.componentStateImagePath(12, 345, 0, "base"), "artifacts/12/345/base.png");
+  assert.equal(store.componentStateImagePath(12, 345, 0, "diff"), store.componentImagePath(12, 345, "diff"));
+  assert.equal(store.componentStateImagePath(12, 345, 1, "head"), "artifacts/12/345/s1/head.png");
+  assert.equal(store.componentStateImagePath(12, 345, 9, "diff"), "artifacts/12/345/s9/diff.png");
+});
+
+test("ArtifactStore.componentStateImagePath rejects ordinals outside 0–9 and invalid ids", () => {
+  const store = new ArtifactStore("/data");
+  for (const ordinal of [10, -1, 1.5, Number.NaN]) {
+    assert.throws(() => store.componentStateImagePath(12, 345, ordinal, "base"), ArtifactPathError, String(ordinal));
+  }
+  assert.throws(() => store.componentStateImagePath(0, 345, 1, "base"), ArtifactPathError);
+  assert.throws(() => store.componentStateImagePath(12, 345, 1, "other" as "base"), ArtifactPathError);
+});
+
+test("ArtifactStore.ensureComponentStateDir creates the component dir and its s<ordinal> folder", async () => {
+  await withStore(async (store) => {
+    await store.ensureComponentStateDir(3, 4, 0);
+    assert.ok((await fs.stat(store.componentDir(3, 4))).isDirectory());
+    await assert.rejects(fs.access(path.join(store.componentDir(3, 4), "s0")));
+    await store.ensureComponentStateDir(3, 4, 2);
+    assert.ok((await fs.stat(path.join(store.componentDir(3, 4), "s2"))).isDirectory());
+    await assert.rejects(store.ensureComponentStateDir(3, 4, 10), ArtifactPathError);
+    // A state image round-trips through write/read at the relative path.
+    const relative = store.componentStateImagePath(3, 4, 2, "head");
+    await store.write(relative, "png");
+    assert.equal((await store.read(relative)).toString(), "png");
+  });
+});
+
+test("ArtifactStore.toPublicUrl and resolveSafe accept s<n> state paths and reject malformed or escaping ones", async () => {
+  await withStore((store, dataDir) => {
+    assert.equal(store.toPublicUrl("artifacts/12/345/s2/head.png"), "/artifacts/12/345/s2/head.png");
+    assert.equal(store.toPublicUrl("artifacts/12/345/s9/diff.png"), "/artifacts/12/345/s9/diff.png");
+    for (const bad of [
+      "artifacts/12/345/s0/head.png",
+      "artifacts/12/345/s10/head.png",
+      "artifacts/12/345/s/head.png",
+      "artifacts/12/345/s2/s3/head.png",
+      "artifacts/12/345/x2/head.png",
+      "artifacts/12/345/s2/../head.png",
+      "artifacts/12/345/s2/head.jpg"
+    ]) {
+      assert.throws(() => store.toPublicUrl(bad), ArtifactPathError, bad);
+    }
+    assert.equal(store.resolveSafe("artifacts/12/345/s2/head.png"), path.join(dataDir, "artifacts/12/345/s2/head.png"));
+    for (const escape of [
+      "artifacts/12/345/s2/../../../../etc/passwd",
+      "/artifacts/12/345/s2/head.png",
+      "artifacts\\12\\s2"
+    ]) {
+      assert.throws(() => store.resolveSafe(escape), ArtifactPathError, escape);
+    }
+    return Promise.resolve();
+  });
+});

@@ -18,10 +18,12 @@ export class RepositoryModel {
   private _id!: number;
   private _isDeleted!: boolean;
   private _lastDetectedAt!: Date;
+  private _libraryBuildMode!: "grow" | "scan";
   private _localPath!: string;
   private _name!: string;
   private _packageManager!: "npm" | "pnpm" | "yarn";
   private _renderViewport!: "desktop" | "tablet" | "mobile";
+  private _stateAllowance!: number;
   private _tsconfigPath!: string | null;
   private _updatedAt!: Date;
   private _viteConfigPath!: string | null;
@@ -82,6 +84,9 @@ export class RepositoryModel {
   setLastDetectedAt(value: Date): void {
     this._lastDetectedAt = value;
   }
+  setLibraryBuildMode(value: "grow" | "scan"): void {
+    this._libraryBuildMode = value;
+  }
   setLocalPath(value: string): void {
     this._localPath = value;
   }
@@ -93,6 +98,9 @@ export class RepositoryModel {
   }
   setRenderViewport(value: "desktop" | "tablet" | "mobile"): void {
     this._renderViewport = value;
+  }
+  setStateAllowance(value: number): void {
+    this._stateAllowance = value;
   }
   setTsconfigPath(value: string | null): void {
     this._tsconfigPath = value;
@@ -144,6 +152,9 @@ export class RepositoryModel {
   get lastDetectedAt(): Date {
     return this._lastDetectedAt;
   }
+  get libraryBuildMode(): "grow" | "scan" {
+    return this._libraryBuildMode;
+  }
   get localPath(): string {
     return this._localPath;
   }
@@ -155,6 +166,9 @@ export class RepositoryModel {
   }
   get renderViewport(): "desktop" | "tablet" | "mobile" {
     return this._renderViewport;
+  }
+  get stateAllowance(): number {
+    return this._stateAllowance;
   }
   get tsconfigPath(): string | null {
     return this._tsconfigPath;

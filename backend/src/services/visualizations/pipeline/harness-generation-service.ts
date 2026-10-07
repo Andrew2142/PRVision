@@ -41,6 +41,7 @@ import { HarnessContextBuilder, SafeFileReader, type HarnessContextPackage } fro
 import { REACT_HARNESS_PROMPTS, type HarnessAiResponse, type HarnessPromptSet } from "./harness-prompts";
 import {
   HarnessValidator,
+  singleDefaultState,
   type HarnessValidationInput,
   type HarnessValidationIssue,
   type HarnessValidationReport
@@ -193,7 +194,8 @@ const INVALID_STATUS_REPORT: HarnessValidationReport = {
         'status component_defect is only valid in repair requests; return status "ok" with a complete harness, or "cannot_render".'
     }
   ],
-  warnings: []
+  warnings: [],
+  states: null
 };
 
 /** Generates, validates and persists render harnesses; repairs them for sheet 10 (09 §5.9). */
@@ -534,7 +536,15 @@ export class HarnessGenerationService {
         return attempt.harness;
       }
       if (attempt.kind === "failed" && attempt.lastHarness !== null && attempt.lastHarness.trim() !== "") {
-        return { harnessSource: attempt.lastHarness, mockedModules: [], notes: "" };
+        // 16a shim fields (16 §6.12): one Default state, written in this run, not saved to the library yet.
+        return {
+          harnessSource: attempt.lastHarness,
+          mockedModules: [],
+          notes: "",
+          states: singleDefaultState(),
+          origin: "written",
+          libraryEntryId: null
+        };
       }
       return null;
     };
@@ -660,7 +670,10 @@ export class HarnessGenerationService {
       harness: {
         harnessSource: last.harnessSource,
         mockedModules: last.mockedModules.map(({ specifier, source }) => ({ specifier, source })),
-        notes: composeNotes(last, report.warnings)
+        notes: composeNotes(last, report.warnings),
+        states: report.states ?? singleDefaultState(), // 16a: the validator's Default state until 16b
+        origin: "written",
+        libraryEntryId: null
       },
       calls: call.budget.calls,
       warnings: report.warnings.length
@@ -695,7 +708,8 @@ export class HarnessGenerationService {
       directImports: pkg.directImports,
       sidesPresent: pkg.sidesPresent,
       entryFilePath: this.ctx.repository.entryFilePath,
-      targetImportStatement: pkg.targetImportStatement
+      targetImportStatement: pkg.targetImportStatement,
+      stateAllowance: pkg.stateAllowance
     };
   }
 
@@ -1036,7 +1050,10 @@ export class HarnessGenerationService {
             componentId,
             harnessSource: response.harnessSource,
             mockedModules: response.mockedModules.map(({ specifier, source }) => ({ specifier, source })),
-            notes: capText(repairedNotes, HARNESS_NOTES_MAX_CHARS)
+            notes: capText(repairedNotes, HARNESS_NOTES_MAX_CHARS),
+            states: report.states ?? singleDefaultState(), // 16a: the validator's Default state until 16b
+            origin: "written",
+            libraryEntryId: null
           }
         };
       }

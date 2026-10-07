@@ -379,7 +379,7 @@ export class AngularHarnessContextBuilder {
   private readonly log: Logger;
 
   constructor(
-    private readonly ctx: Pick<PipelineContext, "workspace" | "repository">,
+    private readonly ctx: Pick<PipelineContext, "workspace" | "repository" | "library">,
     private readonly queries: AngularSourceQueriesLike,
     private readonly fsReader: SafeFileReader = new SafeFileReader(ctx.workspace)
   ) {
@@ -482,6 +482,8 @@ export class AngularHarnessContextBuilder {
       directImports,
       sections: [],
       estimatedTokens: 0,
+      purpose: "change", // 16a shim: 16d adds the library purpose
+      stateAllowance: this.ctx.library.stateAllowance,
       angular: { className, selector: meta?.selector ?? null, appRoot }
     };
     const budgeted = applyBudget(

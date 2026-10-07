@@ -382,7 +382,10 @@ export function harnessFor(
     componentId,
     harnessSource: `import Target from "${target}";\nexport default function PRVisionHarness() {\n  return <Target />;\n}\n`,
     mockedModules: mocks,
-    notes
+    notes,
+    states: [{ name: "Default", steps: [] }],
+    origin: "written",
+    libraryEntryId: null
   };
 }
 

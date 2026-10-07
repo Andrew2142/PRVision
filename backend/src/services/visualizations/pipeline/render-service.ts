@@ -31,6 +31,7 @@ import {
   type PipelineContext,
   type RenderSideResult
 } from "../../../types/visualization-pipeline";
+import { DEFAULT_STATE_NAME } from "../../../types/harness-library";
 import { ArtifactStore, createLogger, getErrorMessage, QueryHandler, redactSecrets } from "../../../utilities";
 import { targetImportPath, viteRootRelOf } from "./harness-prompts";
 import {
@@ -353,11 +354,12 @@ function otherSide(side: RenderSide): RenderSide {
 
 function failedSideResult(
   side: RenderSide,
+  failureKind: RenderFailureKind,
   error: string,
   durationMs = 0,
   consoleErrors: string[] = []
 ): RenderSideResult {
-  return { side, ok: false, imagePath: null, width: null, height: null, error, consoleErrors, durationMs };
+  return { side, ok: false, imagePath: null, width: null, height: null, error, consoleErrors, durationMs, failureKind };
 }
 
 function describeSide(side: SideAttempt | null, label: RenderSide): string | null {
@@ -616,7 +618,7 @@ class RenderRun {
             baseError: "Component file not found on either side.",
             headError: "Component file not found on either side."
           },
-          { componentId: candidate.componentId, base: null, head: null }
+          { componentId: candidate.componentId, base: null, head: null, states: [] }
         );
         continue;
       }
@@ -764,7 +766,7 @@ class RenderRun {
     if (planned === null) {
       return null;
     }
-    return { result: failedSideResult(side, planned.error), kind: planned.kind, tempImagePath: null };
+    return { result: failedSideResult(side, planned.kind, planned.error), kind: planned.kind, tempImagePath: null };
   }
 
   // ----- workspaces -----
@@ -1050,7 +1052,7 @@ class RenderRun {
 
   private sideFailure(side: RenderSide, kind: RenderFailureKind, headline: string, durationMs = 0): SideAttempt {
     return {
-      result: failedSideResult(side, this.formatPlanned(kind, headline), durationMs),
+      result: failedSideResult(side, kind, this.formatPlanned(kind, headline), durationMs),
       kind,
       tempImagePath: null
     };
@@ -1066,7 +1068,7 @@ class RenderRun {
     const componentId = item.candidate.componentId;
     const planned = item.plannedFailures[side];
     if (planned !== null) {
-      return { result: failedSideResult(side, planned.error), kind: planned.kind, tempImagePath: null };
+      return { result: failedSideResult(side, planned.kind, planned.error), kind: planned.kind, tempImagePath: null };
     }
     if (slot.state === "failed") {
       return this.sideFailure(side, "vite_unavailable", slot.message);
@@ -1108,6 +1110,7 @@ class RenderRun {
       outcome = await this.session.renderComponent({
         host: slot.handle,
         componentId,
+        stateName: DEFAULT_STATE_NAME, // 16a compile shim (16 §6.12): 16e renders one page per state
         timeoutMs,
         outputPath: tempImagePath,
         signal: this.ctx.signal,
@@ -1144,7 +1147,7 @@ class RenderRun {
         );
       }
       return {
-        result: failedSideResult(side, error, outcome.durationMs, outcome.consoleErrors),
+        result: failedSideResult(side, outcome.kind, error, outcome.durationMs, outcome.consoleErrors),
         kind: outcome.kind,
         tempImagePath: null
       };
@@ -1176,7 +1179,8 @@ class RenderRun {
         height: outcome.height,
         error: null,
         consoleErrors: outcome.consoleErrors,
-        durationMs: outcome.durationMs
+        durationMs: outcome.durationMs,
+        failureKind: null
       },
       kind: null,
       tempImagePath
@@ -1203,6 +1207,7 @@ class RenderRun {
         } catch (error) {
           sideAttempt.result = failedSideResult(
             side,
+            "screenshot",
             this.formatPlanned("screenshot", `Could not store the image: ${getErrorMessage(error)}`),
             sideAttempt.result.durationMs,
             sideAttempt.result.consoleErrors
@@ -1217,7 +1222,8 @@ class RenderRun {
     const result: ComponentRenderResult = {
       componentId,
       base: attempt.base?.result ?? null,
-      head: attempt.head?.result ?? null
+      head: attempt.head?.result ?? null,
+      states: [] // 16a compile shim (16 §6.12): 16e renders and reports every state
     };
     const sizeSource = result.head?.ok === true ? result.head : result.base?.ok === true ? result.base : null;
     const payload: ComponentRenderPayload = {

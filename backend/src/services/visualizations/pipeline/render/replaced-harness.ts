@@ -35,7 +35,14 @@ export function sideHarnessOf(harness: HarnessGenerationResult, side: RenderSide
   if (side === "base" && harness.baseHarness !== undefined && harness.baseHarness !== null) {
     return harness.baseHarness;
   }
-  return { harnessSource: harness.harnessSource, mockedModules: harness.mockedModules, notes: harness.notes };
+  return {
+    harnessSource: harness.harnessSource,
+    mockedModules: harness.mockedModules,
+    notes: harness.notes,
+    states: harness.states,
+    origin: harness.origin,
+    libraryEntryId: harness.libraryEntryId
+  };
 }
 
 /** The harness of a replaced row with one side swapped for 09's repaired result. */
@@ -47,7 +54,10 @@ export function withRepairedSide(
   const sideHarness: SideHarness = {
     harnessSource: repaired.harnessSource,
     mockedModules: repaired.mockedModules,
-    notes: repaired.notes
+    notes: repaired.notes,
+    states: repaired.states,
+    origin: repaired.origin,
+    libraryEntryId: repaired.libraryEntryId
   };
   return side === "base" ? { ...harness, baseHarness: sideHarness } : { ...harness, ...sideHarness };
 }

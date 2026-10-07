@@ -26,6 +26,8 @@ export interface CreatePipelineContextOptions {
   workspace?: Partial<PreparedWorkspace>;
   script?: Script;
   repository?: Partial<PipelineContext["repository"]>;
+  /** 16 §6.12: defaults to { stateAllowance: 1, buildMode: "grow" } so existing tests keep their meaning. */
+  library?: Partial<PipelineContext["library"]>;
 }
 
 /** Builds a PipelineContext for one visualization; worktree dirs default to <dataDir>/worktrees/<id>/{base,head}. */
@@ -65,7 +67,8 @@ export function createPipelineContext(options: CreatePipelineContextOptions): Pi
     aiSettings: { model: "claude-opus-5-5", harnessEffort: "high", summaryEffort: "medium" },
     console: recorder,
     isCancelled: () => Promise.resolve(cancelled),
-    signal: abort.signal
+    signal: abort.signal,
+    library: { stateAllowance: 1, buildMode: "grow", ...options.library }
   };
   return {
     context,

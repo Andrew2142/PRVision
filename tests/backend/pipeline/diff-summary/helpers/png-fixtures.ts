@@ -147,6 +147,7 @@ export function okSide(
     error: null,
     consoleErrors: [],
     durationMs: 10,
+    failureKind: null,
     ...overrides
   };
 }
@@ -161,6 +162,7 @@ export function failedSide(side: "base" | "head", error = "Render failed"): Rend
     height: null,
     error,
     consoleErrors: [],
-    durationMs: 10
+    durationMs: 10,
+    failureKind: "render_error"
   };
 }

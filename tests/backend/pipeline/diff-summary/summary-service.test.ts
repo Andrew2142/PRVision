@@ -103,6 +103,7 @@ function setup(options: SetupOptions): Setup {
     skipped: [],
     changedFiles: [{ path: "src/components/C1.tsx", status: "M" }],
     sourceQueries: {} as ComponentSourceQueries,
+    globalStyleChanges: [],
     ...options.analysis
   };
   return { service, handle, db, store, transactions, analysis };

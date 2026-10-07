@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import {
+  JSON_COLUMN_TYPES,
   generateModelClass,
   mapColumnType,
   readSchemaTables,
@@ -24,13 +25,18 @@ function fieldLine(source: string, field: string): string {
   return match[1].replace(/\s+/g, " ").trim();
 }
 
-test("produces the five class names from §9.2", () => {
+test("produces the five class names from §9.2 and the five of 16 §6.10", () => {
   const tables = readSchemaTables();
   assert.deepEqual(
     tables.map((table) => [table.exportName, table.tableName, table.className]),
     [
       ["appSettings", "app_settings", "AppSettingModel"],
+      ["harnessLibraryEntries", "harness_library_entries", "HarnessLibraryEntryModel"],
+      ["harnessLibraryJobEvents", "harness_library_job_events", "HarnessLibraryJobEventModel"],
+      ["harnessLibraryJobs", "harness_library_jobs", "HarnessLibraryJobModel"],
+      ["liveSessions", "live_sessions", "LiveSessionModel"],
       ["repositories", "repositories", "RepositoryModel"],
+      ["visualizationComponentStates", "visualization_component_states", "VisualizationComponentStateModel"],
       ["visualizationComponents", "visualization_components", "VisualizationComponentModel"],
       ["visualizationConsoleEvents", "visualization_console_events", "VisualizationConsoleEventModel"],
       ["visualizations", "visualizations", "VisualizationModel"]
@@ -108,7 +114,8 @@ test("fails when a json column has no type mapping", () => {
   );
   assert.deepEqual(mapColumnType("visualizations", "aiUsage", { dataType: "json" }), {
     tsType: "AiUsage",
-    typeImports: ["AiUsage"]
+    typeImports: ["AiUsage"],
+    typesModule: "../types/visualization-pipeline"
   });
 });
 
@@ -125,4 +132,60 @@ test("committed src/models matches generator output", async () => {
   for (const [fileName, content] of expected) {
     assert.equal(fs.readFileSync(path.join(MODELS_DIR, fileName), "utf8"), content, fileName);
   }
+});
+
+test("16 §6.10: the eight JSON_COLUMN_TYPES entries of the library tables name their type module", () => {
+  const PIPELINE = "../types/visualization-pipeline";
+  const LIBRARY = "../types/harness-library";
+  const expected: Record<string, { tsType: string; typeImports: string[]; typesModule: string | null }> = {
+    "harnessLibraryEntries.mockedModules": {
+      tsType: "MockedModule[]",
+      typeImports: ["MockedModule"],
+      typesModule: PIPELINE
+    },
+    "harnessLibraryEntries.states": {
+      tsType: "HarnessStateSpec[]",
+      typeImports: ["HarnessStateSpec"],
+      typesModule: LIBRARY
+    },
+    "harnessLibraryEntries.aiUsage": { tsType: "AiUsage", typeImports: ["AiUsage"], typesModule: PIPELINE },
+    "harnessLibraryJobs.componentIds": { tsType: "number[]", typeImports: [], typesModule: null },
+    "harnessLibraryJobs.aiUsage": { tsType: "AiUsage", typeImports: ["AiUsage"], typesModule: PIPELINE },
+    "visualizationComponentStates.steps": {
+      tsType: "HarnessStep[]",
+      typeImports: ["HarnessStep"],
+      typesModule: LIBRARY
+    },
+    "liveSessions.hosts": { tsType: "LiveHostState[]", typeImports: ["LiveHostState"], typesModule: LIBRARY },
+    "liveSessions.openRequests": {
+      tsType: "LiveOpenRequestRecord[]",
+      typeImports: ["LiveOpenRequestRecord"],
+      typesModule: LIBRARY
+    }
+  };
+  for (const [key, entry] of Object.entries(expected)) {
+    assert.deepEqual(JSON_COLUMN_TYPES[key], entry, key);
+  }
+});
+
+test("16 §6.10: generated files import from both type modules, one import line per module", () => {
+  const tables = readSchemaTables();
+  const entry = generateModelClass(tableByName(tables, "harness_library_entries"));
+  assert.match(entry, /^import type \{ HarnessStateSpec \} from "\.\.\/types\/harness-library";$/m);
+  assert.match(entry, /^import type \{ AiUsage, MockedModule \} from "\.\.\/types\/visualization-pipeline";$/m);
+  assert.equal(fieldLine(entry, "states"), "HarnessStateSpec[]");
+  assert.equal(fieldLine(entry, "aiUsage"), "AiUsage | null");
+  assert.equal(fieldLine(entry, "status"), '"ready" | "needs_update" | "off_default_branch"');
+
+  const job = generateModelClass(tableByName(tables, "harness_library_jobs"));
+  assert.equal(fieldLine(job, "componentIds"), "number[] | null");
+  assert.equal((job.match(/^import type/gm) ?? []).length, 1);
+
+  const live = generateModelClass(tableByName(tables, "live_sessions"));
+  assert.match(live, /^import type \{ LiveHostState, LiveOpenRequestRecord \} from "\.\.\/types\/harness-library";$/m);
+  assert.doesNotMatch(live, /visualization-pipeline/);
+
+  const state = generateModelClass(tableByName(tables, "visualization_component_states"));
+  assert.equal(fieldLine(state, "steps"), "HarnessStep[]");
+  assert.match(fieldLine(state, "headFailureKind"), /"step_failed"/);
 });

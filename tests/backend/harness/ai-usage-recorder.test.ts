@@ -65,10 +65,43 @@ test("treats null or malformed ai_usage as zero", async () => {
   }
 });
 
-test("stores only inputTokens, outputTokens, calls", async () => {
+// 16 §6.13 replaces 09's "stores only inputTokens, outputTokens, calls": the two optional cache counts are summed and
+// stored when present (so library costs can be priced), and rows written before 16a still parse.
+test("stores the three counts plus the cache read and write counts when present (16 §6.13)", async () => {
   const stub = store({ inputTokens: 1, outputTokens: 1, calls: 1, cacheReadInputTokens: 99 });
-  await recorder(stub).add({ inputTokens: 1, outputTokens: 1, calls: 1, cacheReadInputTokens: 500 });
+  await recorder(stub).add({
+    inputTokens: 1,
+    outputTokens: 1,
+    calls: 1,
+    cacheReadInputTokens: 500,
+    cacheWriteInputTokens: 20
+  });
+  assert.deepEqual(stored(stub), {
+    inputTokens: 2,
+    outputTokens: 2,
+    calls: 2,
+    cacheReadInputTokens: 599,
+    cacheWriteInputTokens: 20
+  });
+  // Unknown keys of the stored row are dropped.
+  const extra = store({ inputTokens: 1, outputTokens: 1, calls: 1, foo: 3 });
+  await recorder(extra).add({ inputTokens: 1, outputTokens: 1, calls: 1 });
+  assert.deepEqual(Object.keys(stored(extra) as object).sort(), ["calls", "inputTokens", "outputTokens"]);
+});
+
+test("rows without cache counts parse, and no cache key is written when neither side has one (16 §6.13)", async () => {
+  const stub = store({ inputTokens: 10, outputTokens: 5, calls: 1 });
+  const total = await recorder(stub).add({ inputTokens: 1, outputTokens: 1, calls: 1 });
+  assert.deepEqual(total, { inputTokens: 11, outputTokens: 6, calls: 2 });
   assert.deepEqual(Object.keys(stored(stub) as object).sort(), ["calls", "inputTokens", "outputTokens"]);
+
+  const old = store({ inputTokens: 10, outputTokens: 5, calls: 1 });
+  await recorder(old).add({ inputTokens: 1, outputTokens: 1, calls: 1, cacheWriteInputTokens: 4 });
+  assert.deepEqual(stored(old), { inputTokens: 11, outputTokens: 6, calls: 2, cacheWriteInputTokens: 4 });
+
+  const malformedCache = store({ inputTokens: 10, outputTokens: 5, calls: 1, cacheReadInputTokens: "9" });
+  await recorder(malformedCache).add({ inputTokens: 1, outputTokens: 1, calls: 1 });
+  assert.deepEqual(stored(malformedCache), { inputTokens: 11, outputTokens: 6, calls: 2 });
 });
 
 test("throws when the update response is not 200", async () => {

@@ -185,7 +185,10 @@ function angularHarness(id: number, mocks: MockedModule[] = [], marker = ""): Ha
     componentId: id,
     harnessSource: `import { definePrvisionHarness } from '../harness-api';\nimport { C${String(id)} } from '../../${component(id).replace(/\.ts$/, "")}';\n${marker}export default definePrvisionHarness({ component: C${String(id)} });\n`,
     mockedModules: mocks,
-    notes: "Initial notes."
+    notes: "Initial notes.",
+    states: [{ name: "Default", steps: [] }],
+    origin: "written",
+    libraryEntryId: null
   };
 }
 
@@ -578,7 +581,14 @@ function replacedInput(id: number, baseId: number, headId: number): RenderCompon
       ...head,
       componentId: id,
       notes: "Head notes.",
-      baseHarness: { harnessSource: base.harnessSource, mockedModules: base.mockedModules, notes: "Base notes." }
+      baseHarness: {
+        harnessSource: base.harnessSource,
+        mockedModules: base.mockedModules,
+        notes: "Base notes.",
+        states: base.states,
+        origin: base.origin,
+        libraryEntryId: base.libraryEntryId
+      }
     },
     basePath: component(baseId)
   };

@@ -120,7 +120,15 @@ function input(key: ComponentKey, rank: number): RenderComponentInput {
   const { harnessSource, notes } = angularFixtureHarness(candidate.displayName, statement, "");
   return {
     candidate,
-    harness: { componentId: candidate.componentId, harnessSource, mockedModules: [], notes },
+    harness: {
+      componentId: candidate.componentId,
+      harnessSource,
+      mockedModules: [],
+      notes,
+      states: [{ name: "Default", steps: [] }],
+      origin: "written",
+      libraryEntryId: null
+    },
     basePath: candidate.filePath
   };
 }
@@ -128,7 +136,15 @@ function input(key: ComponentKey, rank: number): RenderComponentInput {
 function brokenInput(rank: number): RenderComponentInput {
   return {
     candidate: { ...candidateFor("signalCard", rank), componentId: BROKEN_ID },
-    harness: { componentId: BROKEN_ID, harnessSource: BROKEN_HARNESS, mockedModules: [], notes: "Broken on purpose." },
+    harness: {
+      componentId: BROKEN_ID,
+      harnessSource: BROKEN_HARNESS,
+      mockedModules: [],
+      notes: "Broken on purpose.",
+      states: [{ name: "Default", steps: [] }],
+      origin: "written",
+      libraryEntryId: null
+    },
     basePath: COMPONENTS.signalCard.file
   };
 }

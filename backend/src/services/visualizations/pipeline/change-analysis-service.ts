@@ -504,7 +504,14 @@ export class ChangeAnalysisService {
       sourceRoot: run.sourceRoot,
       now: () => this.deps.now()
     });
-    return { candidates, skipped, changedFiles, sourceQueries: new AnalysisSourceQueries(state) };
+    // 16a compile shim (16 §6.12): 16d fills globalStyleChanges (§8.5.2).
+    return {
+      candidates,
+      skipped,
+      changedFiles,
+      sourceQueries: new AnalysisSourceQueries(state),
+      globalStyleChanges: []
+    };
   }
 
   /** Step 3 (08 §5.6): reads both sides, applies the generated check and builds truncated diffs. */

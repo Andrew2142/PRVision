@@ -187,3 +187,59 @@ export const ANGULAR_ANALYSIS_PARTIAL_MAX_DEPTH = 3;
 export const ANGULAR_ANALYSIS_OUTLINE_MAX_LINES = 120;
 /** `findSpecSetups` snippet line cap (15 §5.5.6). */
 export const ANGULAR_ANALYSIS_SPEC_SNIPPET_MAX_LINES = 80;
+
+// ---- Harness library, states and live mode (16 §16.1) ----
+
+/** Hard ceiling of candidates change analysis persists per run (16 E10); replaces the 12-component cap of 08/15b. */
+export const ANALYSIS_MAX_CANDIDATES = 500;
+/** State allowance range and default (16 D4, E23). MIN/MAX are literals in DB CHECKs (validated at boot). */
+export const STATE_ALLOWANCE_MIN = 1;
+export const STATE_ALLOWANCE_MAX = 5;
+export const STATE_ALLOWANCE_DEFAULT = 3;
+/** Distinct state ordinals per run row: the union of two harnesses' states (DB CHECK ordinal 0–9). */
+export const MAX_STATE_ORDINALS = 10;
+/** Longest state name (16 §7.1). */
+export const STATE_NAME_MAX_CHARS = 40;
+/** Allowed state names (16 §7.1). */
+export const STATE_NAME_PATTERN = "^[A-Za-z0-9][A-Za-z0-9 ,.'()&/+-]{0,39}$";
+/** Scripted steps per state (16 §7.1). */
+export const STATE_MAX_STEPS = 5;
+/** Longest text in a step (target names, typed text) (16 §7.1). */
+export const STATE_STEP_TEXT_MAX_CHARS = 200;
+/** Largest `nth` of a step target (16 §7.1). */
+export const STATE_STEP_NTH_MAX = 20;
+/** Time one step may wait for its target (16 §7.2). */
+export const STATE_STEP_TIMEOUT_MS = 3_000;
+/** Work items (component × side) rendered in parallel (16 §9.2). */
+export const RENDER_ITEM_CONCURRENCY = 2;
+/** Pages (component × state × side) open in parallel; equals 2 × RENDER_ITEM_CONCURRENCY (16 §9.2). */
+export const RENDER_PAGE_CONCURRENCY = 4;
+/** Dynamic render stage budget: time per page (16 §9.2). */
+export const RENDER_STAGE_MS_PER_PAGE = 2_500;
+/** Dynamic render stage budget: React startup allowance per group and side (16 §9.2). */
+export const RENDER_GROUP_STARTUP_ALLOWANCE_MS = 20_000;
+/** Dynamic render stage budget: Angular startup allowance per group and side (one build) (16 §9.2). */
+export const ANGULAR_RENDER_GROUP_STARTUP_ALLOWANCE_MS = ANGULAR_BUILD_TIMEOUT_MS;
+/** Ceiling of the dynamic render stage budget; RENDER_STAGE_TIMEOUT_MS stays the 15-minute floor (16 §9.2). */
+export const RENDER_STAGE_TIMEOUT_MAX_MS = 60 * 60_000;
+/** Render groups larger than this are split (16 §9.2). */
+export const RENDER_GROUP_MAX_ITEMS = 40;
+/** Changed files outside the global stylesheets that trigger the whole-library re-check (16 §8.5). */
+export const GLOBAL_STYLE_TRIGGER_PATTERNS = {
+  tailwindConfig: "^tailwind\\.config\\.[cm]?[jt]s$",
+  postcssConfig: ["^postcss\\.config\\.([cm]?[jt]s|json)$", "^\\.postcssrc(\\.(json|ya?ml|[cm]?js))?$"],
+  tokenBasenames: [
+    "^(design-)?tokens?\\.(css|scss|sass|less|json)$",
+    "^design-tokens\\.[cm]?[jt]s$",
+    "^_?(variables|tokens|theme)\\.(css|scss|sass|less)$"
+  ],
+  tokenFolders: ["tokens", "design-tokens"]
+} as const;
+/** Component inventory limits (16 §8.3). */
+export const LIBRARY_INVENTORY_MAX_COMPONENTS = 2_000;
+export const LIBRARY_INVENTORY_MAX_FILES = 6_000;
+export const LIBRARY_INVENTORY_BUDGET_MS = 120_000;
+/** Saved harnesses re-checked by one global style change, first by path (16 §8.4 step 6). */
+export const LIBRARY_RECHECK_MAX_COMPONENTS = 2_000;
+/** Components a scan writes and verifies per batch (16 §10.4). */
+export const LIBRARY_SCAN_BATCH_SIZE = 12;

@@ -7,7 +7,7 @@ export interface VisualizationComponentView {
   filePath: string;
   exportName: string;
   displayName: string;
-  changeKind: "modified" | "added" | "removed" | "affected_parent" | "replaced";
+  changeKind: "modified" | "added" | "removed" | "affected_parent" | "replaced" | "rechecked"; // rechecked: 16 §14.5
   renderStatus: "pending" | "rendered" | "partial" | "failed" | "skipped";
   visualChange: "changed" | "unchanged" | "new" | "deleted" | null;
   risk: "none" | "check" | "likely_regression" | null;

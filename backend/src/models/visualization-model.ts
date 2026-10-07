@@ -12,6 +12,7 @@ export class VisualizationModel {
   private _baseRef!: string;
   private _baseSha!: string | null;
   private _changedCount!: number;
+  private _checkedCount!: number;
   private _completedAt!: Date | null;
   private _componentCount!: number;
   private _componentLimit!: number | null;
@@ -27,14 +28,18 @@ export class VisualizationModel {
     | "diffing"
     | "summarizing"
     | null;
+  private _globalStyleTrigger!: string | null;
   private _headRef!: string;
   private _headSha!: string | null;
   private _id!: number;
   private _isDeleted!: boolean;
   private _jobId!: string | null;
+  private _needsUpdateCount!: number;
+  private _newHarnessCount!: number;
   private _prNumber!: number | null;
   private _renderViewport!: "desktop" | "tablet" | "mobile" | null;
   private _repositoryId!: number;
+  private _reusedHarnessCount!: number;
   private _sourceType!: "github_pr" | "local_branch" | "working_tree" | "commit_range";
   private _startedAt!: Date | null;
   private _status!:
@@ -52,6 +57,7 @@ export class VisualizationModel {
   private _summaryMarkdown!: string | null;
   private _title!: string;
   private _updatedAt!: Date;
+  private _workingTreeSnapshot!: boolean;
 
   constructor(data?: Partial<Record<keyof VisualizationModel, unknown>>) {
     if (!data) {
@@ -88,6 +94,9 @@ export class VisualizationModel {
   setChangedCount(value: number): void {
     this._changedCount = value;
   }
+  setCheckedCount(value: number): void {
+    this._checkedCount = value;
+  }
   setCompletedAt(value: Date | null): void {
     this._completedAt = value;
   }
@@ -117,6 +126,9 @@ export class VisualizationModel {
   ): void {
     this._failedStage = value;
   }
+  setGlobalStyleTrigger(value: string | null): void {
+    this._globalStyleTrigger = value;
+  }
   setHeadRef(value: string): void {
     this._headRef = value;
   }
@@ -132,6 +144,12 @@ export class VisualizationModel {
   setJobId(value: string | null): void {
     this._jobId = value;
   }
+  setNeedsUpdateCount(value: number): void {
+    this._needsUpdateCount = value;
+  }
+  setNewHarnessCount(value: number): void {
+    this._newHarnessCount = value;
+  }
   setPrNumber(value: number | null): void {
     this._prNumber = value;
   }
@@ -140,6 +158,9 @@ export class VisualizationModel {
   }
   setRepositoryId(value: number): void {
     this._repositoryId = value;
+  }
+  setReusedHarnessCount(value: number): void {
+    this._reusedHarnessCount = value;
   }
   setSourceType(value: "github_pr" | "local_branch" | "working_tree" | "commit_range"): void {
     this._sourceType = value;
@@ -172,6 +193,9 @@ export class VisualizationModel {
   setUpdatedAt(value: Date): void {
     this._updatedAt = value;
   }
+  setWorkingTreeSnapshot(value: boolean): void {
+    this._workingTreeSnapshot = value;
+  }
 
   // ===== Getters =====
   get aiModel(): string {
@@ -191,6 +215,9 @@ export class VisualizationModel {
   }
   get changedCount(): number {
     return this._changedCount;
+  }
+  get checkedCount(): number {
+    return this._checkedCount;
   }
   get completedAt(): Date | null {
     return this._completedAt;
@@ -219,6 +246,9 @@ export class VisualizationModel {
     | null {
     return this._failedStage;
   }
+  get globalStyleTrigger(): string | null {
+    return this._globalStyleTrigger;
+  }
   get headRef(): string {
     return this._headRef;
   }
@@ -234,6 +264,12 @@ export class VisualizationModel {
   get jobId(): string | null {
     return this._jobId;
   }
+  get needsUpdateCount(): number {
+    return this._needsUpdateCount;
+  }
+  get newHarnessCount(): number {
+    return this._newHarnessCount;
+  }
   get prNumber(): number | null {
     return this._prNumber;
   }
@@ -242,6 +278,9 @@ export class VisualizationModel {
   }
   get repositoryId(): number {
     return this._repositoryId;
+  }
+  get reusedHarnessCount(): number {
+    return this._reusedHarnessCount;
   }
   get sourceType(): "github_pr" | "local_branch" | "working_tree" | "commit_range" {
     return this._sourceType;
@@ -271,5 +310,8 @@ export class VisualizationModel {
   }
   get updatedAt(): Date {
     return this._updatedAt;
+  }
+  get workingTreeSnapshot(): boolean {
+    return this._workingTreeSnapshot;
   }
 }

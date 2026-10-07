@@ -72,7 +72,10 @@ function harness(
     componentId,
     harnessSource: `import Target from "${importPath}";\n${body.includes("Target") ? "" : "void Target;\n"}export default function PRVisionHarness() {\n  return ${body};\n}\n`,
     mockedModules: [],
-    notes
+    notes,
+    states: [{ name: "Default", steps: [] }],
+    origin: "written",
+    libraryEntryId: null
   };
 }
 
@@ -260,7 +263,10 @@ describe("render engine against the fixture repo (real Vite + Chromium)", { time
           componentId: ids.missing,
           harnessSource: `import Target from "${itImport("Swatch")}";\nimport { helper } from "./does-not-exist";\nexport default function PRVisionHarness() {\n  return <div data-x={String(helper)}><Target /></div>;\n}\n`,
           mockedModules: [],
-          notes: "Scripted harness with a broken import."
+          notes: "Scripted harness with a broken import.",
+          states: [{ name: "Default", steps: [] }],
+          origin: "written",
+          libraryEntryId: null
         },
         basePath: `${IT_DIR}/Swatch.tsx`
       }
@@ -392,6 +398,7 @@ describe("render engine against the fixture repo (real Vite + Chromium)", { time
       const outcome = await session.renderComponent({
         host,
         componentId: ids.remote,
+        stateName: "Default",
         timeoutMs: 60_000,
         outputPath: output,
         signal: controller.signal,

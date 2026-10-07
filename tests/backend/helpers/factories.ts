@@ -8,10 +8,12 @@ import {
   AI_EFFORT_VALUES,
   AI_PROVIDER_KIND_VALUES,
   COMPONENT_CHANGE_KIND_VALUES,
+  COMPONENT_HARNESS_ORIGIN_VALUES,
   COMPONENT_RENDER_STATUS_VALUES,
   COMPONENT_RISK_VALUES,
   COMPONENT_VISUAL_CHANGE_VALUES,
   CONSOLE_LEVEL_VALUES,
+  LIBRARY_BUILD_MODE_VALUES,
   NON_TERMINAL_VISUALIZATION_STATUSES,
   PACKAGE_MANAGER_VALUES,
   REPOSITORY_FRAMEWORK_VALUES,
@@ -88,6 +90,9 @@ export function makeRepositoryRow(overrides: Partial<RepositoryRow> = {}): Repos
     tsconfigPath: "tsconfig.json",
     entryFilePath: "src/main.tsx",
     globalStylePaths: ["/src/index.css"],
+    renderViewport: "desktop",
+    libraryBuildMode: "grow",
+    stateAllowance: 3,
     lastDetectedAt: at(),
     isDeleted: false,
     createdAt: at(),
@@ -95,6 +100,12 @@ export function makeRepositoryRow(overrides: Partial<RepositoryRow> = {}): Repos
     ...overrides
   };
   checkEnum(row.framework, REPOSITORY_FRAMEWORK_VALUES, "repositories_framework_check");
+  checkEnum(row.libraryBuildMode, LIBRARY_BUILD_MODE_VALUES, "repositories_library_build_mode_check");
+  check(
+    Number.isInteger(row.stateAllowance) && row.stateAllowance >= 1 && row.stateAllowance <= 5,
+    "repositories_state_allowance_check",
+    String(row.stateAllowance)
+  );
   checkEnum(row.packageManager, PACKAGE_MANAGER_VALUES, "repositories_package_manager_check");
   check(row.localPath.startsWith("/"), "repositories_local_path_absolute_check", row.localPath);
   check(row.name.trim().length > 0, "repositories_name_check", "empty name");
@@ -136,6 +147,14 @@ export function makeVisualizationRow(overrides: Partial<VisualizationRow> = {}):
     jobId: `viz-${id}`,
     componentCount: 0,
     changedCount: 0,
+    componentLimit: null,
+    renderViewport: null,
+    checkedCount: 0,
+    reusedHarnessCount: 0,
+    newHarnessCount: 0,
+    needsUpdateCount: 0,
+    globalStyleTrigger: null,
+    workingTreeSnapshot: false,
     startedAt: null,
     completedAt: null,
     isDeleted: false,
@@ -163,6 +182,16 @@ export function makeVisualizationRow(overrides: Partial<VisualizationRow> = {}):
     row.failedStage === null || row.status === "failed" || row.status === "cancelled",
     "visualizations_failed_stage_status_check",
     `failedStage on ${row.status}`
+  );
+  check(
+    row.checkedCount >= 0 && row.checkedCount <= row.componentCount,
+    "visualizations_checked_count_check",
+    `checkedCount ${row.checkedCount}, componentCount ${row.componentCount}`
+  );
+  check(
+    !row.workingTreeSnapshot || row.sourceType === "working_tree",
+    "visualizations_working_tree_snapshot_check",
+    `workingTreeSnapshot on ${row.sourceType}`
   );
   return row;
 }
@@ -203,6 +232,14 @@ export function makeComponentRow(overrides: Partial<ComponentRow> = {}): Compone
     baseHarnessNotes: null,
     baseMockedModules: null,
     successorEvidence: null,
+    libraryEntryId: null,
+    baseLibraryEntryId: null,
+    harnessOrigin: null,
+    baseHarnessOrigin: null,
+    harnessNeedsUpdate: false,
+    sourceChangedSinceWrite: null,
+    stateCount: 0,
+    changedStateCount: 0,
     createdAt: at(),
     updatedAt: at(),
     ...overrides
@@ -259,6 +296,28 @@ export function makeComponentRow(overrides: Partial<ComponentRow> = {}): Compone
     row.baseFilePath === null || (!row.baseFilePath.startsWith("/") && row.baseFilePath.length > 0),
     "visualization_components_base_file_path_relative_check",
     String(row.baseFilePath)
+  );
+  check(
+    row.changeKind === "replaced" || row.baseLibraryEntryId === null,
+    "visualization_components_base_library_entry_id_check",
+    `baseLibraryEntryId on ${row.changeKind}`
+  );
+  checkEnum(row.harnessOrigin, COMPONENT_HARNESS_ORIGIN_VALUES, "visualization_components_harness_origin_check", true);
+  checkEnum(
+    row.baseHarnessOrigin,
+    COMPONENT_HARNESS_ORIGIN_VALUES,
+    "visualization_components_base_harness_origin_check",
+    true
+  );
+  check(
+    row.changeKind === "replaced" || row.baseHarnessOrigin === null,
+    "visualization_components_base_harness_origin_check",
+    `baseHarnessOrigin on ${row.changeKind}`
+  );
+  check(
+    row.changedStateCount >= 0 && row.changedStateCount <= row.stateCount,
+    "visualization_components_changed_state_count_check",
+    `changedStateCount ${row.changedStateCount}, stateCount ${row.stateCount}`
   );
   return row;
 }

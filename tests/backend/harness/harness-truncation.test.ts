@@ -214,7 +214,9 @@ test("dropped section keeps its tag with the marker", () => {
     targetImportStatement: targetImportStatement(candidate),
     directImports: { base: [], head: [] },
     sections: result.sections,
-    estimatedTokens: result.totalTokens
+    estimatedTokens: result.totalTokens,
+    purpose: "change",
+    stateAllowance: 1
   });
   assert.ok(prompt.includes("<call_sites>[truncated 54 lines]</call_sites>"));
 });

@@ -7,6 +7,8 @@ import {
   QueueService,
   jobAbortReason,
   throwIfJobAborted,
+  type LibraryJob,
+  type LiveSessionJob,
   type VisualizationJob
 } from "../../../backend/src/utilities/services/queue-service";
 import { patchStaticMethod } from "../helpers/test-context";
@@ -161,10 +163,16 @@ async function startRecordingWorker(): Promise<{ jobs: VisualizationJob[]; relea
 test("QueueService.initialize creates the visualizations queue with prefix prvision and a fail-fast connection", async () => {
   await QueueService.initialize();
   await QueueService.initialize(); // idempotent
-  assert.equal(queues.length, 1);
+  // 16 §6.15: all four queues are opened (the API enqueues to every one of them).
+  assert.deepEqual(
+    queues.map((queue) => queue.name),
+    ["visualizations", "harness-scans", "harness-repairs", "live-sessions"]
+  );
   assert.equal(queues[0]!.name, "visualizations");
-  assert.equal(queues[0]!.options.prefix, "prvision");
-  assert.equal((queues[0]!.options.connection as { maxRetriesPerRequest: unknown }).maxRetriesPerRequest, 1);
+  for (const queue of queues) {
+    assert.equal(queue.options.prefix, "prvision", queue.name);
+    assert.equal((queue.options.connection as { maxRetriesPerRequest: unknown }).maxRetriesPerRequest, 1, queue.name);
+  }
   assert.equal(QueueService.isInitialized(), true);
 });
 
@@ -279,10 +287,15 @@ test('QueueService.close aborts active jobs with reason "shutdown", closes worke
   const running = worker.processor({ id: "viz-14", data: { visualizationId: 14 } });
   await delay(20);
   queues[0]!.closeError = new Error("queue close boom");
-  await assert.rejects(QueueService.close(), /Failed to close queue resources: queue: queue close boom/);
+  await assert.rejects(
+    QueueService.close(),
+    /^Error: Failed to close queue resources: queue visualizations: queue close boom$/
+  );
   await running;
   assert.equal(jobs[0]!.signal.reason, "shutdown");
-  assert.deepEqual(order, ["worker", "queue"]);
+  // 16 §6.15: every queue is closed after the worker, even when the first close fails.
+  assert.deepEqual(order, ["worker", "queue", "queue", "queue", "queue"]);
+  assert.ok(queues.every((queue) => queue.closed));
   assert.deepEqual(worker.closeCalls, [false]);
   assert.equal(QueueService.isInitialized(), false);
   await assert.rejects(QueueService.enqueueVisualization(1), /must be initialized/);
@@ -342,4 +355,206 @@ test("QueueService.removeQueuedVisualization only removes waiting/delayed jobs",
   assert.equal(await QueueService.removeQueuedVisualization(99), false);
   assert.equal(await QueueService.getVisualizationJobState(4), "active");
   assert.equal(await QueueService.getVisualizationJobState(99), "missing");
+});
+
+// ---------------------------------------------------------------------------------------------------------------
+// Sheet 16 §6.15: harness library jobs and live sessions
+// ---------------------------------------------------------------------------------------------------------------
+
+function queueNamed(name: string): FakeQueue {
+  const queue = queues.find((candidate) => candidate.name === name);
+  assert.ok(queue, `queue ${name}`);
+  return queue;
+}
+
+function workerNamed(name: string): FakeWorker {
+  const worker = workers.find((candidate) => candidate.name === name);
+  assert.ok(worker, `worker ${name}`);
+  return worker;
+}
+
+test("QueueService.libraryJobId and liveSessionJobId: scan-<id> for scan and rescan, repair-<id>, live-<id>", () => {
+  assert.equal(QueueService.libraryJobId("scan", 4), "scan-4");
+  assert.equal(QueueService.libraryJobId("rescan", 4), "scan-4");
+  assert.equal(QueueService.libraryJobId("repair", 4), "repair-4");
+  assert.equal(QueueService.liveSessionJobId(9), "live-9");
+});
+
+test("QueueService.enqueueLibraryJob puts scans and rescans on harness-scans and repairs on harness-repairs", async () => {
+  await QueueService.initialize();
+  assert.deepEqual(await QueueService.enqueueLibraryJob("scan", 3), { jobId: "scan-3", alreadyQueued: false });
+  assert.deepEqual(await QueueService.enqueueLibraryJob("rescan", 5), { jobId: "scan-5", alreadyQueued: false });
+  assert.deepEqual(await QueueService.enqueueLibraryJob("repair", 6), { jobId: "repair-6", alreadyQueued: false });
+  const scans = queueNamed("harness-scans").added;
+  assert.deepEqual(
+    scans.map((job) => [job.name, job.data, job.options.jobId, job.options.attempts]),
+    [
+      ["scan", { libraryJobId: 3 }, "scan-3", 1],
+      ["scan", { libraryJobId: 5 }, "scan-5", 1]
+    ]
+  );
+  const repairs = queueNamed("harness-repairs").added;
+  assert.deepEqual(
+    repairs.map((job) => [job.name, job.data, job.options.jobId, job.options.attempts]),
+    [["repair", { libraryJobId: 6 }, "repair-6", 1]]
+  );
+  assert.ok(repairs[0]?.options.removeOnComplete);
+  assert.ok(repairs[0].options.removeOnFail);
+  assert.equal(queueNamed("visualizations").added.length, 0);
+  assert.equal(queueNamed("live-sessions").added.length, 0);
+
+  queueNamed("harness-repairs").jobs.set("repair-8", fakeJob("active"));
+  assert.deepEqual(await QueueService.enqueueLibraryJob("repair", 8), { jobId: "repair-8", alreadyQueued: true });
+  assert.equal(queueNamed("harness-repairs").added.length, 1);
+  await assert.rejects(QueueService.enqueueLibraryJob("scan", 0), /Invalid library job data/);
+});
+
+test("QueueService.removeQueuedLibraryJob and getLibraryJobState use the queue of the kind", async () => {
+  await QueueService.initialize();
+  queueNamed("harness-scans").jobs.set("scan-1", fakeJob("waiting"));
+  queueNamed("harness-scans").jobs.set("scan-2", fakeJob("active"));
+  queueNamed("harness-repairs").jobs.set("repair-3", fakeJob("delayed"));
+  assert.equal(await QueueService.getLibraryJobState("rescan", 1), "waiting");
+  assert.equal(await QueueService.getLibraryJobState("repair", 1), "missing");
+  assert.equal(await QueueService.removeQueuedLibraryJob("scan", 2), false);
+  assert.equal(await QueueService.removeQueuedLibraryJob("scan", 1), true);
+  assert.equal(await QueueService.removeQueuedLibraryJob("repair", 3), true);
+  assert.equal(await QueueService.removeQueuedLibraryJob("repair", 99), false);
+});
+
+test("QueueService library and live methods before initialize throw", async () => {
+  await assert.rejects(QueueService.enqueueLibraryJob("scan", 1), /must be initialized/);
+  await assert.rejects(QueueService.getLibraryJobState("repair", 1), /must be initialized/);
+  await assert.rejects(QueueService.enqueueLiveSession(1), /must be initialized/);
+  await assert.rejects(QueueService.getLiveSessionJobState(1), /must be initialized/);
+});
+
+test("QueueService.requestLibraryCancel sets prvision:library-cancel:<id> with EX 86400; clearLibraryCancel deletes it", async () => {
+  await QueueService.requestLibraryCancel(31);
+  assert.deepEqual(redisCalls[0], ["set", "prvision:library-cancel:31", "1", "EX", 86_400]);
+  assert.equal(await QueueService.isLibraryCancelRequested(31), true);
+  assert.equal(await QueueService.isCancelRequested(31), false, "visualization and library flags are separate");
+  await QueueService.clearLibraryCancel(31);
+  assert.equal(await QueueService.isLibraryCancelRequested(31), false);
+});
+
+test("QueueService library workers: concurrency 1, lockDuration 300000, maxStalledCount 0; idempotent start", async () => {
+  await QueueService.startLibraryScanWorker(() => Promise.resolve());
+  await QueueService.startLibraryScanWorker(() => Promise.resolve());
+  await QueueService.startLibraryRepairWorker(() => Promise.resolve());
+  await QueueService.startLibraryRepairWorker(() => Promise.resolve());
+  assert.deepEqual(
+    workers.map((worker) => worker.name),
+    ["harness-scans", "harness-repairs"]
+  );
+  for (const worker of workers) {
+    assert.equal(worker.options.prefix, "prvision", worker.name);
+    assert.equal(worker.options.concurrency, 1, worker.name);
+    assert.equal(worker.options.lockDuration, 300_000, worker.name);
+    assert.equal(worker.options.maxStalledCount, 0, worker.name);
+    assert.equal((worker.options.connection as { maxRetriesPerRequest: unknown }).maxRetriesPerRequest, null);
+  }
+});
+
+test("QueueService library processor receives { libraryJobId, jobId, signal }; invalid data fails the job", async () => {
+  const received: LibraryJob[] = [];
+  await QueueService.startLibraryRepairWorker((job) => {
+    received.push(job);
+    return Promise.resolve();
+  });
+  await workerNamed("harness-repairs").processor({ id: "repair-4", data: { libraryJobId: 4 } });
+  assert.deepEqual(Object.keys(received[0]!).sort(), ["jobId", "libraryJobId", "signal"]);
+  assert.equal(received[0]!.libraryJobId, 4);
+  assert.equal(received[0]!.jobId, "repair-4");
+  assert.equal(received[0]!.signal.aborted, false);
+  for (const data of [{}, { libraryJobId: "4" }, { visualizationId: 4 }, null]) {
+    await assert.rejects(
+      workerNamed("harness-repairs").processor({ id: "repair-x", data }),
+      /Invalid library job data/
+    );
+  }
+});
+
+test('QueueService the library cancel flag aborts a scan job with reason "cancelled"', async () => {
+  const jobs: LibraryJob[] = [];
+  await QueueService.startLibraryScanWorker(async (job) => {
+    jobs.push(job);
+    await new Promise<void>((resolve) => job.signal.addEventListener("abort", () => resolve()));
+  });
+  const running = workerNamed("harness-scans").processor({ id: "scan-12", data: { libraryJobId: 12 } });
+  await delay(50);
+  await QueueService.requestCancel(12); // the visualization flag of the same number must not cancel it
+  await delay(1_200);
+  assert.equal(jobs[0]!.signal.aborted, false);
+  await QueueService.requestLibraryCancel(12);
+  await running;
+  assert.equal(jobs[0]!.signal.reason, "cancelled");
+  assert.equal(jobAbortReason(jobs[0]!.signal), "cancelled");
+});
+
+test("QueueService.enqueueLiveSession puts job live-<id> on live-sessions; the worker runs LIVE_MAX_SESSIONS at once", async () => {
+  await QueueService.initialize();
+  assert.deepEqual(await QueueService.enqueueLiveSession(7), { jobId: "live-7", alreadyQueued: false });
+  const added = queueNamed("live-sessions").added[0]!;
+  assert.equal(added.name, "live");
+  assert.deepEqual(added.data, { liveSessionId: 7 });
+  assert.equal(added.options.jobId, "live-7");
+  assert.equal(added.options.attempts, 1);
+  assert.equal(await QueueService.getLiveSessionJobState(7), "missing"); // the fake records adds without jobs
+  queueNamed("live-sessions").jobs.set("live-7", fakeJob("active"));
+  assert.equal(await QueueService.getLiveSessionJobState(7), "active");
+  assert.deepEqual(await QueueService.enqueueLiveSession(7), { jobId: "live-7", alreadyQueued: true });
+
+  const received: LiveSessionJob[] = [];
+  await QueueService.startLiveSessionWorker((job) => {
+    received.push(job);
+    return Promise.resolve();
+  });
+  const worker = workerNamed("live-sessions");
+  assert.equal(worker.options.concurrency, 2);
+  assert.equal(worker.options.lockDuration, 300_000);
+  assert.equal(worker.options.maxStalledCount, 0);
+  await worker.processor({ id: "live-7", data: { liveSessionId: 7 } });
+  assert.deepEqual(Object.keys(received[0]!).sort(), ["jobId", "liveSessionId", "signal"]);
+  assert.equal(received[0]!.jobId, "live-7");
+  await assert.rejects(
+    worker.processor({ id: "live-x", data: { liveSessionId: -1 } }),
+    /Invalid live session job data/
+  );
+});
+
+test('QueueService.close aborts active library and live jobs with "shutdown" and closes every worker and queue', async () => {
+  const library: LibraryJob[] = [];
+  const live: LiveSessionJob[] = [];
+  const waitForAbort = (signal: AbortSignal): Promise<void> =>
+    new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve()));
+  await QueueService.startLibraryScanWorker(async (job) => {
+    library.push(job);
+    await waitForAbort(job.signal);
+  });
+  await QueueService.startLibraryRepairWorker(async (job) => {
+    library.push(job);
+    await waitForAbort(job.signal);
+  });
+  await QueueService.startLiveSessionWorker(async (job) => {
+    live.push(job);
+    await waitForAbort(job.signal);
+  });
+  const running = [
+    workerNamed("harness-scans").processor({ id: "scan-1", data: { libraryJobId: 1 } }),
+    workerNamed("harness-repairs").processor({ id: "repair-2", data: { libraryJobId: 2 } }),
+    workerNamed("live-sessions").processor({ id: "live-3", data: { liveSessionId: 3 } })
+  ];
+  await delay(20);
+  await QueueService.close();
+  await Promise.all(running);
+  assert.deepEqual(
+    [...library, ...live].map((job) => job.signal.reason),
+    ["shutdown", "shutdown", "shutdown"]
+  );
+  assert.deepEqual(order, ["worker", "worker", "worker", "queue", "queue", "queue", "queue"]);
+  assert.ok(workers.every((worker) => worker.closeCalls.length === 1));
+  assert.ok(queues.every((queue) => queue.closed));
+  assert.equal(QueueService.isInitialized(), false);
+  await assert.rejects(QueueService.enqueueLibraryJob("scan", 1), /must be initialized/);
 });

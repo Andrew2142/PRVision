@@ -80,6 +80,10 @@ export interface HarnessContextPackage {
   directImports: { base: DirectImport[]; head: DirectImport[] }; // of the component file on each present side
   sections: PromptSection[]; // in prompt order
   estimatedTokens: number;
+  /** 16 §6.12: "change" for run candidates; "library" for scans (16d). Unused by prompts until 16b/16d. */
+  purpose: "change" | "library";
+  /** 16 §6.12: the repository's state allowance (ctx.library.stateAllowance); unused until 16b's user prompt. */
+  stateAllowance: number;
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -862,7 +866,7 @@ export class HarnessContextBuilder {
   private readonly log: Logger;
 
   constructor(
-    private readonly ctx: Pick<PipelineContext, "workspace" | "repository">,
+    private readonly ctx: Pick<PipelineContext, "workspace" | "repository" | "library">,
     private readonly queries: ComponentSourceQueries,
     private readonly fsReader: SafeFileReader = new SafeFileReader(ctx.workspace)
   ) {
@@ -939,7 +943,9 @@ export class HarnessContextBuilder {
       targetImportStatement: targetImportStatement(importTarget, viteRootRel),
       directImports,
       sections: [],
-      estimatedTokens: 0
+      estimatedTokens: 0,
+      purpose: "change", // 16a shim: 16d adds the library purpose
+      stateAllowance: this.ctx.library.stateAllowance
     };
     const budgeted = applyBudget(
       drafts,
@@ -977,7 +983,8 @@ export class HarnessContextBuilder {
       affected_parent: { base: true, head: true },
       added: { base: false, head: true },
       removed: { base: true, head: false },
-      replaced: { base: true, head: true } // 00 §17: harnesses are built per side, as removed + added
+      replaced: { base: true, head: true }, // 00 §17: harnesses are built per side, as removed + added
+      rechecked: { base: true, head: true } // 16 E11: unchanged component re-rendered on both sides
     }[candidate.changeKind];
     if (expected.base !== present.base || expected.head !== present.head) {
       this.log.warn(

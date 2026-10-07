@@ -379,7 +379,8 @@ test("accumulates usage including usage attached to errors", async (t) => {
   assert.deepEqual(db.row(Table.VISUALIZATIONS, VISUALIZATION_ID)?.aiUsage, {
     inputTokens: 1_061,
     outputTokens: 509,
-    calls: 5
+    calls: 5,
+    cacheReadInputTokens: 800 // 16 §6.13: cache counts are stored when present
   });
   assert.equal(batch.failures[0]?.message, "AI returned output that did not match the harness format.");
 });

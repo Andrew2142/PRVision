@@ -13,6 +13,19 @@ import {
   CANCEL_KEY_TTL_SECONDS,
   CANCEL_POLL_INTERVAL_MS,
   JOB_RETENTION,
+  LIBRARY_CANCEL_KEY_PREFIX,
+  LIBRARY_REPAIR_JOB,
+  LIBRARY_REPAIR_JOB_ID_PREFIX,
+  LIBRARY_REPAIR_QUEUE,
+  LIBRARY_REPAIR_WORKER_CONCURRENCY,
+  LIBRARY_SCAN_JOB,
+  LIBRARY_SCAN_JOB_ID_PREFIX,
+  LIBRARY_SCAN_QUEUE,
+  LIBRARY_SCAN_WORKER_CONCURRENCY,
+  LIVE_MAX_SESSIONS,
+  LIVE_SESSION_JOB,
+  LIVE_SESSION_JOB_ID_PREFIX,
+  LIVE_SESSION_QUEUE,
   QUEUE_PREFIX,
   VISUALIZATION_JOB,
   VISUALIZATION_JOB_ATTEMPTS,
@@ -82,45 +95,144 @@ export function throwIfJobAborted(signal: AbortSignal): void {
  * @throws Error("Invalid visualization job data") unless it is an object with an integer visualizationId > 0.
  */
 export function parseVisualizationJobData(input: unknown): VisualizationJobData {
-  if (typeof input === "object" && input !== null && "visualizationId" in input) {
-    const visualizationId: unknown = input.visualizationId;
-    if (typeof visualizationId === "number" && Number.isSafeInteger(visualizationId) && visualizationId > 0) {
-      return { visualizationId };
+  const visualizationId = positiveIdField(input, "visualizationId");
+  if (visualizationId === null) {
+    throw new Error("Invalid visualization job data");
+  }
+  return { visualizationId };
+}
+
+// ---- Harness library jobs and live sessions (16 §6.15) ----
+
+/** Kind of a harness library job; scan and rescan share the `harness-scans` queue. */
+export type LibraryJobQueueKind = "scan" | "rescan" | "repair";
+
+/** BullMQ payload of a scan, rescan or repair job. */
+export interface LibraryJobData {
+  libraryJobId: number;
+}
+
+/** What an injected library job processor receives. `signal` aborts with "cancelled" or "shutdown". */
+export interface LibraryJob {
+  libraryJobId: number;
+  jobId: string;
+  signal: AbortSignal;
+}
+
+export type LibraryJobProcessor = (job: LibraryJob) => Promise<void>;
+
+/** BullMQ payload of a live session job. */
+export interface LiveSessionJobData {
+  liveSessionId: number;
+}
+
+/** What the injected live session processor receives. `signal` aborts with "shutdown" only (stop goes through the row). */
+export interface LiveSessionJob {
+  liveSessionId: number;
+  jobId: string;
+  signal: AbortSignal;
+}
+
+export type LiveSessionJobProcessor = (job: LiveSessionJob) => Promise<void>;
+
+/** @throws Error("Invalid library job data") unless it is an object with an integer libraryJobId > 0. */
+export function parseLibraryJobData(input: unknown): LibraryJobData {
+  const libraryJobId = positiveIdField(input, "libraryJobId");
+  if (libraryJobId === null) {
+    throw new Error("Invalid library job data");
+  }
+  return { libraryJobId };
+}
+
+/** @throws Error("Invalid live session job data") unless it is an object with an integer liveSessionId > 0. */
+export function parseLiveSessionJobData(input: unknown): LiveSessionJobData {
+  const liveSessionId = positiveIdField(input, "liveSessionId");
+  if (liveSessionId === null) {
+    throw new Error("Invalid live session job data");
+  }
+  return { liveSessionId };
+}
+
+function positiveIdField(input: unknown, field: string): number | null {
+  if (typeof input === "object" && input !== null && field in input) {
+    const value: unknown = (input as Record<string, unknown>)[field];
+    if (typeof value === "number" && Number.isSafeInteger(value) && value > 0) {
+      return value;
     }
   }
-  throw new Error("Invalid visualization job data");
+  return null;
 }
 
 type ActiveJobEntry = { controller: AbortController; cancelTimer: NodeJS.Timeout; polling: boolean };
 
+/** Cancel-flag polling target: which flag an active job watches. */
+type CancelFlag = { keyPrefix: string; id: number };
+
+type AnyQueue = Queue<VisualizationJobData> | Queue<LibraryJobData> | Queue<LiveSessionJobData>;
+type AnyWorker = Worker<VisualizationJobData> | Worker<LibraryJobData> | Worker<LiveSessionJobData>;
+
 /**
- * BullMQ wiring for the single `visualizations` queue (00 §10, §14.6). Rewritten from Uply-v2's QueueService:
- * all-or-nothing initialize, idempotent worker start, aggregated close. The processor is injected by worker.ts,
- * so utilities never import pipeline services.
+ * BullMQ wiring (00 §10, §14.6, §21 item 7): the `visualizations` queue plus the `harness-scans`, `harness-repairs`
+ * and `live-sessions` queues of sheet 16 §6.15. Rewritten from Uply-v2's QueueService: all-or-nothing initialize,
+ * idempotent worker start, aggregated close. Processors are injected by worker.ts, so utilities never import
+ * pipeline services. QueueService stays the only BullMQ owner.
  */
 export class QueueService {
   private static queue: Queue<VisualizationJobData> | null = null;
+  private static scanQueue: Queue<LibraryJobData> | null = null;
+  private static repairQueue: Queue<LibraryJobData> | null = null;
+  private static liveQueue: Queue<LiveSessionJobData> | null = null;
   private static worker: Worker<VisualizationJobData> | null = null;
+  private static scanWorker: Worker<LibraryJobData> | null = null;
+  private static repairWorker: Worker<LibraryJobData> | null = null;
+  private static liveWorker: Worker<LiveSessionJobData> | null = null;
   private static initialized = false;
   private static readonly activeJobs = new Map<number, ActiveJobEntry>();
+  private static readonly activeLibraryJobs = new Map<number, ActiveJobEntry>();
+  private static readonly activeLiveJobs = new Map<number, AbortController>();
 
   /** `viz-<visualizationId>`: the idempotent BullMQ job id. */
   static visualizationJobId(visualizationId: number): string {
     return `${VISUALIZATION_JOB_ID_PREFIX}${visualizationId}`;
   }
 
-  /** Opens the queue. Idempotent; all-or-nothing (a failure closes what was opened and rethrows). */
+  /** `scan-<id>` for scan and rescan jobs, `repair-<id>` for repair jobs (16 §6.15). */
+  static libraryJobId(kind: LibraryJobQueueKind, libraryJobId: number): string {
+    return `${kind === "repair" ? LIBRARY_REPAIR_JOB_ID_PREFIX : LIBRARY_SCAN_JOB_ID_PREFIX}${libraryJobId}`;
+  }
+
+  /** `live-<liveSessionId>`. */
+  static liveSessionJobId(liveSessionId: number): string {
+    return `${LIVE_SESSION_JOB_ID_PREFIX}${liveSessionId}`;
+  }
+
+  /**
+   * Opens all four queues (the API enqueues, the worker processes). Idempotent; all-or-nothing (a failure closes
+   * what was opened and rethrows).
+   */
   static async initialize(): Promise<void> {
     if (QueueService.initialized) {
       return;
     }
     try {
-      const queue = QueueService.createQueue(VISUALIZATION_QUEUE, {
+      const options = (): QueueOptions => ({
         connection: RedisPool.getQueueConnectionOptions(),
         prefix: QUEUE_PREFIX
       });
+      const queue = QueueService.createQueue<VisualizationJobData>(VISUALIZATION_QUEUE, options());
       QueueService.queue = queue;
-      await queue.waitUntilReady();
+      const scanQueue = QueueService.createQueue<LibraryJobData>(LIBRARY_SCAN_QUEUE, options());
+      QueueService.scanQueue = scanQueue;
+      const repairQueue = QueueService.createQueue<LibraryJobData>(LIBRARY_REPAIR_QUEUE, options());
+      QueueService.repairQueue = repairQueue;
+      const liveQueue = QueueService.createQueue<LiveSessionJobData>(LIVE_SESSION_QUEUE, options());
+      QueueService.liveQueue = liveQueue;
+      await Promise.all([
+        queue.waitUntilReady(),
+        scanQueue.waitUntilReady(),
+        repairQueue.waitUntilReady(),
+        liveQueue.waitUntilReady()
+      ]);
       QueueService.initialized = true;
     } catch (error: unknown) {
       await QueueService.closeAfterStartupFailure(error);
@@ -139,20 +251,21 @@ export class QueueService {
     }
     await QueueService.initialize();
     try {
-      const worker = QueueService.createWorker(
+      const worker = QueueService.createWorker<VisualizationJobData>(
         VISUALIZATION_QUEUE,
         async (job: Job<VisualizationJobData>) => {
           const data = parseVisualizationJobData(job.data);
           const controller = new AbortController();
+          const flag: CancelFlag = { keyPrefix: CANCEL_KEY_PREFIX, id: data.visualizationId };
           const entry: ActiveJobEntry = {
             controller,
             polling: false,
             cancelTimer: setInterval(() => {
-              QueueService.pollCancel(data.visualizationId, entry);
+              QueueService.pollCancel(flag, entry);
             }, CANCEL_POLL_INTERVAL_MS)
           };
           QueueService.activeJobs.set(data.visualizationId, entry);
-          QueueService.pollCancel(data.visualizationId, entry); // a cancel requested while the job was waiting
+          QueueService.pollCancel(flag, entry); // a cancel requested while the job was waiting
           try {
             await processor({
               visualizationId: data.visualizationId,
@@ -278,53 +391,234 @@ export class QueueService {
     await RedisPool.getConnection().del(QueueService.cancelKey(visualizationId));
   }
 
+  // ----- harness library jobs (16 §6.15) -----
+
+  /**
+   * Worker process only. Starts the `harness-scans` worker (scan and rescan jobs, concurrency 1). Each job's signal
+   * aborts with "cancelled" when `prvision:library-cancel:<id>` appears (polled every CANCEL_POLL_INTERVAL_MS) or
+   * "shutdown" when close() runs. Idempotent.
+   */
+  static async startLibraryScanWorker(processor: LibraryJobProcessor): Promise<void> {
+    if (QueueService.scanWorker) {
+      return;
+    }
+    await QueueService.initialize();
+    try {
+      QueueService.scanWorker = QueueService.createLibraryWorker(
+        LIBRARY_SCAN_QUEUE,
+        LIBRARY_SCAN_JOB_ID_PREFIX,
+        LIBRARY_SCAN_WORKER_CONCURRENCY,
+        processor
+      );
+    } catch (error: unknown) {
+      await QueueService.closeAfterStartupFailure(error);
+      throw error;
+    }
+  }
+
+  /** Worker process only. Starts the `harness-repairs` worker (concurrency 1); same signal rules as scans. */
+  static async startLibraryRepairWorker(processor: LibraryJobProcessor): Promise<void> {
+    if (QueueService.repairWorker) {
+      return;
+    }
+    await QueueService.initialize();
+    try {
+      QueueService.repairWorker = QueueService.createLibraryWorker(
+        LIBRARY_REPAIR_QUEUE,
+        LIBRARY_REPAIR_JOB_ID_PREFIX,
+        LIBRARY_REPAIR_WORKER_CONCURRENCY,
+        processor
+      );
+    } catch (error: unknown) {
+      await QueueService.closeAfterStartupFailure(error);
+      throw error;
+    }
+  }
+
+  /**
+   * Idempotent enqueue of a library job: scan and rescan go to `harness-scans` (job `scan`, id `scan-<id>`), repair
+   * to `harness-repairs` (job `repair`, id `repair-<id>`).
+   *
+   * @returns The job id, and alreadyQueued=true when a job with that id already exists.
+   * @throws Error when the queue is not initialized.
+   */
+  static async enqueueLibraryJob(
+    kind: LibraryJobQueueKind,
+    libraryJobId: number
+  ): Promise<{ jobId: string; alreadyQueued: boolean }> {
+    const queue = QueueService.requireLibraryQueue(kind);
+    const data = parseLibraryJobData({ libraryJobId });
+    const jobId = QueueService.libraryJobId(kind, libraryJobId);
+    if (await queue.getJob(jobId)) {
+      return { jobId, alreadyQueued: true };
+    }
+    const jobName = kind === "repair" ? LIBRARY_REPAIR_JOB : LIBRARY_SCAN_JOB;
+    await queue.add(jobName, data, QueueService.jobOptions(jobId)); // a duplicate jobId is ignored by BullMQ
+    log.info({ event: "queue.job.enqueued", jobId, libraryJobId, kind }, "Library job enqueued");
+    return { jobId, alreadyQueued: false };
+  }
+
+  /** Removes the library job if it is still waiting/delayed/prioritized. Returns true when removed. */
+  static async removeQueuedLibraryJob(kind: LibraryJobQueueKind, libraryJobId: number): Promise<boolean> {
+    const job = await QueueService.requireLibraryQueue(kind).getJob(QueueService.libraryJobId(kind, libraryJobId));
+    return job ? QueueService.removeIfWaiting(job, { libraryJobId, kind }) : false;
+  }
+
+  /** BullMQ state of the library job, or "missing". */
+  static async getLibraryJobState(kind: LibraryJobQueueKind, libraryJobId: number): Promise<string> {
+    const job = await QueueService.requireLibraryQueue(kind).getJob(QueueService.libraryJobId(kind, libraryJobId));
+    return job ? job.getState() : "missing";
+  }
+
+  /** Sets prvision:library-cancel:<id> = "1" EX 86400. Callable from API or worker. */
+  static async requestLibraryCancel(libraryJobId: number): Promise<void> {
+    await RedisPool.getConnection().set(QueueService.libraryCancelKey(libraryJobId), "1", "EX", CANCEL_KEY_TTL_SECONDS);
+  }
+
+  /** True when the library job's cancel flag is set. */
+  static async isLibraryCancelRequested(libraryJobId: number): Promise<boolean> {
+    return (await RedisPool.getConnection().exists(QueueService.libraryCancelKey(libraryJobId))) === 1;
+  }
+
+  /** Deletes the library job's cancel flag. */
+  static async clearLibraryCancel(libraryJobId: number): Promise<void> {
+    await RedisPool.getConnection().del(QueueService.libraryCancelKey(libraryJobId));
+  }
+
+  // ----- live sessions (16 §6.15) -----
+
+  /** Idempotent enqueue of a live session job (queue `live-sessions`, job `live`, id `live-<id>`). */
+  static async enqueueLiveSession(liveSessionId: number): Promise<{ jobId: string; alreadyQueued: boolean }> {
+    const queue = QueueService.requireLiveQueue();
+    const data = parseLiveSessionJobData({ liveSessionId });
+    const jobId = QueueService.liveSessionJobId(liveSessionId);
+    if (await queue.getJob(jobId)) {
+      return { jobId, alreadyQueued: true };
+    }
+    await queue.add(LIVE_SESSION_JOB, data, QueueService.jobOptions(jobId));
+    log.info({ event: "queue.job.enqueued", jobId, liveSessionId }, "Live session job enqueued");
+    return { jobId, alreadyQueued: false };
+  }
+
+  /** BullMQ state of the live session job, or "missing". */
+  static async getLiveSessionJobState(liveSessionId: number): Promise<string> {
+    const job = await QueueService.requireLiveQueue().getJob(QueueService.liveSessionJobId(liveSessionId));
+    return job ? job.getState() : "missing";
+  }
+
+  /**
+   * Worker process only. Starts the `live-sessions` worker with concurrency LIVE_MAX_SESSIONS. A session's signal
+   * aborts with "shutdown" only: there is no cancel flag, a stop goes through the session row (16 §12.3).
+   */
+  static async startLiveSessionWorker(processor: LiveSessionJobProcessor): Promise<void> {
+    if (QueueService.liveWorker) {
+      return;
+    }
+    await QueueService.initialize();
+    try {
+      const worker = QueueService.createWorker<LiveSessionJobData>(
+        LIVE_SESSION_QUEUE,
+        async (job: Job<LiveSessionJobData>) => {
+          const data = parseLiveSessionJobData(job.data);
+          const controller = new AbortController();
+          QueueService.activeLiveJobs.set(data.liveSessionId, controller);
+          try {
+            await processor({
+              liveSessionId: data.liveSessionId,
+              jobId: job.id ?? QueueService.liveSessionJobId(data.liveSessionId),
+              signal: controller.signal
+            });
+          } finally {
+            QueueService.activeLiveJobs.delete(data.liveSessionId);
+          }
+        },
+        QueueService.workerOptions(LIVE_MAX_SESSIONS)
+      );
+      QueueService.attachWorkerLogs(worker, LIVE_SESSION_QUEUE);
+      QueueService.liveWorker = worker;
+    } catch (error: unknown) {
+      await QueueService.closeAfterStartupFailure(error);
+      throw error;
+    }
+  }
+
   /** True after initialize() succeeded and until close(). */
   static isInitialized(): boolean {
     return QueueService.initialized;
   }
 
   /**
-   * Aborts active jobs (reason "shutdown"), closes the worker (forced after WORKER_CLOSE_TIMEOUT_MS), then the
-   * queue. No-op when nothing was opened. Always resets state; throws one aggregated error if any close failed.
+   * Aborts the active jobs of every worker (reason "shutdown"), closes every worker (each forced after
+   * WORKER_CLOSE_TIMEOUT_MS), then every queue. No-op when nothing was opened. Always resets state; throws one
+   * aggregated error if any close failed.
    */
   static async close(): Promise<void> {
-    for (const entry of QueueService.activeJobs.values()) {
+    for (const entry of [...QueueService.activeJobs.values(), ...QueueService.activeLibraryJobs.values()]) {
       clearInterval(entry.cancelTimer);
       if (!entry.controller.signal.aborted) {
         entry.controller.abort("shutdown");
       }
     }
+    for (const controller of QueueService.activeLiveJobs.values()) {
+      if (!controller.signal.aborted) {
+        controller.abort("shutdown");
+      }
+    }
 
-    const worker = QueueService.worker;
-    const queue = QueueService.queue;
+    const workers: Array<[string, AnyWorker | null]> = [
+      [VISUALIZATION_QUEUE, QueueService.worker],
+      [LIBRARY_SCAN_QUEUE, QueueService.scanWorker],
+      [LIBRARY_REPAIR_QUEUE, QueueService.repairWorker],
+      [LIVE_SESSION_QUEUE, QueueService.liveWorker]
+    ];
+    const queues: Array<[string, AnyQueue | null]> = [
+      [VISUALIZATION_QUEUE, QueueService.queue],
+      [LIBRARY_SCAN_QUEUE, QueueService.scanQueue],
+      [LIBRARY_REPAIR_QUEUE, QueueService.repairQueue],
+      [LIVE_SESSION_QUEUE, QueueService.liveQueue]
+    ];
     const failures: string[] = [];
 
-    if (worker) {
+    for (const [name, worker] of workers) {
+      if (!worker) {
+        continue;
+      }
       try {
         await QueueService.closeWorker(worker);
       } catch (error: unknown) {
-        failures.push(`worker: ${getErrorMessage(error)}`);
+        failures.push(`worker ${name}: ${getErrorMessage(error)}`);
       }
     }
-    if (queue) {
+    for (const [name, queue] of queues) {
+      if (!queue) {
+        continue;
+      }
       try {
         await queue.close();
       } catch (error: unknown) {
-        failures.push(`queue: ${getErrorMessage(error)}`);
+        failures.push(`queue ${name}: ${getErrorMessage(error)}`);
       }
     }
 
     QueueService.worker = null;
+    QueueService.scanWorker = null;
+    QueueService.repairWorker = null;
+    QueueService.liveWorker = null;
     QueueService.queue = null;
+    QueueService.scanQueue = null;
+    QueueService.repairQueue = null;
+    QueueService.liveQueue = null;
     QueueService.initialized = false;
     QueueService.activeJobs.clear();
+    QueueService.activeLibraryJobs.clear();
+    QueueService.activeLiveJobs.clear();
 
     if (failures.length > 0) {
       throw new Error(`Failed to close queue resources: ${failures.join("; ")}`);
     }
   }
 
-  private static async closeWorker(worker: Worker<VisualizationJobData>): Promise<void> {
+  private static async closeWorker(worker: AnyWorker): Promise<void> {
     const timeoutController = new AbortController();
     const timedOut = (async (): Promise<"timeout"> => {
       await delay(WORKER_CLOSE_TIMEOUT_MS, undefined, { signal: timeoutController.signal, ref: false });
@@ -354,23 +648,27 @@ export class QueueService {
   }
 
   /** Fire-and-forget by design (interval callback): never rejects, never overlaps a previous poll of the same job. */
-  private static pollCancel(visualizationId: number, entry: { controller: AbortController; polling: boolean }): void {
+  private static pollCancel(flag: CancelFlag, entry: { controller: AbortController; polling: boolean }): void {
     if (entry.controller.signal.aborted || entry.polling) {
       return;
     }
     entry.polling = true;
-    QueueService.checkCancel(visualizationId, entry).catch((error: unknown) => {
-      log.warn({ event: "queue.cancel.poll_failed", visualizationId, err: error }, "Cancel flag poll failed");
+    QueueService.checkCancel(flag, entry).catch((error: unknown) => {
+      log.warn(
+        { event: "queue.cancel.poll_failed", key: `${flag.keyPrefix}${String(flag.id)}`, err: error },
+        "Cancel flag poll failed"
+      );
     });
   }
 
   private static async checkCancel(
-    visualizationId: number,
+    flag: CancelFlag,
     entry: { controller: AbortController; polling: boolean }
   ): Promise<void> {
     try {
-      if ((await QueueService.isCancelRequested(visualizationId)) && !entry.controller.signal.aborted) {
-        log.info({ event: "queue.job.cancel_seen", visualizationId }, "Cancel flag seen; aborting active job");
+      const key = `${flag.keyPrefix}${String(flag.id)}`;
+      if ((await RedisPool.getConnection().exists(key)) === 1 && !entry.controller.signal.aborted) {
+        log.info({ event: "queue.job.cancel_seen", key }, "Cancel flag seen; aborting active job");
         entry.controller.abort("cancelled");
       }
     } finally {
@@ -382,11 +680,126 @@ export class QueueService {
     return `${CANCEL_KEY_PREFIX}${visualizationId}`;
   }
 
+  private static libraryCancelKey(libraryJobId: number): string {
+    return `${LIBRARY_CANCEL_KEY_PREFIX}${libraryJobId}`;
+  }
+
   private static requireQueue(): Queue<VisualizationJobData> {
     if (!QueueService.queue || !QueueService.initialized) {
       throw new Error("QueueService must be initialized before use");
     }
     return QueueService.queue;
+  }
+
+  private static requireLibraryQueue(kind: LibraryJobQueueKind): Queue<LibraryJobData> {
+    const queue = kind === "repair" ? QueueService.repairQueue : QueueService.scanQueue;
+    if (!queue || !QueueService.initialized) {
+      throw new Error("QueueService must be initialized before use");
+    }
+    return queue;
+  }
+
+  private static requireLiveQueue(): Queue<LiveSessionJobData> {
+    if (!QueueService.liveQueue || !QueueService.initialized) {
+      throw new Error("QueueService must be initialized before use");
+    }
+    return QueueService.liveQueue;
+  }
+
+  /** attempts 1 and JOB_RETENTION, shared by every queue (00 §10, 16 §6.15). */
+  private static jobOptions(jobId: string): JobsOptions {
+    return {
+      jobId,
+      attempts: VISUALIZATION_JOB_ATTEMPTS,
+      removeOnComplete: JOB_RETENTION.removeOnComplete,
+      removeOnFail: JOB_RETENTION.removeOnFail
+    };
+  }
+
+  /** lockDuration WORKER_LOCK_DURATION_MS and maxStalledCount 0 for every worker (00 §14.6, 16 §6.15). */
+  private static workerOptions(concurrency: number): WorkerOptions {
+    return {
+      connection: RedisPool.getWorkerConnectionOptions(),
+      prefix: QUEUE_PREFIX,
+      concurrency,
+      lockDuration: WORKER_LOCK_DURATION_MS,
+      maxStalledCount: WORKER_MAX_STALLED_COUNT
+    };
+  }
+
+  /** Removes a waiting/delayed/prioritized job; false when it is in any other state or the worker locked it first. */
+  private static async removeIfWaiting(
+    job: { getState(): Promise<string>; remove(): Promise<void> },
+    logFields: Record<string, unknown>
+  ): Promise<boolean> {
+    const state = await job.getState();
+    if (state !== "waiting" && state !== "delayed" && state !== "prioritized") {
+      return false;
+    }
+    try {
+      await job.remove();
+      return true;
+    } catch (error: unknown) {
+      log.warn({ event: "queue.job.remove_failed", ...logFields, err: error }, "Queued job could not be removed");
+      return false;
+    }
+  }
+
+  /** A scan or repair worker: one cancel-flag poller and AbortController per active job. */
+  private static createLibraryWorker(
+    queueName: string,
+    jobIdPrefix: string,
+    concurrency: number,
+    processor: LibraryJobProcessor
+  ): Worker<LibraryJobData> {
+    const worker = QueueService.createWorker<LibraryJobData>(
+      queueName,
+      async (job: Job<LibraryJobData>) => {
+        const data = parseLibraryJobData(job.data);
+        const controller = new AbortController();
+        const flag: CancelFlag = { keyPrefix: LIBRARY_CANCEL_KEY_PREFIX, id: data.libraryJobId };
+        const entry: ActiveJobEntry = {
+          controller,
+          polling: false,
+          cancelTimer: setInterval(() => {
+            QueueService.pollCancel(flag, entry);
+          }, CANCEL_POLL_INTERVAL_MS)
+        };
+        QueueService.activeLibraryJobs.set(data.libraryJobId, entry);
+        QueueService.pollCancel(flag, entry); // a cancel requested while the job was waiting
+        try {
+          await processor({
+            libraryJobId: data.libraryJobId,
+            jobId: job.id ?? `${jobIdPrefix}${String(data.libraryJobId)}`,
+            signal: controller.signal
+          });
+        } finally {
+          clearInterval(entry.cancelTimer);
+          QueueService.activeLibraryJobs.delete(data.libraryJobId);
+        }
+      },
+      QueueService.workerOptions(concurrency)
+    );
+    QueueService.attachWorkerLogs(worker, queueName);
+    return worker;
+  }
+
+  private static attachWorkerLogs(worker: Worker<LibraryJobData> | Worker<LiveSessionJobData>, queue: string): void {
+    worker.on("active", (job) => {
+      log.info({ event: "queue.job.started", queue, jobId: job.id }, "Job started");
+    });
+    worker.on("completed", (job) => {
+      log.info({ event: "queue.job.completed", queue, jobId: job.id }, "Job completed");
+    });
+    worker.on("failed", (job, error) => {
+      log.error({ event: "queue.job.failed", queue, jobId: job?.id ?? null, err: error }, "Job failed");
+    });
+    worker.on("stalled", (jobId) => {
+      log.warn({ event: "queue.job.stalled", queue, jobId }, "Job stalled (will be failed, not retried)");
+    });
+    worker.on("error", (error) => {
+      log.error({ event: "queue.worker.error", queue, err: error }, "Worker error");
+    });
   }
 
   private static async closeAfterStartupFailure(startupError: unknown): Promise<void> {
@@ -399,15 +812,11 @@ export class QueueService {
     log.error({ event: "queue.worker.error", err: startupError }, "QueueService startup failed");
   }
 
-  private static createQueue(name: string, options: QueueOptions): Queue<VisualizationJobData> {
-    return new Queue<VisualizationJobData>(name, options);
+  private static createQueue<T>(name: string, options: QueueOptions): Queue<T> {
+    return new Queue<T>(name, options);
   }
 
-  private static createWorker(
-    name: string,
-    processor: Processor<VisualizationJobData>,
-    options: WorkerOptions
-  ): Worker<VisualizationJobData> {
-    return new Worker<VisualizationJobData>(name, processor, options);
+  private static createWorker<T>(name: string, processor: Processor<T>, options: WorkerOptions): Worker<T> {
+    return new Worker<T>(name, processor, options);
   }
 }

@@ -164,8 +164,12 @@ describe("database migrations (real Postgres)", { skip }, () => {
     const before = await countMigrations();
     await runMigrations();
     assert.equal(await countMigrations(), before);
-    // 0000 schema, 0001 seed, 0002 repository app roots (15 §5.4.1), 0003 commit_range (00 §16), 0004 replaced (00 §17)
-    assert.equal(before, 5);
+    // Every journal entry is applied once (0000 schema … 0009 harness library, 00 §21).
+    const journal = JSON.parse(fs.readFileSync(path.join(MIGRATIONS_FOLDER, "meta", "_journal.json"), "utf8")) as {
+      entries: Array<{ tag: string }>;
+    };
+    assert.equal(before, journal.entries.length);
+    assert.equal(journal.entries.at(-1)?.tag, "0009_harness_library");
     const settings = await pool.query("select id from app_settings");
     assert.equal(settings.rowCount, 1);
   });
@@ -476,6 +480,186 @@ describe("database migrations (real Postgres)", { skip }, () => {
       assert.deepEqual(rows.rows, [
         { framework: "react_vite", app_root: ".", angular_project: null, angular_build_configuration: null }
       ]);
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  test("migration 0009 applies over rows from 0008 with the 16 §6 defaults and enforces its CHECKs and keys", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "prvision-test-migrations-"));
+    try {
+      const journal = JSON.parse(fs.readFileSync(path.join(MIGRATIONS_FOLDER, "meta", "_journal.json"), "utf8")) as {
+        entries: Array<{ tag: string }>;
+      };
+      const before0009 = journal.entries.filter((entry) => entry.tag < "0009");
+      fs.mkdirSync(path.join(tempDir, "meta"));
+      fs.writeFileSync(
+        path.join(tempDir, "meta", "_journal.json"),
+        JSON.stringify({ ...journal, entries: before0009 })
+      );
+      for (const entry of before0009) {
+        fs.copyFileSync(path.join(MIGRATIONS_FOLDER, `${entry.tag}.sql`), path.join(tempDir, `${entry.tag}.sql`));
+      }
+      await resetDatabase();
+      await migrate(drizzle(pool), {
+        migrationsFolder: tempDir,
+        migrationsTable: "__drizzle_migrations",
+        migrationsSchema: "drizzle"
+      });
+      // Rows written by the 0008 schema.
+      const repo = await pool.query<{ id: number }>(
+        "insert into repositories (name, local_path, default_branch, package_manager) values ('old', '/tmp/prvision-it/old9', 'main', 'npm') returning id"
+      );
+      const repositoryId = repo.rows[0]?.id ?? 0;
+      const viz = await pool.query<{ id: number }>(
+        `insert into visualizations (repository_id, source_type, title, base_ref, head_ref, ai_provider, ai_model)
+         values ($1, 'local_branch', 't', 'main', 'f', 'anthropic_api', 'claude-opus-5-5') returning id`,
+        [repositoryId]
+      );
+      const visualizationId = viz.rows[0]?.id ?? 0;
+      const component = await pool.query<{ id: number }>(
+        `insert into visualization_components (visualization_id, file_path, export_name, display_name, change_kind, rank)
+         values ($1, 'src/A.tsx', 'default', 'A', 'modified', 0) returning id`,
+        [visualizationId]
+      );
+      const componentId = component.rows[0]?.id ?? 0;
+
+      await runMigrations();
+
+      const repositoryRow = await pool.query(
+        "select library_build_mode, state_allowance from repositories where id = $1",
+        [repositoryId]
+      );
+      assert.deepEqual(repositoryRow.rows, [{ library_build_mode: "grow", state_allowance: 3 }]);
+      const visualizationRow = await pool.query(
+        `select checked_count, reused_harness_count, new_harness_count, needs_update_count, global_style_trigger,
+                working_tree_snapshot from visualizations where id = $1`,
+        [visualizationId]
+      );
+      assert.deepEqual(visualizationRow.rows, [
+        {
+          checked_count: 0,
+          reused_harness_count: 0,
+          new_harness_count: 0,
+          needs_update_count: 0,
+          global_style_trigger: null,
+          working_tree_snapshot: false
+        }
+      ]);
+      const componentRow = await pool.query(
+        `select library_entry_id, base_library_entry_id, harness_origin, base_harness_origin, harness_needs_update,
+                source_changed_since_write, state_count, changed_state_count from visualization_components where id = $1`,
+        [componentId]
+      );
+      assert.deepEqual(componentRow.rows, [
+        {
+          library_entry_id: null,
+          base_library_entry_id: null,
+          harness_origin: null,
+          base_harness_origin: null,
+          harness_needs_update: false,
+          source_changed_since_write: null,
+          state_count: 0,
+          changed_state_count: 0
+        }
+      ]);
+      const stateRows = await pool.query("select count(*)::int as count from visualization_component_states");
+      assert.deepEqual(stateRows.rows, [{ count: 0 }], "no state rows are back-filled");
+
+      // Rejected rows.
+      for (const allowance of [0, 6]) {
+        await rejectsWithCode(
+          pool.query("update repositories set state_allowance = $1 where id = $2", [allowance, repositoryId]),
+          "23514",
+          "repositories_state_allowance_check"
+        );
+      }
+      await rejectsWithCode(
+        pool.query("update visualizations set working_tree_snapshot = true where id = $1", [visualizationId]),
+        "23514",
+        "visualizations_working_tree_snapshot_check"
+      );
+      const entrySql = `insert into harness_library_entries
+        (repository_id, framework, file_path, export_name, display_name, source_fingerprint, harness_source, state_count,
+         state_allowance, status, origin)
+        values ($1, 'react_vite', $2, 'default', 'A', $3, $4, $5, 3, $6, 'run') returning id`;
+      await rejectsWithCode(
+        pool.query(entrySql, [repositoryId, "src/Bad.tsx", "ABC", "export default 1", 1, "ready"]),
+        "23514",
+        "harness_library_entries_source_fingerprint_check"
+      );
+      await rejectsWithCode(
+        pool.query(entrySql, [repositoryId, "src/NoHarness.tsx", null, null, 0, "ready"]),
+        "23514",
+        "harness_library_entries_ready_harness_check"
+      );
+      // Accepted: off_default_branch with and without a harness (E26), and a valid fingerprint.
+      const fingerprint = "a".repeat(64);
+      const offWith = await pool.query<{ id: number }>(entrySql, [
+        repositoryId,
+        "src/Off.tsx",
+        fingerprint,
+        "export default 1",
+        1,
+        "off_default_branch"
+      ]);
+      await pool.query(entrySql, [repositoryId, "src/OffEmpty.tsx", null, null, 0, "off_default_branch"]);
+      const entryId = offWith.rows[0]?.id ?? 0;
+      await rejectsWithCode(
+        pool.query("update visualization_components set base_library_entry_id = $1 where id = $2", [
+          entryId,
+          componentId
+        ]),
+        "23514",
+        "visualization_components_base_library_entry_id_check"
+      );
+      await pool.query("update visualization_components set library_entry_id = $1 where id = $2", [
+        entryId,
+        componentId
+      ]);
+
+      await rejectsWithCode(
+        pool.query(
+          `insert into visualization_component_states (visualization_component_id, visualization_id, ordinal, state_name,
+             on_base, on_head) values ($1, $2, 0, 'Open', true, true)`,
+          [componentId, visualizationId]
+        ),
+        "23514",
+        "visualization_component_states_default_ordinal_check"
+      );
+      await pool.query(
+        `insert into visualization_component_states (visualization_component_id, visualization_id, ordinal, state_name,
+           on_base, on_head) values ($1, $2, 0, 'Default', true, true)`,
+        [componentId, visualizationId]
+      );
+
+      const scanSql = `insert into harness_library_jobs (repository_id, kind, state_allowance, ai_model)
+        values ($1, 'scan', 3, 'claude-opus-5-5')`;
+      await pool.query(scanSql, [repositoryId]);
+      await rejectsWithCode(pool.query(scanSql, [repositoryId]), "23505", "harness_library_jobs_active_scan_key");
+      await rejectsWithCode(
+        pool.query(
+          `insert into harness_library_jobs (repository_id, kind, visualization_id, component_ids, state_allowance,
+             spend_cap_usd, ai_model) values ($1, 'repair', $2, '[1]'::jsonb, 3, 5, 'claude-opus-5-5')`,
+          [repositoryId, visualizationId]
+        ),
+        "23514",
+        "harness_library_jobs_spend_cap_usd_check"
+      );
+
+      await pool.query("insert into live_sessions (visualization_id) values ($1)", [visualizationId]);
+      await rejectsWithCode(
+        pool.query("insert into live_sessions (visualization_id) values ($1)", [visualizationId]),
+        "23505",
+        "live_sessions_active_visualization_key"
+      );
+
+      // Deleting the entry keeps the run row and clears its link (on delete set null).
+      await pool.query("delete from harness_library_entries where id = $1", [entryId]);
+      const unlinked = await pool.query("select library_entry_id from visualization_components where id = $1", [
+        componentId
+      ]);
+      assert.deepEqual(unlinked.rows, [{ library_entry_id: null }]);
     } finally {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }

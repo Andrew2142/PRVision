@@ -46,6 +46,7 @@ function exampleA(overrides: Partial<HarnessValidationInput> = {}): HarnessValid
     directImports: BUTTON_IMPORTS,
     sidesPresent: { base: true, head: true },
     entryFilePath: "src/main.tsx",
+    stateAllowance: 1,
     ...overrides
   };
 }
@@ -125,6 +126,7 @@ function exampleB(overrides: Partial<HarnessValidationInput> = {}): HarnessValid
     sidesPresent: { base: true, head: true },
     entryFilePath: "src/main.tsx",
     targetImportStatement: 'import OrdersPanel from "../../src/features/orders/OrdersPanel";',
+    stateAllowance: 1,
     ...overrides
   };
 }

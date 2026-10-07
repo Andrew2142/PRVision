@@ -6,6 +6,7 @@ import {
   AnthropicApiProvider,
   type AnthropicApiProviderOptions
 } from "../../../backend/src/utilities/services/ai/anthropic-api-provider";
+import { ZERO_USAGE, addUsage } from "../../../backend/src/utilities/services/ai/ai-provider";
 import { anthropicErrors, anthropicFinalMessage, fakeAnthropicStream, hangingMessage } from "../helpers/ai-sdk-fakes";
 import { patchStaticMethod } from "../helpers/test-context";
 
@@ -159,7 +160,7 @@ test("AnthropicApiProvider default streamFn calls client.beta.messages.stream an
 
 // ---- responses ----
 
-test("AnthropicApiProvider returns parsed data, model and usage including cache reads", async () => {
+test("AnthropicApiProvider returns parsed data, model and usage including cache reads and cache writes (16 §6.13)", async () => {
   const { provider } = providerWith([
     anthropicFinalMessage(
       { answer: "hello" },
@@ -172,7 +173,7 @@ test("AnthropicApiProvider returns parsed data, model and usage including cache 
   const result = await provider.generateStructured<{ answer: string }>(request());
   assert.deepEqual(result, {
     data: { answer: "hello" },
-    usage: { inputTokens: 1050, outputTokens: 40, calls: 1, cacheReadInputTokens: 900 },
+    usage: { inputTokens: 1050, outputTokens: 40, calls: 1, cacheReadInputTokens: 900, cacheWriteInputTokens: 50 },
     model: "claude-opus-5-5"
   });
 });
@@ -222,13 +223,25 @@ test("AnthropicApiProvider sums usage across iterations when a fallback ran", as
   ]);
   const result = await provider.generateStructured<{ answer: string }>(request());
   assert.equal(result.model, "claude-opus-5");
-  assert.deepEqual(result.usage, { inputTokens: 615, outputTokens: 90, calls: 1, cacheReadInputTokens: 10 });
+  assert.deepEqual(result.usage, {
+    inputTokens: 615,
+    outputTokens: 90,
+    calls: 1,
+    cacheReadInputTokens: 10,
+    cacheWriteInputTokens: 5
+  });
 });
 
 test("AnthropicApiProvider throws max_tokens on stop_reason max_tokens", async () => {
   const { provider } = providerWith([anthropicFinalMessage('{"answer": "cut', { stop_reason: "max_tokens" })]);
   const error = await rejectsWith(provider.generateStructured(request()), "max_tokens", false);
-  assert.deepEqual(error.usage, { inputTokens: 1200, outputTokens: 300, calls: 1, cacheReadInputTokens: 0 });
+  assert.deepEqual(error.usage, {
+    inputTokens: 1200,
+    outputTokens: 300,
+    calls: 1,
+    cacheReadInputTokens: 0,
+    cacheWriteInputTokens: 0
+  });
 });
 
 test("AnthropicApiProvider throws refusal with stop_details category", async () => {
@@ -271,7 +284,13 @@ test("AnthropicApiProvider throws invalid_output on schema mismatch with usage a
   const { provider } = providerWith([anthropicFinalMessage({ answer: 42 })]);
   const error = await rejectsWith(provider.generateStructured(request()), "invalid_output", true);
   assert.match(error.message, /^AI output did not match the expected schema: \/answer: must be string/);
-  assert.deepEqual(error.usage, { inputTokens: 1200, outputTokens: 300, calls: 1, cacheReadInputTokens: 0 });
+  assert.deepEqual(error.usage, {
+    inputTokens: 1200,
+    outputTokens: 300,
+    calls: 1,
+    cacheReadInputTokens: 0,
+    cacheWriteInputTokens: 0
+  });
 });
 
 // ---- error mapping ----
@@ -372,4 +391,25 @@ test("AnthropicApiProvider rejects request schemas that are not structured-outpu
     /additionalProperties: false/
   );
   assert.equal(calls.length, 0);
+});
+
+test("addUsage sums both optional cache counts; a count is present only when either side reports it (16 §6.13)", () => {
+  assert.deepEqual(
+    addUsage(
+      { inputTokens: 10, outputTokens: 1, calls: 1, cacheReadInputTokens: 4, cacheWriteInputTokens: 2 },
+      { inputTokens: 20, outputTokens: 2, calls: 1, cacheWriteInputTokens: 3 }
+    ),
+    { inputTokens: 30, outputTokens: 3, calls: 2, cacheReadInputTokens: 4, cacheWriteInputTokens: 5 }
+  );
+  assert.deepEqual(addUsage({ inputTokens: 1, outputTokens: 1, calls: 1 }, ZERO_USAGE), {
+    inputTokens: 1,
+    outputTokens: 1,
+    calls: 1
+  });
+  assert.deepEqual(addUsage(ZERO_USAGE, { inputTokens: 0, outputTokens: 0, calls: 0, cacheWriteInputTokens: 0 }), {
+    inputTokens: 0,
+    outputTokens: 0,
+    calls: 0,
+    cacheWriteInputTokens: 0
+  });
 });

@@ -198,6 +198,7 @@ export function makeContext(
     console: { info: record("info"), warn: record("warn"), error: record("error") },
     isCancelled: () => Promise.resolve(cancelled),
     signal: abort.signal,
+    library: { stateAllowance: 1, buildMode: "grow" }, // 16 §6.12 test default
     consoleEvents,
     cancel: () => {
       cancelled = true;

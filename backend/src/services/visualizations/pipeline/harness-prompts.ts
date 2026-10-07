@@ -324,7 +324,9 @@ const CHANGE_KIND_DESCRIPTIONS: Readonly<Record<ComponentCandidate["changeKind"]
   added: "new component added in this change",
   removed: "component deleted in this change; only the base version can render",
   affected_parent: "unchanged itself, but imports code that changed (see changed_dependencies)",
-  replaced: "replaced by a different component in this change; each side renders its own component"
+  replaced: "replaced by a different component in this change; each side renders its own component",
+  // 16 E11: rechecked rows render with saved harnesses only, so this line is not expected in a prompt.
+  rechecked: "unchanged itself; re-checked because a global style changed"
 };
 
 function existsIn(sidesPresent: HarnessContextPackage["sidesPresent"]): string {

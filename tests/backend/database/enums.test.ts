@@ -1,28 +1,47 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  ACTIVE_LIBRARY_JOB_STATUSES,
+  ACTIVE_LIVE_SESSION_STATUSES,
   ACTIVE_VISUALIZATION_STATUSES,
   AI_EFFORT_VALUES,
   AI_PROVIDER_KIND_VALUES,
   AiEffort,
   AiProviderKind,
   COMPONENT_CHANGE_KIND_VALUES,
+  COMPONENT_HARNESS_ORIGIN_VALUES,
   COMPONENT_RENDER_STATUS_VALUES,
   COMPONENT_RISK_VALUES,
   COMPONENT_VISUAL_CHANGE_VALUES,
   CONSOLE_LEVEL_VALUES,
   ComponentChangeKind,
+  ComponentHarnessOrigin,
   ComponentRenderStatus,
   ComponentRisk,
   ComponentVisualChange,
   ConsoleLevel,
   DeletionMode,
+  HARNESS_LIBRARY_ORIGIN_VALUES,
+  HARNESS_LIBRARY_STATUS_VALUES,
+  HarnessLibraryOrigin,
+  HarnessLibraryStatus,
+  LIBRARY_BUILD_MODE_VALUES,
+  LIBRARY_JOB_KIND_VALUES,
+  LIBRARY_JOB_STATUS_VALUES,
+  LIVE_SESSION_STATUS_VALUES,
+  LIVE_STOP_REASON_VALUES,
+  LibraryBuildMode,
+  LibraryJobKind,
+  LibraryJobStatus,
+  LiveSessionStatus,
+  LiveStopReason,
   NON_TERMINAL_VISUALIZATION_STATUSES,
   PACKAGE_MANAGER_VALUES,
   PackageManager,
   REPOSITORY_FRAMEWORK_VALUES,
   RepositoryFramework,
   TABLE_VALUES,
+  TERMINAL_LIBRARY_JOB_STATUSES,
   TERMINAL_VISUALIZATION_STATUSES,
   Table,
   VISUALIZATION_SOURCE_TYPE_VALUES,
@@ -77,6 +96,7 @@ const EXPECTED: Array<{
       "queued",
       "preparing",
       "analyzing",
+      "awaiting_confirmation", // 00 §19
       "generating_harnesses",
       "rendering",
       "diffing",
@@ -90,7 +110,7 @@ const EXPECTED: Array<{
     name: "ComponentChangeKind",
     object: ComponentChangeKind,
     tuple: COMPONENT_CHANGE_KIND_VALUES,
-    values: ["modified", "added", "removed", "affected_parent", "replaced"] // 00 §17 adds replaced
+    values: ["modified", "added", "removed", "affected_parent", "replaced", "rechecked"] // 00 §17 replaced, §21 rechecked
   },
   {
     name: "ComponentRenderStatus",
@@ -115,6 +135,55 @@ const EXPECTED: Array<{
     object: ConsoleLevel,
     tuple: CONSOLE_LEVEL_VALUES,
     values: ["info", "warn", "error"]
+  },
+  // 00 §21 / sheet 16 §6.1
+  {
+    name: "HarnessLibraryStatus",
+    object: HarnessLibraryStatus,
+    tuple: HARNESS_LIBRARY_STATUS_VALUES,
+    values: ["ready", "needs_update", "off_default_branch"]
+  },
+  {
+    name: "HarnessLibraryOrigin",
+    object: HarnessLibraryOrigin,
+    tuple: HARNESS_LIBRARY_ORIGIN_VALUES,
+    values: ["run", "scan", "repair", "import"]
+  },
+  {
+    name: "LibraryBuildMode",
+    object: LibraryBuildMode,
+    tuple: LIBRARY_BUILD_MODE_VALUES,
+    values: ["grow", "scan"]
+  },
+  {
+    name: "LibraryJobKind",
+    object: LibraryJobKind,
+    tuple: LIBRARY_JOB_KIND_VALUES,
+    values: ["scan", "rescan", "repair"]
+  },
+  {
+    name: "LibraryJobStatus",
+    object: LibraryJobStatus,
+    tuple: LIBRARY_JOB_STATUS_VALUES,
+    values: ["queued", "preparing", "running", "completed", "cap_reached", "failed", "cancelled"]
+  },
+  {
+    name: "ComponentHarnessOrigin",
+    object: ComponentHarnessOrigin,
+    tuple: COMPONENT_HARNESS_ORIGIN_VALUES,
+    values: ["library", "written", "repaired"]
+  },
+  {
+    name: "LiveSessionStatus",
+    object: LiveSessionStatus,
+    tuple: LIVE_SESSION_STATUS_VALUES,
+    values: ["starting", "ready", "stopping", "stopped", "failed"]
+  },
+  {
+    name: "LiveStopReason",
+    object: LiveStopReason,
+    tuple: LIVE_STOP_REASON_VALUES,
+    values: ["user", "left", "idle", "max_duration", "shutdown", "error"]
   }
 ];
 
@@ -131,7 +200,12 @@ test("Table values are the snake_case SQL table names (00 §14.3)", () => {
     REPOSITORIES: "repositories",
     VISUALIZATIONS: "visualizations",
     VISUALIZATION_COMPONENTS: "visualization_components",
-    VISUALIZATION_CONSOLE_EVENTS: "visualization_console_events"
+    VISUALIZATION_CONSOLE_EVENTS: "visualization_console_events",
+    HARNESS_LIBRARY_ENTRIES: "harness_library_entries",
+    HARNESS_LIBRARY_JOBS: "harness_library_jobs",
+    HARNESS_LIBRARY_JOB_EVENTS: "harness_library_job_events",
+    VISUALIZATION_COMPONENT_STATES: "visualization_component_states",
+    LIVE_SESSIONS: "live_sessions"
   });
   assert.deepEqual([...TABLE_VALUES], Object.values(Table));
   assert.deepEqual(DeletionMode, { SOFT: "soft", HARD: "hard" });
@@ -143,11 +217,35 @@ test("TERMINAL_VISUALIZATION_STATUSES is a subset of VisualizationStatus values"
   }
 });
 
-test("ACTIVE + TERMINAL + queued covers every VisualizationStatus exactly once", () => {
-  const combined = [VisualizationStatus.QUEUED, ...ACTIVE_VISUALIZATION_STATUSES, ...TERMINAL_VISUALIZATION_STATUSES];
+test("ACTIVE + TERMINAL + queued + awaiting_confirmation covers every VisualizationStatus exactly once", () => {
+  // 00 §19: awaiting_confirmation is neither terminal nor active.
+  const combined = [
+    VisualizationStatus.QUEUED,
+    VisualizationStatus.AWAITING_CONFIRMATION,
+    ...ACTIVE_VISUALIZATION_STATUSES,
+    ...TERMINAL_VISUALIZATION_STATUSES
+  ];
   assert.equal(new Set(combined).size, combined.length);
   assert.deepEqual([...combined].sort(), [...VISUALIZATION_STATUS_VALUES].sort());
-  assert.deepEqual([...NON_TERMINAL_VISUALIZATION_STATUSES], ["queued", ...ACTIVE_VISUALIZATION_STATUSES]);
+  assert.deepEqual(
+    [...NON_TERMINAL_VISUALIZATION_STATUSES],
+    ["queued", "awaiting_confirmation", ...ACTIVE_VISUALIZATION_STATUSES]
+  );
+});
+
+test("16 §6.1: ACTIVE and TERMINAL library job statuses partition LibraryJobStatus", () => {
+  assert.deepEqual([...ACTIVE_LIBRARY_JOB_STATUSES], ["queued", "preparing", "running"]);
+  assert.deepEqual([...TERMINAL_LIBRARY_JOB_STATUSES], ["completed", "cap_reached", "failed", "cancelled"]);
+  const combined = [...ACTIVE_LIBRARY_JOB_STATUSES, ...TERMINAL_LIBRARY_JOB_STATUSES];
+  assert.equal(new Set(combined).size, combined.length);
+  assert.deepEqual([...combined].sort(), [...LIBRARY_JOB_STATUS_VALUES].sort());
+});
+
+test("16 §6.1: ACTIVE_LIVE_SESSION_STATUSES are starting, ready, stopping", () => {
+  assert.deepEqual([...ACTIVE_LIVE_SESSION_STATUSES], ["starting", "ready", "stopping"]);
+  for (const status of ACTIVE_LIVE_SESSION_STATUSES) {
+    assert.ok((LIVE_SESSION_STATUS_VALUES as readonly string[]).includes(status), status);
+  }
 });
 
 test("enumValues throws on an empty object", () => {

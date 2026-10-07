@@ -20,8 +20,13 @@ export class ArtifactPathError extends Error {
 
 const DIR_MODE = 0o700;
 const IMAGE_KINDS: readonly string[] = ["base", "head", "diff"];
-/** "artifacts/<v>/<c>/<kind>.png": the only shape stored in *_image_path (00 §14.3). */
-const RELATIVE_IMAGE_PATH = /^artifacts\/([1-9]\d{0,15})\/([1-9]\d{0,15})\/(base|head|diff)\.png$/;
+/**
+ * "artifacts/<v>/<c>/<kind>.png" (state ordinal 0) or "artifacts/<v>/<c>/s<ordinal>/<kind>.png" (ordinals 1–9):
+ * the only shapes stored in *_image_path (00 §14.3, 16 §6.14).
+ */
+const RELATIVE_IMAGE_PATH = /^artifacts\/([1-9]\d{0,15})\/([1-9]\d{0,15})\/(?:s([1-9])\/)?(base|head|diff)\.png$/;
+/** Highest state ordinal (16 §6.6: ordinals 0–9; MAX_STATE_ORDINALS = 10). */
+const MAX_STATE_ORDINAL = 9;
 
 /**
  * Owns the data-dir layout of 00 §4. Paths stored in the DB are relative to the data dir and POSIX
@@ -72,6 +77,25 @@ export class ArtifactStore {
       throw new ArtifactPathError("Invalid artifact kind", kind);
     }
     return `${ARTIFACTS_DIR_NAME}/${visualizationId}/${componentId}/${kind}.png`;
+  }
+
+  /**
+   * State image path (16 §6.14): "artifacts/<v>/<c>/<kind>.png" for ordinal 0 (unchanged, the Default state) and
+   * "artifacts/<v>/<c>/s<ordinal>/<kind>.png" for ordinals 1–9.
+   *
+   * @throws ArtifactPathError for an ordinal outside 0–9, an invalid id or kind.
+   */
+  componentStateImagePath(
+    visualizationId: number,
+    componentId: number,
+    ordinal: number,
+    kind: ArtifactImageKind
+  ): string {
+    assertOrdinal(ordinal);
+    const defaultPath = this.componentImagePath(visualizationId, componentId, kind);
+    return ordinal === 0
+      ? defaultPath
+      : `${ARTIFACTS_DIR_NAME}/${visualizationId}/${componentId}/${stateDirName(ordinal)}/${kind}.png`;
   }
 
   /** Absolute <dataDir>/artifacts/<v>/<c>. */
@@ -129,6 +153,13 @@ export class ArtifactStore {
   /** mkdir -p <dataDir>/artifacts/<v>/<c> (mode 0o700). */
   async ensureComponentDir(visualizationId: number, componentId: number): Promise<void> {
     await this.ensureDir(this.componentDir(visualizationId, componentId));
+  }
+
+  /** mkdir -p of the component dir and, for ordinal > 0, its s<ordinal> subfolder (16 §6.14). */
+  async ensureComponentStateDir(visualizationId: number, componentId: number, ordinal: number): Promise<void> {
+    assertOrdinal(ordinal);
+    const componentDir = this.componentDir(visualizationId, componentId);
+    await this.ensureDir(ordinal === 0 ? componentDir : path.join(componentDir, stateDirName(ordinal)));
   }
 
   /** Reads a dataDir-relative file. Missing file → the fs ENOENT error (callers check `code === "ENOENT"`). */
@@ -197,7 +228,10 @@ export class ArtifactStore {
 
   // ----- public URLs -----
 
-  /** "artifacts/12/345/base.png" → "/artifacts/12/345/base.png"; null → null; any other shape → ArtifactPathError. */
+  /**
+   * "artifacts/12/345/base.png" → "/artifacts/12/345/base.png" (also "artifacts/12/345/s2/base.png", 16 §6.14);
+   * null → null; any other shape → ArtifactPathError.
+   */
   toPublicUrl(relativePath: string | null): string | null {
     if (relativePath === null) {
       return null;
@@ -207,6 +241,17 @@ export class ArtifactStore {
     }
     return `/${relativePath}`;
   }
+}
+
+function assertOrdinal(ordinal: number): void {
+  if (!Number.isSafeInteger(ordinal) || ordinal < 0 || ordinal > MAX_STATE_ORDINAL) {
+    throw new ArtifactPathError("Invalid state ordinal", String(ordinal));
+  }
+}
+
+/** "s<ordinal>": the per-state folder of ordinals 1–9. */
+function stateDirName(ordinal: number): string {
+  return `s${String(ordinal)}`;
 }
 
 function assertId(value: number, what: string): void {

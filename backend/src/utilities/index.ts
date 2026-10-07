@@ -6,6 +6,7 @@ export * from "./handlers/query-conditions";
 export * from "./handlers/query-handler";
 export * from "./handlers/query-handler-drizzle";
 export * from "./handlers/response-handler";
+export * from "./helpers/ai-cost";
 export * from "./helpers/date";
 export * from "./helpers/error-message";
 export * from "./helpers/graceful-shutdown";

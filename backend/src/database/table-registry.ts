@@ -3,7 +3,12 @@ import type { PgTable } from "drizzle-orm/pg-core";
 import { Table } from "../enums";
 import {
   appSettings,
+  harnessLibraryEntries,
+  harnessLibraryJobEvents,
+  harnessLibraryJobs,
+  liveSessions,
   repositories,
+  visualizationComponentStates,
   visualizationComponents,
   visualizationConsoleEvents,
   visualizations
@@ -15,7 +20,12 @@ export const TABLE_SCHEMAS = {
   [Table.REPOSITORIES]: repositories,
   [Table.VISUALIZATIONS]: visualizations,
   [Table.VISUALIZATION_COMPONENTS]: visualizationComponents,
-  [Table.VISUALIZATION_CONSOLE_EVENTS]: visualizationConsoleEvents
+  [Table.VISUALIZATION_CONSOLE_EVENTS]: visualizationConsoleEvents,
+  [Table.HARNESS_LIBRARY_ENTRIES]: harnessLibraryEntries,
+  [Table.HARNESS_LIBRARY_JOBS]: harnessLibraryJobs,
+  [Table.HARNESS_LIBRARY_JOB_EVENTS]: harnessLibraryJobEvents,
+  [Table.VISUALIZATION_COMPONENT_STATES]: visualizationComponentStates,
+  [Table.LIVE_SESSIONS]: liveSessions
 } as const satisfies Record<Table, PgTable>;
 
 /** Drizzle table object for a logical Table value. */

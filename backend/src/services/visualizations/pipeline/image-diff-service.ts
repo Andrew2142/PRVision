@@ -343,7 +343,8 @@ export class ImageDiffService {
         diffImagePath: diffPath,
         diffPixelRatio: rounded,
         width: output.width,
-        height: output.height
+        height: output.height,
+        states: [] // 16a compile shim (16 §6.12): 16e diffs every state
       }
     };
   }

@@ -679,7 +679,9 @@ export class VisualizationWorkerService {
       },
       console: consoleSvc.asPipelineConsole(),
       isCancelled: () => this.safeIsCancelled(visualizationId),
-      signal
+      signal,
+      // 16 §6.12: snapshot of the repository's library settings at job start.
+      library: { stateAllowance: repository.stateAllowance, buildMode: repository.libraryBuildMode }
     };
   }
 

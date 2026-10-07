@@ -24,6 +24,19 @@ test("supportsSoftDelete is true only for repositories and visualizations", () =
   assert.deepEqual(softDeletable.sort(), [Table.REPOSITORIES, Table.VISUALIZATIONS].sort());
 });
 
+test("16 §6.10: the five library tables are registered", () => {
+  for (const table of [
+    Table.HARNESS_LIBRARY_ENTRIES,
+    Table.HARNESS_LIBRARY_JOBS,
+    Table.HARNESS_LIBRARY_JOB_EVENTS,
+    Table.VISUALIZATION_COMPONENT_STATES,
+    Table.LIVE_SESSIONS
+  ]) {
+    assert.equal(getTableName(getTableSchema(table)), table);
+    assert.equal(supportsSoftDelete(table), false, table);
+  }
+});
+
 test("tableHasColumn uses property names, not SQL names", () => {
   const repositories = getTableSchema(Table.REPOSITORIES);
   assert.equal(tableHasColumn(repositories, "isDeleted"), true);

@@ -5,8 +5,11 @@ import { ResponseHandler, createLogger } from "../utilities";
 const log = createLogger("artifacts");
 const responseHandler = new ResponseHandler();
 
-/** /artifacts/<vizId>/<componentId>/<base|head|diff>.png: the only servable shape (00 §4). */
-export const ARTIFACT_PUBLIC_PATH_PATTERN = /^\/[1-9]\d{0,9}\/[1-9]\d{0,9}\/(base|head|diff)\.png$/;
+/**
+ * /artifacts/<vizId>/<componentId>/[s<1-9>/]<base|head|diff>.png: the only servable shapes (00 §4, 16 §6.14 state
+ * images).
+ */
+export const ARTIFACT_PUBLIC_PATH_PATTERN = /^\/[1-9]\d{0,9}\/[1-9]\d{0,9}\/(?:s[1-9]\/)?(base|head|diff)\.png$/;
 
 /**
  * Allow-list and traversal guard in front of express.static for /artifacts. Any percent-encoding, "..",

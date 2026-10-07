@@ -58,6 +58,18 @@ const EXPECTED_NAMES = [
   "BRANCH_LIST_MAX",
   "COMMIT_LIST_DEFAULT_LIMIT",
   "COMMIT_LIST_MAX_LIMIT",
+  // 16 §16.4
+  "LIBRARY_JOBS_DIR_NAME",
+  "LIVE_DIR_NAME",
+  "WORKING_TREE_SNAPSHOT_DIR_NAME",
+  "LIBRARY_IMPORT_BODY_LIMIT",
+  "LIBRARY_EXPORT_MAX_BYTES",
+  "LIBRARY_IMPORT_MAX_ENTRIES",
+  "LIBRARY_EXPORT_FORMAT",
+  "LIBRARY_EXPORT_VERSION",
+  "LIBRARY_ESTIMATE_TIMEOUT_MS",
+  "LIBRARY_ESTIMATE_INVENTORY_BUDGET_MS",
+  "LIBRARY_ESTIMATE_CACHE_MS",
   // queue
   "QUEUE_PREFIX",
   "VISUALIZATION_QUEUE",
@@ -82,6 +94,29 @@ const EXPECTED_NAMES = [
   "WORKING_TREE_MAX_UNTRACKED_BYTES",
   "WORKING_TREE_HEAD_REF",
   "CONSOLE_MESSAGE_MAX_LENGTH",
+  // 16 §16.3
+  "LIBRARY_SCAN_QUEUE",
+  "LIBRARY_SCAN_JOB",
+  "LIBRARY_SCAN_JOB_ID_PREFIX",
+  "LIBRARY_REPAIR_QUEUE",
+  "LIBRARY_REPAIR_JOB",
+  "LIBRARY_REPAIR_JOB_ID_PREFIX",
+  "LIVE_SESSION_QUEUE",
+  "LIVE_SESSION_JOB",
+  "LIVE_SESSION_JOB_ID_PREFIX",
+  "LIBRARY_SCAN_WORKER_CONCURRENCY",
+  "LIBRARY_REPAIR_WORKER_CONCURRENCY",
+  "LIBRARY_CANCEL_KEY_PREFIX",
+  "LIBRARY_SCAN_MAX_RUNTIME_MS",
+  "LIBRARY_REPAIR_MAX_RUNTIME_MS",
+  "LIVE_MAX_SESSIONS",
+  "LIVE_IDLE_TIMEOUT_MS",
+  "LIVE_HEARTBEAT_INTERVAL_MS",
+  "LIVE_HEARTBEAT_LOSS_MS",
+  "LIVE_POLL_INTERVAL_MS",
+  "LIVE_MAX_SESSION_MS",
+  "LIVE_START_TIMEOUT_MS",
+  "LIVE_MAX_HOSTS_PER_SIDE",
   // pagination
   "DEFAULT_PAGE",
   "DEFAULT_PAGE_SIZE",
@@ -139,6 +174,31 @@ const EXPECTED_NAMES = [
   "STRUCTURAL_DIFF_MAX_DEPTH",
   "STRUCTURAL_DIFF_MAX_NODES",
   "STRUCTURAL_VALUE_MAX_CHARS",
+  // 16 §16.1
+  "ANALYSIS_MAX_CANDIDATES",
+  "STATE_ALLOWANCE_MIN",
+  "STATE_ALLOWANCE_MAX",
+  "STATE_ALLOWANCE_DEFAULT",
+  "MAX_STATE_ORDINALS",
+  "STATE_NAME_MAX_CHARS",
+  "STATE_NAME_PATTERN",
+  "STATE_MAX_STEPS",
+  "STATE_STEP_TEXT_MAX_CHARS",
+  "STATE_STEP_NTH_MAX",
+  "STATE_STEP_TIMEOUT_MS",
+  "RENDER_ITEM_CONCURRENCY",
+  "RENDER_PAGE_CONCURRENCY",
+  "RENDER_STAGE_MS_PER_PAGE",
+  "RENDER_GROUP_STARTUP_ALLOWANCE_MS",
+  "ANGULAR_RENDER_GROUP_STARTUP_ALLOWANCE_MS",
+  "RENDER_STAGE_TIMEOUT_MAX_MS",
+  "RENDER_GROUP_MAX_ITEMS",
+  "GLOBAL_STYLE_TRIGGER_PATTERNS",
+  "LIBRARY_INVENTORY_MAX_COMPONENTS",
+  "LIBRARY_INVENTORY_MAX_FILES",
+  "LIBRARY_INVENTORY_BUDGET_MS",
+  "LIBRARY_RECHECK_MAX_COMPONENTS",
+  "LIBRARY_SCAN_BATCH_SIZE",
   // ai
   "AI_DEFAULT_PROVIDER",
   "AI_DEFAULT_MODEL",
@@ -166,7 +226,18 @@ const EXPECTED_NAMES = [
   "SUMMARY_MARKDOWN_MAX_CHARS",
   "SUMMARY_NOTE_MAX_CHARS",
   "SUMMARY_RELATED_DIFFS_MAX_FILES",
-  "SUMMARY_RELATED_DIFF_MAX_LINES"
+  "SUMMARY_RELATED_DIFF_MAX_LINES",
+  // 16 §16.2
+  "AI_PRICES_AS_OF",
+  "AI_MODEL_PRICES_USD_PER_MTOK",
+  "AI_PRICE_FALLBACK_MODEL",
+  "LIBRARY_ESTIMATE_MIN_SAMPLES",
+  "LIBRARY_ESTIMATE_DEFAULT_HARNESS_USAGE",
+  "LIBRARY_ESTIMATE_OUTPUT_TOKENS_PER_EXTRA_STATE",
+  "LIBRARY_ESTIMATE_DEFAULT_CALL_USAGE",
+  "LIBRARY_ESTIMATE_SECONDS_PER_HARNESS",
+  "LIBRARY_SPEND_CAP_MIN_USD",
+  "LIBRARY_SPEND_CAP_MAX_USD"
 ] as const;
 
 test("every constant of the 02 §6.7 table is exported", () => {
@@ -229,4 +300,82 @@ test("SHUTDOWN_TIMEOUT_MS exceeds WORKER_CLOSE_TIMEOUT_MS", () => {
   const shutdownMs: number = config.SHUTDOWN_TIMEOUT_MS;
   const workerCloseMs: number = config.WORKER_CLOSE_TIMEOUT_MS;
   assert.ok(shutdownMs > workerCloseMs);
+});
+
+test("16 §16: harness library constants have their binding values", () => {
+  // §16.1
+  assert.equal(config.ANALYSIS_MAX_CANDIDATES, 500);
+  assert.deepEqual([config.STATE_ALLOWANCE_MIN, config.STATE_ALLOWANCE_MAX, config.STATE_ALLOWANCE_DEFAULT], [1, 5, 3]);
+  assert.equal(config.MAX_STATE_ORDINALS, 10);
+  assert.equal(config.STATE_NAME_MAX_CHARS, 40);
+  assert.equal(config.STATE_NAME_PATTERN, "^[A-Za-z0-9][A-Za-z0-9 ,.'()&/+-]{0,39}$");
+  assert.equal(config.STATE_MAX_STEPS, 5);
+  assert.equal(config.STATE_STEP_TEXT_MAX_CHARS, 200);
+  assert.equal(config.STATE_STEP_NTH_MAX, 20);
+  assert.equal(config.STATE_STEP_TIMEOUT_MS, 3_000);
+  assert.equal(config.RENDER_ITEM_CONCURRENCY, 2);
+  assert.equal(config.RENDER_PAGE_CONCURRENCY, 4);
+  assert.equal(config.RENDER_STAGE_MS_PER_PAGE, 2_500);
+  assert.equal(config.RENDER_GROUP_STARTUP_ALLOWANCE_MS, 20_000);
+  assert.equal(config.ANGULAR_RENDER_GROUP_STARTUP_ALLOWANCE_MS, config.ANGULAR_BUILD_TIMEOUT_MS);
+  assert.equal(config.ANGULAR_RENDER_GROUP_STARTUP_ALLOWANCE_MS, 240_000);
+  assert.equal(config.RENDER_STAGE_TIMEOUT_MAX_MS, 60 * 60_000);
+  assert.equal(config.RENDER_GROUP_MAX_ITEMS, 40);
+  assert.deepEqual(config.GLOBAL_STYLE_TRIGGER_PATTERNS, {
+    tailwindConfig: "^tailwind\\.config\\.[cm]?[jt]s$",
+    postcssConfig: ["^postcss\\.config\\.([cm]?[jt]s|json)$", "^\\.postcssrc(\\.(json|ya?ml|[cm]?js))?$"],
+    tokenBasenames: [
+      "^(design-)?tokens?\\.(css|scss|sass|less|json)$",
+      "^design-tokens\\.[cm]?[jt]s$",
+      "^_?(variables|tokens|theme)\\.(css|scss|sass|less)$"
+    ],
+    tokenFolders: ["tokens", "design-tokens"]
+  });
+  assert.match("tailwind.config.mjs", new RegExp(config.GLOBAL_STYLE_TRIGGER_PATTERNS.tailwindConfig));
+  assert.equal(config.LIBRARY_INVENTORY_MAX_COMPONENTS, 2_000);
+  assert.equal(config.LIBRARY_INVENTORY_MAX_FILES, 6_000);
+  assert.equal(config.LIBRARY_INVENTORY_BUDGET_MS, 120_000);
+  assert.equal(config.LIBRARY_RECHECK_MAX_COMPONENTS, 2_000);
+  assert.equal(config.LIBRARY_SCAN_BATCH_SIZE, 12);
+  // §16.2
+  assert.equal(config.AI_PRICES_AS_OF, "2026-09-25");
+  assert.equal(Object.keys(config.AI_MODEL_PRICES_USD_PER_MTOK).length, 11);
+  assert.deepEqual(config.AI_MODEL_PRICES_USD_PER_MTOK["claude-opus-5-5"], {
+    input: 4,
+    output: 20,
+    cacheRead: 0.2,
+    cacheWrite: 5
+  });
+  assert.equal(config.AI_PRICE_FALLBACK_MODEL, "claude-fable-5-1");
+  assert.equal(config.LIBRARY_ESTIMATE_MIN_SAMPLES, 5);
+  assert.deepEqual(config.LIBRARY_ESTIMATE_DEFAULT_HARNESS_USAGE, {
+    inputTokens: 26_000,
+    cacheReadInputTokens: 4_500,
+    cacheWriteInputTokens: 0,
+    outputTokens: 9_000,
+    calls: 1
+  });
+  assert.equal(config.LIBRARY_ESTIMATE_OUTPUT_TOKENS_PER_EXTRA_STATE, 1_500);
+  assert.deepEqual(config.LIBRARY_ESTIMATE_DEFAULT_CALL_USAGE, {
+    inputTokens: 20_000,
+    cacheReadInputTokens: 3_500,
+    cacheWriteInputTokens: 0,
+    outputTokens: 7_000,
+    calls: 1
+  });
+  assert.equal(config.LIBRARY_ESTIMATE_SECONDS_PER_HARNESS, 25);
+  assert.equal(config.LIBRARY_SPEND_CAP_MIN_USD, 0.5);
+  assert.equal(config.LIBRARY_SPEND_CAP_MAX_USD, 10_000);
+  // §16.4
+  assert.equal(config.LIBRARY_JOBS_DIR_NAME, "library-jobs");
+  assert.equal(config.LIVE_DIR_NAME, "live");
+  assert.equal(config.WORKING_TREE_SNAPSHOT_DIR_NAME, "snapshots");
+  assert.equal(config.LIBRARY_IMPORT_BODY_LIMIT, "64mb");
+  assert.equal(config.LIBRARY_EXPORT_MAX_BYTES, 64 * 1024 * 1024);
+  assert.equal(config.LIBRARY_IMPORT_MAX_ENTRIES, 5_000);
+  assert.equal(config.LIBRARY_EXPORT_FORMAT, "prvision-harness-library");
+  assert.equal(config.LIBRARY_EXPORT_VERSION, 1);
+  assert.equal(config.LIBRARY_ESTIMATE_TIMEOUT_MS, 60_000);
+  assert.equal(config.LIBRARY_ESTIMATE_INVENTORY_BUDGET_MS, 45_000);
+  assert.equal(config.LIBRARY_ESTIMATE_CACHE_MS, 60_000);
 });

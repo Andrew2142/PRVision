@@ -138,6 +138,7 @@ export class AnthropicApiProvider implements AiProvider {
         inputTokens: usage.inputTokens,
         outputTokens: usage.outputTokens,
         cacheReadInputTokens: usage.cacheReadInputTokens ?? 0,
+        cacheWriteInputTokens: usage.cacheWriteInputTokens ?? 0,
         fallbackUsed: this.fallbackRan(message),
         durationMs: Date.now() - startedAt
       },
@@ -258,11 +259,13 @@ export class AnthropicApiProvider implements AiProvider {
     const sum = (pick: (part: (typeof parts)[number]) => number): number =>
       parts.reduce((total, part) => total + pick(part), 0);
     const cacheRead = sum((part) => part.cacheRead);
+    const cacheWrite = sum((part) => part.cacheWrite);
     return {
-      inputTokens: sum((part) => part.input) + cacheRead + sum((part) => part.cacheWrite),
+      inputTokens: sum((part) => part.input) + cacheRead + cacheWrite,
       outputTokens: sum((part) => part.output),
       calls: 1,
-      cacheReadInputTokens: cacheRead
+      cacheReadInputTokens: cacheRead,
+      cacheWriteInputTokens: cacheWrite // 16 §6.13: included in inputTokens, reported for pricing
     };
   }
 

@@ -75,7 +75,8 @@ async function diffPair(
     {
       componentId: 1,
       base: okSide("base", 1, base.width, base.height),
-      head: okSide("head", 1, head.width, head.height)
+      head: okSide("head", 1, head.width, head.height),
+      states: []
     }
   ]);
   const values = h.db.updatesFor(1).at(-1) ?? {};
@@ -86,7 +87,8 @@ test("classifyRender table", () => {
   const render = (base: ComponentRenderResult["base"], head: ComponentRenderResult["head"]): ComponentRenderResult => ({
     componentId: 1,
     base,
-    head
+    head,
+    states: []
   });
   const ok = (side: "base" | "head") => okSide(side, 1);
   const failed = (side: "base" | "head") => failedSide(side);
@@ -200,8 +202,8 @@ test("images above the decode limits are refused as png_too_large without decodi
     [artifactPath(2, "head")]: encodePng(solidPng(2, 2, WHITE))
   });
   const results = await h.service.diff(h.handle.context, [
-    { componentId: 1, base: okSide("base", 1), head: okSide("head", 1) },
-    { componentId: 2, base: okSide("base", 2), head: okSide("head", 2) }
+    { componentId: 1, base: okSide("base", 1), head: okSide("head", 1), states: [] },
+    { componentId: 2, base: okSide("base", 2), head: okSide("head", 2), states: [] }
   ]);
   assert.deepEqual(results, []);
   assert.ok(h.handle.console.has("warn", "Could not compare screenshots for Comp1: PNG too large."));
@@ -239,12 +241,14 @@ test("writes diff.png through ArtifactStore for changed and unchanged", async ()
     {
       componentId: 2,
       base: okSide("base", 2, 20, 20),
-      head: okSide("head", 2, 20, 20)
+      head: okSide("head", 2, 20, 20),
+      states: []
     },
     {
       componentId: 1,
       base: okSide("base", 1, 20, 20),
-      head: okSide("head", 1, 20, 20)
+      head: okSide("head", 1, 20, 20),
+      states: []
     }
   ]);
   assert.deepEqual(
@@ -278,7 +282,8 @@ test("persists ratio as a number rounded to 6 decimals, dimensions and visual_ch
       diffImagePath: "artifacts/1/1/diff.png",
       diffPixelRatio: 0.047619,
       width: 7,
-      height: 3
+      height: 3,
+      states: []
     }
   ]);
 });
@@ -286,8 +291,8 @@ test("persists ratio as a number rounded to 6 decimals, dimensions and visual_ch
 test("new and deleted set visual_change and dimensions without diff", async () => {
   const h = setup([1, 2]);
   const results = await h.service.diff(h.handle.context, [
-    { componentId: 1, base: null, head: okSide("head", 1, 320, 200) },
-    { componentId: 2, base: okSide("base", 2, 640, 480), head: null }
+    { componentId: 1, base: null, head: okSide("head", 1, 320, 200), states: [] },
+    { componentId: 2, base: okSide("base", 2, 640, 480), head: null, states: [] }
   ]);
   assert.deepEqual(results, []);
   assert.deepEqual(h.db.updatesFor(1), [
@@ -315,7 +320,7 @@ test("new and deleted set visual_change and dimensions without diff", async () =
 test("failed side leaves visual_change null and returns no result", async () => {
   const h = setup([1]);
   const results = await h.service.diff(h.handle.context, [
-    { componentId: 1, base: okSide("base", 1), head: failedSide("head") }
+    { componentId: 1, base: okSide("base", 1), head: failedSide("head"), states: [] }
   ]);
   assert.deepEqual(results, []);
   assert.deepEqual(h.db.updatesFor(1), [{ visualChange: null, diffImagePath: null, diffPixelRatio: null }]);
@@ -331,8 +336,8 @@ test("missing screenshot is captured per component, not thrown", async () => {
     [artifactPath(2, "head")]: png
   });
   const results = await h.service.diff(h.handle.context, [
-    { componentId: 1, base: okSide("base", 1), head: okSide("head", 1) },
-    { componentId: 2, base: okSide("base", 2), head: okSide("head", 2) }
+    { componentId: 1, base: okSide("base", 1), head: okSide("head", 1), states: [] },
+    { componentId: 2, base: okSide("base", 2), head: okSide("head", 2), states: [] }
   ]);
   assert.deepEqual(
     results.map((result) => result.componentId),
@@ -348,7 +353,9 @@ test("corrupt PNG is captured per component", async () => {
     [artifactPath(1, "head")]: encodePng(solidPng(10, 10, WHITE))
   });
   assert.deepEqual(
-    await h.service.diff(h.handle.context, [{ componentId: 1, base: okSide("base", 1), head: okSide("head", 1) }]),
+    await h.service.diff(h.handle.context, [
+      { componentId: 1, base: okSide("base", 1), head: okSide("head", 1), states: [] }
+    ]),
     []
   );
   assert.ok(h.handle.console.has("warn", "Could not compare screenshots for Comp1: invalid PNG."));
@@ -363,7 +370,9 @@ test("diff image write failure is captured per component without a partial row u
   });
   h.store.failWrites = true;
   assert.deepEqual(
-    await h.service.diff(h.handle.context, [{ componentId: 1, base: okSide("base", 1), head: okSide("head", 1) }]),
+    await h.service.diff(h.handle.context, [
+      { componentId: 1, base: okSide("base", 1), head: okSide("head", 1), states: [] }
+    ]),
     []
   );
   assert.ok(h.handle.console.has("warn", "Could not compare screenshots for Comp1: could not write diff image."));
@@ -377,9 +386,9 @@ test("never writes visualizations.changed_count", async () => {
     [artifactPath(1, "head")]: png
   });
   await h.service.diff(h.handle.context, [
-    { componentId: 1, base: okSide("base", 1), head: okSide("head", 1) },
-    { componentId: 2, base: null, head: okSide("head", 2) },
-    { componentId: 3, base: okSide("base", 3), head: null }
+    { componentId: 1, base: okSide("base", 1), head: okSide("head", 1), states: [] },
+    { componentId: 2, base: null, head: okSide("head", 2), states: [] },
+    { componentId: 3, base: okSide("base", 3), head: null, states: [] }
   ]);
   assert.equal(h.db.callsFor("update", Table.VISUALIZATIONS).length, 0);
   assert.ok(h.db.updates.every((update) => !("changedCount" in update.values)));
@@ -389,7 +398,7 @@ test("throws IMAGE_DIFF_PERSIST_FAILED on update error", async () => {
   const h = setup([1]);
   h.db.failNext("update");
   await assert.rejects(
-    h.service.diff(h.handle.context, [{ componentId: 1, base: null, head: okSide("head", 1) }]),
+    h.service.diff(h.handle.context, [{ componentId: 1, base: null, head: okSide("head", 1), states: [] }]),
     (error: unknown) =>
       error instanceof PipelineStepError &&
       error.code === "IMAGE_DIFF_PERSIST_FAILED" &&
@@ -402,7 +411,7 @@ test("throws IMAGE_DIFF_CANCELLED when cancelled", async () => {
   const h = setup([1, 2]);
   h.handle.cancel();
   await assert.rejects(
-    h.service.diff(h.handle.context, [{ componentId: 1, base: null, head: okSide("head", 1) }]),
+    h.service.diff(h.handle.context, [{ componentId: 1, base: null, head: okSide("head", 1), states: [] }]),
     (error: unknown) =>
       error instanceof PipelineStepError && error.code === "IMAGE_DIFF_CANCELLED" && error.userMessage === "Cancelled."
   );

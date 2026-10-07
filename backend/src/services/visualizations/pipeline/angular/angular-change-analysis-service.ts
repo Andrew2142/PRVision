@@ -569,7 +569,14 @@ export class AngularChangeAnalysisService {
       log,
       now: () => this.deps.now()
     });
-    return { candidates, skipped, changedFiles, sourceQueries: new AngularSourceQueries(state) };
+    // 16a compile shim (16 §6.12): 16d fills globalStyleChanges (§8.5.2).
+    return {
+      candidates,
+      skipped,
+      changedFiles,
+      sourceQueries: new AngularSourceQueries(state),
+      globalStyleChanges: []
+    };
   }
 
   /**

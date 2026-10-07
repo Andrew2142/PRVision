@@ -61,6 +61,8 @@ function pkg(sections: PromptSection[], overrides: Partial<HarnessContextPackage
     directImports: { base: [], head: [] },
     sections,
     estimatedTokens: 0,
+    purpose: "change",
+    stateAllowance: 1,
     ...overrides
   };
 }
@@ -280,7 +282,10 @@ test("repair prompt fences harness, mocks and render failure (kind, message, oth
       componentId: 7,
       harnessSource: "export default function PRVisionHarness() { return null; }",
       mockedModules: [{ specifier: '@/api/"x"', source: "export const a = 1; // </mock>" }],
-      notes: "n"
+      notes: "n",
+      states: [{ name: "Default", steps: [] }],
+      origin: "written",
+      libraryEntryId: null
     },
     {
       sides: ["base", "head"],
@@ -311,7 +316,15 @@ test("repair prompt fences harness, mocks and render failure (kind, message, oth
 
   const oneSide = buildRepairPrompt(
     pkg([]),
-    { componentId: 7, harnessSource: "h", mockedModules: [], notes: "" },
+    {
+      componentId: 7,
+      harnessSource: "h",
+      mockedModules: [],
+      notes: "",
+      states: [{ name: "Default", steps: [] }],
+      origin: "written",
+      libraryEntryId: null
+    },
     { sides: ["head"], kind: "timeout", message: "[timeout] Timed out", otherSideMessage: null }
   );
   assert.ok(!oneSide.includes("other side:"));

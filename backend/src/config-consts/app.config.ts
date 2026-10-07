@@ -85,6 +85,15 @@ export const ARTIFACTS_DIR_NAME = "artifacts";
 export const FIXTURES_DIR_NAME = "fixtures";
 export const FIXTURE_REPO_NAME = "sample-react-app";
 
+/** `<dataDir>/library-jobs/<libraryJobId>/`: scratch renders of scan and repair jobs (16 §16.4). */
+export const LIBRARY_JOBS_DIR_NAME = "library-jobs";
+
+/** `<dataDir>/live/<liveSessionId>/`: live session workspaces (16 §16.4). */
+export const LIVE_DIR_NAME = "live";
+
+/** `<dataDir>/snapshots/<visualizationId>/`: a working-tree run's uncommitted changes (16 §16.4, E18). */
+export const WORKING_TREE_SNAPSHOT_DIR_NAME = "snapshots";
+
 // ---- Required secrets and connections (00 §4). "" when unset; validateConfig() fails boot. ----
 
 /** `DATABASE_URL` (required). Never log it: it contains the password. */
@@ -199,3 +208,22 @@ export const COMMIT_LIST_MAX_LIMIT = 200;
 export const COMMIT_SEARCH_MAX_CHARS = 100;
 /** App discovery (15 §5.4.3): at most this many angular.json / vite.config.* files are inspected per repository. */
 export const APP_DISCOVERY_MAX_CONFIGS = 50;
+
+// ---- Harness library export/import and estimates (16 §16.4) ----
+
+/** `express.json` limit of POST /api/repositories/:id/library/import (route-specific, E21). */
+export const LIBRARY_IMPORT_BODY_LIMIT = "64mb";
+/** Largest export file; equals LIBRARY_IMPORT_BODY_LIMIT in bytes (validated at boot). */
+export const LIBRARY_EXPORT_MAX_BYTES = 64 * 1024 * 1024;
+/** Most entries one import file may hold. */
+export const LIBRARY_IMPORT_MAX_ENTRIES = 5_000;
+/** `format` field of an export file (16 §13.2). */
+export const LIBRARY_EXPORT_FORMAT = "prvision-harness-library";
+/** `version` of the export file format (16 §13.2). */
+export const LIBRARY_EXPORT_VERSION = 1;
+/** Whole library estimate request; a timeout answers 504 internal_error. */
+export const LIBRARY_ESTIMATE_TIMEOUT_MS = 60_000;
+/** Inventory budget inside an estimate (below LIBRARY_ESTIMATE_TIMEOUT_MS). */
+export const LIBRARY_ESTIMATE_INVENTORY_BUDGET_MS = 45_000;
+/** An estimate of the same folder, allowance and commit is reused for this long. */
+export const LIBRARY_ESTIMATE_CACHE_MS = 60_000;

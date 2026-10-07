@@ -2,7 +2,12 @@
 // Run `npm run generate:models` after schema changes.
 
 export * from "./app-setting-model";
+export * from "./harness-library-entry-model";
+export * from "./harness-library-job-event-model";
+export * from "./harness-library-job-model";
+export * from "./live-session-model";
 export * from "./repository-model";
+export * from "./visualization-component-state-model";
 export * from "./visualization-component-model";
 export * from "./visualization-console-event-model";
 export * from "./visualization-model";

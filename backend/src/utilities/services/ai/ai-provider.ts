@@ -32,8 +32,9 @@ export interface ResolvedAiSettings {
 }
 
 /**
- * Adds two usage records. Used by providers (retries) and by 09/11 accumulation. `cacheReadInputTokens` is kept
- * only when at least one side reports it.
+ * Adds two usage records. Used by providers (retries) and by 09/11 accumulation. Each optional cache count
+ * (`cacheReadInputTokens`, `cacheWriteInputTokens`, 16 §6.13) is kept only when at least one side reports it; an
+ * absent count is 0.
  *
  * @param a - First usage record.
  * @param b - Second usage record.
@@ -46,9 +47,12 @@ export function addUsage(a: AiUsage, b: AiUsage): AiUsage {
     calls: a.calls + b.calls,
     ...(a.cacheReadInputTokens !== undefined || b.cacheReadInputTokens !== undefined
       ? { cacheReadInputTokens: (a.cacheReadInputTokens ?? 0) + (b.cacheReadInputTokens ?? 0) }
+      : {}),
+    ...(a.cacheWriteInputTokens !== undefined || b.cacheWriteInputTokens !== undefined
+      ? { cacheWriteInputTokens: (a.cacheWriteInputTokens ?? 0) + (b.cacheWriteInputTokens ?? 0) }
       : {})
   };
 }
 
-/** Neutral element of addUsage. */
+/** Neutral element of addUsage (no cache counts: adding it never adds a cache field). */
 export const ZERO_USAGE: AiUsage = Object.freeze({ inputTokens: 0, outputTokens: 0, calls: 0 });

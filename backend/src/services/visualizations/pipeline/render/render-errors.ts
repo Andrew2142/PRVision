@@ -11,10 +11,11 @@ export type { RenderFailureKind } from "./render-types";
 const REPAIRABLE: ReadonlySet<RenderFailureKind> = new Set<RenderFailureKind>([
   "module_load",
   "render_error",
-  "timeout"
+  "timeout",
+  "step_failed"
 ]);
 
-/** True only for failures a better harness can fix: module_load, render_error, timeout. */
+/** True only for failures a better harness can fix: module_load, render_error, timeout, step_failed (16 §6.12). */
 export function isRepairableFailure(kind: RenderFailureKind): boolean {
   return REPAIRABLE.has(kind);
 }
@@ -40,6 +41,7 @@ export function headlineFor(kind: RenderFailureKind, detail: string): string {
     case "screenshot":
       return `Screenshot failed: ${detail}`;
     case "timeout":
+    case "step_failed": // 16b gives it its own headline; never produced before 16b
     case "file_missing":
     case "budget_exceeded":
     case "vite_unavailable":

@@ -94,7 +94,13 @@ function setup(
   const store = new InMemoryQueryHandler();
   store.now = () => NOW;
   store.seed(Table.REPOSITORIES, [
-    makeRepositoryRow({ id: 1, localPath: "/tmp/repo", globalStylePaths: ["/src/index.css"] })
+    makeRepositoryRow({
+      id: 1,
+      localPath: "/tmp/repo",
+      globalStylePaths: ["/src/index.css"],
+      stateAllowance: 4,
+      libraryBuildMode: "scan"
+    })
   ]);
   if (options.visualization !== null) {
     store.seed(Table.VISUALIZATIONS, [makeVisualizationRow({ id: 1, status: "queued", ...options.visualization })]);
@@ -253,8 +259,12 @@ test("VisualizationWorkerService.run reads settings once and builds both the pro
     viteConfigPath: "vite.config.ts",
     tsconfigPath: "tsconfig.json",
     entryFilePath: "src/main.tsx",
-    globalStylePaths: ["/src/index.css"]
+    globalStylePaths: ["/src/index.css"],
+    renderViewport: "desktop"
   });
+  // 16 §6.12: the repository's library settings are snapshotted into the context at job start.
+  assert.deepEqual(ctx.library, { stateAllowance: 4, buildMode: "scan" });
+  assert.equal(ctx.libraryJob, undefined);
   assert.deepEqual(ctx.workspace, workspaceFor(1));
   assert.equal(ctx.visualizationId, 1);
   assert.equal(await ctx.isCancelled(), false);
@@ -404,7 +414,7 @@ test("toRepairHarnessFn forwards the HarnessRenderError object and returns 09's 
 test("VisualizationWorkerService.run calls ImageDiffService.diff(ctx, renders), StructuralDiffService.compare(ctx, { renders, diffs, analysis }) and SummaryService.summarize(ctx, analysis)", async (t) => {
   const analysis = analysisWith([candidate(1)]);
   const diffs = [
-    { componentId: 1, diffImagePath: "artifacts/1/1/diff.png", diffPixelRatio: 0.1, width: 10, height: 10 }
+    { componentId: 1, diffImagePath: "artifacts/1/1/diff.png", diffPixelRatio: 0.1, width: 10, height: 10, states: [] }
   ];
   const h = setup(t, { steps: { analysis, diffs } });
   await h.worker().run(makeJob(1).job);

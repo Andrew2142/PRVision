@@ -68,11 +68,11 @@ function analysisOf(
   candidates: ComponentCandidate[],
   changedFiles: ChangeAnalysisResult["changedFiles"] = []
 ): ChangeAnalysisResult {
-  return { candidates, skipped: [], changedFiles, sourceQueries: {} as ComponentSourceQueries };
+  return { candidates, skipped: [], changedFiles, sourceQueries: {} as ComponentSourceQueries, globalStyleChanges: [] };
 }
 
 function headFailed(componentId: number): ComponentRenderResult {
-  return { componentId, base: okSide("base", componentId), head: failedSide("head") };
+  return { componentId, base: okSide("base", componentId), head: failedSide("head"), states: [] };
 }
 
 function setupService(files: { base?: Record<string, string>; head?: Record<string, string> }, componentIds: number[]) {
@@ -115,8 +115,10 @@ test("AngularStructuralDiffService.compare runs only for components without pixe
   const files = { [TS_PATH]: externalComponent(), [HTML_PATH]: `<span class="badge">{{ label }}</span>` };
   const { db, handle, service } = setupService({ base: files, head: files }, [1, 2]);
   const outcomes = await service.compare(handle.context, {
-    renders: [{ componentId: 1, base: okSide("base", 1), head: okSide("head", 1) }, headFailed(2)],
-    diffs: [{ componentId: 1, diffImagePath: "artifacts/1/1/diff.png", diffPixelRatio: 0, width: 100, height: 50 }],
+    renders: [{ componentId: 1, base: okSide("base", 1), head: okSide("head", 1), states: [] }, headFailed(2)],
+    diffs: [
+      { componentId: 1, diffImagePath: "artifacts/1/1/diff.png", diffPixelRatio: 0, width: 100, height: 50, states: [] }
+    ],
     analysis: analysisOf([candidate(1), candidate(2)])
   });
   assert.deepEqual(outcomes, [
@@ -134,9 +136,9 @@ test("AngularStructuralDiffService.compare does not run for new, deleted or miss
   const { db, handle, service, reads } = setupService({}, [1, 2, 3]);
   const outcomes = await service.compare(handle.context, {
     renders: [
-      { componentId: 1, base: null, head: okSide("head", 1) },
-      { componentId: 2, base: okSide("base", 2), head: null },
-      { componentId: 3, base: null, head: null }
+      { componentId: 1, base: null, head: okSide("head", 1), states: [] },
+      { componentId: 2, base: okSide("base", 2), head: null, states: [] },
+      { componentId: 3, base: null, head: null, states: [] }
     ],
     diffs: [],
     analysis: analysisOf([candidate(1, { changeKind: "added" }), candidate(2, { changeKind: "removed" }), candidate(3)])

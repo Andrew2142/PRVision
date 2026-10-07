@@ -12,10 +12,13 @@ export class VisualizationComponentModel {
   private _baseExportName!: string | null;
   private _baseFilePath!: string | null;
   private _baseHarnessNotes!: string | null;
+  private _baseHarnessOrigin!: "library" | "written" | "repaired" | null;
   private _baseHarnessSource!: string | null;
   private _baseImagePath!: string | null;
+  private _baseLibraryEntryId!: number | null;
   private _baseMockedModules!: MockedModule[] | null;
-  private _changeKind!: "modified" | "added" | "removed" | "affected_parent" | "replaced";
+  private _changedStateCount!: number;
+  private _changeKind!: "modified" | "added" | "removed" | "affected_parent" | "replaced" | "rechecked";
   private _changeReason!: string | null;
   private _codeDiff!: string | null;
   private _createdAt!: Date;
@@ -24,18 +27,23 @@ export class VisualizationComponentModel {
   private _displayName!: string;
   private _exportName!: string;
   private _filePath!: string;
+  private _harnessNeedsUpdate!: boolean;
   private _harnessNotes!: string | null;
+  private _harnessOrigin!: "library" | "written" | "repaired" | null;
   private _harnessSource!: string | null;
   private _headError!: string | null;
   private _headImagePath!: string | null;
   private _id!: number;
   private _imageHeight!: number | null;
   private _imageWidth!: number | null;
+  private _libraryEntryId!: number | null;
   private _mockedModules!: MockedModule[];
   private _rank!: number;
   private _renderStatus!: "pending" | "rendered" | "partial" | "failed" | "skipped";
   private _risk!: "none" | "check" | "likely_regression" | null;
   private _skipReason!: string | null;
+  private _sourceChangedSinceWrite!: boolean | null;
+  private _stateCount!: number;
   private _structuralDiff!: StructuralChange[] | null;
   private _successorEvidence!: SuccessorEvidence[] | null;
   private _updatedAt!: Date;
@@ -77,16 +85,25 @@ export class VisualizationComponentModel {
   setBaseHarnessNotes(value: string | null): void {
     this._baseHarnessNotes = value;
   }
+  setBaseHarnessOrigin(value: "library" | "written" | "repaired" | null): void {
+    this._baseHarnessOrigin = value;
+  }
   setBaseHarnessSource(value: string | null): void {
     this._baseHarnessSource = value;
   }
   setBaseImagePath(value: string | null): void {
     this._baseImagePath = value;
   }
+  setBaseLibraryEntryId(value: number | null): void {
+    this._baseLibraryEntryId = value;
+  }
   setBaseMockedModules(value: MockedModule[] | null): void {
     this._baseMockedModules = value;
   }
-  setChangeKind(value: "modified" | "added" | "removed" | "affected_parent" | "replaced"): void {
+  setChangedStateCount(value: number): void {
+    this._changedStateCount = value;
+  }
+  setChangeKind(value: "modified" | "added" | "removed" | "affected_parent" | "replaced" | "rechecked"): void {
     this._changeKind = value;
   }
   setChangeReason(value: string | null): void {
@@ -113,8 +130,14 @@ export class VisualizationComponentModel {
   setFilePath(value: string): void {
     this._filePath = value;
   }
+  setHarnessNeedsUpdate(value: boolean): void {
+    this._harnessNeedsUpdate = value;
+  }
   setHarnessNotes(value: string | null): void {
     this._harnessNotes = value;
+  }
+  setHarnessOrigin(value: "library" | "written" | "repaired" | null): void {
+    this._harnessOrigin = value;
   }
   setHarnessSource(value: string | null): void {
     this._harnessSource = value;
@@ -134,6 +157,9 @@ export class VisualizationComponentModel {
   setImageWidth(value: number | null): void {
     this._imageWidth = value;
   }
+  setLibraryEntryId(value: number | null): void {
+    this._libraryEntryId = value;
+  }
   setMockedModules(value: MockedModule[]): void {
     this._mockedModules = value;
   }
@@ -148,6 +174,12 @@ export class VisualizationComponentModel {
   }
   setSkipReason(value: string | null): void {
     this._skipReason = value;
+  }
+  setSourceChangedSinceWrite(value: boolean | null): void {
+    this._sourceChangedSinceWrite = value;
+  }
+  setStateCount(value: number): void {
+    this._stateCount = value;
   }
   setStructuralDiff(value: StructuralChange[] | null): void {
     this._structuralDiff = value;
@@ -184,16 +216,25 @@ export class VisualizationComponentModel {
   get baseHarnessNotes(): string | null {
     return this._baseHarnessNotes;
   }
+  get baseHarnessOrigin(): "library" | "written" | "repaired" | null {
+    return this._baseHarnessOrigin;
+  }
   get baseHarnessSource(): string | null {
     return this._baseHarnessSource;
   }
   get baseImagePath(): string | null {
     return this._baseImagePath;
   }
+  get baseLibraryEntryId(): number | null {
+    return this._baseLibraryEntryId;
+  }
   get baseMockedModules(): MockedModule[] | null {
     return this._baseMockedModules;
   }
-  get changeKind(): "modified" | "added" | "removed" | "affected_parent" | "replaced" {
+  get changedStateCount(): number {
+    return this._changedStateCount;
+  }
+  get changeKind(): "modified" | "added" | "removed" | "affected_parent" | "replaced" | "rechecked" {
     return this._changeKind;
   }
   get changeReason(): string | null {
@@ -220,8 +261,14 @@ export class VisualizationComponentModel {
   get filePath(): string {
     return this._filePath;
   }
+  get harnessNeedsUpdate(): boolean {
+    return this._harnessNeedsUpdate;
+  }
   get harnessNotes(): string | null {
     return this._harnessNotes;
+  }
+  get harnessOrigin(): "library" | "written" | "repaired" | null {
+    return this._harnessOrigin;
   }
   get harnessSource(): string | null {
     return this._harnessSource;
@@ -241,6 +288,9 @@ export class VisualizationComponentModel {
   get imageWidth(): number | null {
     return this._imageWidth;
   }
+  get libraryEntryId(): number | null {
+    return this._libraryEntryId;
+  }
   get mockedModules(): MockedModule[] {
     return this._mockedModules;
   }
@@ -255,6 +305,12 @@ export class VisualizationComponentModel {
   }
   get skipReason(): string | null {
     return this._skipReason;
+  }
+  get sourceChangedSinceWrite(): boolean | null {
+    return this._sourceChangedSinceWrite;
+  }
+  get stateCount(): number {
+    return this._stateCount;
   }
   get structuralDiff(): StructuralChange[] | null {
     return this._structuralDiff;
