@@ -1,16 +1,28 @@
 import path from "node:path";
-import { Transform } from "class-transformer";
+import { Transform, Type } from "class-transformer";
 import {
   IsIn,
+  IsInt,
+  IsNumber,
   IsOptional,
   IsString,
   Matches,
+  Max,
   MaxLength,
+  Min,
   MinLength,
   Validate,
+  ValidateIf,
   ValidatorConstraint,
+  type ValidationArguments,
   type ValidatorConstraintInterface
 } from "class-validator";
+import {
+  LIBRARY_SPEND_CAP_MAX_USD,
+  LIBRARY_SPEND_CAP_MIN_USD,
+  STATE_ALLOWANCE_MAX,
+  STATE_ALLOWANCE_MIN
+} from "../../config-consts";
 import { expandHome } from "../../utilities/helpers/paths";
 
 /** Trims, then expands a leading "~" or "~/" (00 §14.4). Non-strings pass through to fail @IsString. */
@@ -56,6 +68,21 @@ export class IsRepoRelativeAppRootConstraint implements ValidatorConstraintInter
   }
 }
 
+/** 16 §14.2: a spending cap is only accepted together with `libraryBuildMode: "scan"`. */
+@ValidatorConstraint({ name: "spendCapNeedsScan", async: false })
+export class SpendCapNeedsScanConstraint implements ValidatorConstraintInterface {
+  /** True when the object's libraryBuildMode is "scan". */
+  validate(_value: unknown, args: ValidationArguments): boolean {
+    const mode: unknown = (args.object as { libraryBuildMode?: unknown }).libraryBuildMode;
+    return mode === "scan";
+  }
+
+  /** Message shown for a cap without a scan. */
+  defaultMessage(): string {
+    return "A spending cap only applies to a scan.";
+  }
+}
+
 /**
  * POST /api/repositories body (00 §14.4 RepositoryCreateRequest, 15 §5.4.5). Shape only: whether the folder is a supported
  * project is decided by ProjectDetectionService.
@@ -95,4 +122,28 @@ export class RepositoryCreateDTO {
   @IsOptional()
   @IsIn(["desktop", "tablet", "mobile"])
   renderViewport?: "desktop" | "tablet" | "mobile";
+
+  // --- 16f block (16 §14.2): harness library choices of the Add repository dialog ---
+
+  /** "grow" (default): runs fill the library; "scan": a whole-app scan starts right after registering. */
+  @IsOptional()
+  @IsIn(["grow", "scan"])
+  libraryBuildMode?: "grow" | "scan";
+
+  /** Maximum number of states per harness, 1–5 (default STATE_ALLOWANCE_DEFAULT). */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(STATE_ALLOWANCE_MIN)
+  @Max(STATE_ALLOWANCE_MAX)
+  stateAllowance?: number;
+
+  /** Spending cap of the scan in USD (2 decimals); null or absent = no cap. Only with libraryBuildMode "scan". */
+  @ValidateIf((dto: RepositoryCreateDTO) => dto.scanSpendCapUsd !== null && dto.scanSpendCapUsd !== undefined)
+  @IsNumber({ maxDecimalPlaces: 2, allowNaN: false, allowInfinity: false })
+  @Min(LIBRARY_SPEND_CAP_MIN_USD)
+  @Max(LIBRARY_SPEND_CAP_MAX_USD)
+  @Validate(SpendCapNeedsScanConstraint)
+  scanSpendCapUsd?: number | null;
+  // --- end 16f block ---
 }

@@ -62,3 +62,9 @@ export function toLibraryJobView(job: HarnessLibraryJobModel, repositoryName: st
     completedAt: toIsoStringOrNull(job.completedAt)
   };
 }
+
+/** POST /api/library-jobs/:id/cancel: 200 "cancelled" (removed from the queue) or 202 "cancel_requested". */
+export interface CancelLibraryJobResponse {
+  id: number;
+  status: "cancelled" | "cancel_requested";
+}

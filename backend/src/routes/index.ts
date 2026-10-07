@@ -1,5 +1,6 @@
 import type { Express, RequestHandler } from "express";
 import type {
+  HarnessLibraryController,
   HealthController,
   RepositoriesController,
   SettingsController,
@@ -13,6 +14,8 @@ export type RouteDependencies = {
   settingsController: SettingsController;
   repositoriesController: RepositoriesController;
   visualizationsController: VisualizationsController;
+  /** 16f: library and job routes; 16g and 16k add their routes to the same controller. */
+  harnessLibraryController: HarnessLibraryController;
 };
 
 /** The single explicit route map (guidelines §4.2). Every /api route carries requireLocal. */
@@ -83,4 +86,39 @@ export function registerRoutes(app: Express, dependencies: RouteDependencies): v
     visualizationsController.cancel.bind(visualizationsController)
   );
   app.delete("/api/visualizations/:id", requireLocal, visualizationsController.remove.bind(visualizationsController));
+
+  // ----- 16f: library (16 §14.1). library-estimate is a fixed POST path: no POST /api/repositories/:id exists. -----
+  const { harnessLibraryController } = dependencies;
+  app.post(
+    "/api/repositories/library-estimate",
+    requireLocal,
+    harnessLibraryController.estimateFolder.bind(harnessLibraryController)
+  );
+  app.get(
+    "/api/repositories/:id/library",
+    requireLocal,
+    harnessLibraryController.summary.bind(harnessLibraryController)
+  );
+  app.get(
+    "/api/repositories/:id/library/estimate",
+    requireLocal,
+    harnessLibraryController.estimate.bind(harnessLibraryController)
+  );
+  app.post(
+    "/api/repositories/:id/library/scans",
+    requireLocal,
+    harnessLibraryController.startScan.bind(harnessLibraryController)
+  );
+  app.get("/api/library-jobs/:id", requireLocal, harnessLibraryController.getJob.bind(harnessLibraryController));
+  app.get(
+    "/api/library-jobs/:id/events",
+    requireLocal,
+    harnessLibraryController.jobEvents.bind(harnessLibraryController)
+  );
+  app.post(
+    "/api/library-jobs/:id/cancel",
+    requireLocal,
+    harnessLibraryController.cancelJob.bind(harnessLibraryController)
+  );
+  // ----- end 16f -----
 }

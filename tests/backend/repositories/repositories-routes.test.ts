@@ -113,3 +113,22 @@ test("POST /api/repositories rejects an appRoot with '..', a leading '/', or NUL
     );
   }
 });
+
+test("PATCH /api/repositories/:id validates stateAllowance (1–5) and renderViewport (16 §14.2)", async (t) => {
+  const app = await startTestApp();
+  t.after(() => app.close());
+  for (const body of [
+    { stateAllowance: 0 },
+    { stateAllowance: 6 },
+    { stateAllowance: 1.5 },
+    { renderViewport: "tv" }
+  ]) {
+    const response = await fetch(`${app.baseUrl}/api/repositories/1`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+    assert.equal(response.status, 400, JSON.stringify(body));
+    assert.equal(((await response.json()) as { error_reason: string }).error_reason, "validation_failed");
+  }
+});

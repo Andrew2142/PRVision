@@ -12,7 +12,13 @@ import {
   SHUTDOWN_TIMEOUT_MS
 } from "./config-consts";
 import { validateConfig } from "./config-consts/config-validation";
-import { HealthController, RepositoriesController, SettingsController, VisualizationsController } from "./controllers";
+import {
+  HarnessLibraryController,
+  HealthController,
+  RepositoriesController,
+  SettingsController,
+  VisualizationsController
+} from "./controllers";
 import { assertDatabaseReady } from "./database/schema-readiness";
 import {
   LocalAuthMiddleware,
@@ -108,7 +114,8 @@ export function buildRouteDependencies(localAuth: LocalAuthMiddleware): RouteDep
     healthController: new HealthController(),
     settingsController: new SettingsController(),
     repositoriesController: new RepositoriesController(),
-    visualizationsController: new VisualizationsController()
+    visualizationsController: new VisualizationsController(),
+    harnessLibraryController: new HarnessLibraryController() // 16f (16g and 16k add routes to it)
   };
 }
 

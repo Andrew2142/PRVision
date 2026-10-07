@@ -19,7 +19,7 @@ export function angularStepFactories(): PipelineStepFactories {
   return {
     changeAnalysis: () => new AngularChangeAnalysisService(),
     libraryResolution: () => new LibraryResolutionService(), // 16d block
-    harnessGeneration: (ctx, sourceQueries) => createAngularHarnessGeneration(ctx, sourceQueries),
+    harnessGeneration: (ctx, sourceQueries, deps) => createAngularHarnessGeneration(ctx, sourceQueries, deps ?? {}), // 16f deps
     render: (deps) => new AngularRenderService(renderServiceOverrides(deps)), // 16e block
     imageDiff: () => new ImageDiffService(),
     structuralDiff: () => new AngularStructuralDiffService(),

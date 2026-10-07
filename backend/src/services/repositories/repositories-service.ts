@@ -1,5 +1,10 @@
 import fs from "node:fs/promises";
-import { ANGULAR_CACHE_DIR_NAME, BRANCH_LIST_MAX, COMMIT_LIST_DEFAULT_LIMIT } from "../../config-consts";
+import {
+  ANGULAR_CACHE_DIR_NAME,
+  BRANCH_LIST_MAX,
+  COMMIT_LIST_DEFAULT_LIMIT,
+  STATE_ALLOWANCE_DEFAULT
+} from "../../config-consts";
 import {
   toAppDiscoveryView,
   toCommitView,
@@ -8,13 +13,17 @@ import {
   type AppDiscoveryView,
   type BranchListView,
   type CommitView,
+  type LibraryJobView,
   type PullRequestView,
   type RepositoryCommitsQueryDTO,
+  type RepositoryCreateResponse,
   type RepositoryView
 } from "../../dtos";
 import {
+  ACTIVE_LIBRARY_JOB_STATUSES,
   DeletionMode,
   ErrorReason,
+  LibraryBuildMode,
   Table,
   TERMINAL_VISUALIZATION_STATUSES,
   VisualizationSourceType
@@ -33,6 +42,7 @@ import {
   type ApiResponse,
   type GitCommitEntry
 } from "../../utilities";
+import { HarnessLibraryService, type StartScanInput } from "../harness-library/harness-library-service";
 import { SettingsStore, type SecretRead } from "../settings/settings-store";
 import { removeWorkingTreeSnapshot } from "../visualizations/pipeline/workspace-prepare-service";
 import {
@@ -62,6 +72,20 @@ export interface RepositoriesServiceDependencies {
   now: () => Date;
   /** 16d block (16 §11.2): rm -rf `<dataDir>/snapshots/<id>/` of one of the repository's runs. */
   removeWorkingTreeSnapshot: (visualizationId: number) => Promise<void>;
+  /** 16f block (16 §10.1): starts the scan of a repository registered with "scan" (HarnessLibraryService.startScan). */
+  startScan: (repositoryId: number, input: StartScanInput) => Promise<ApiResponse<LibraryJobView>>;
+}
+
+/** Options of create() that are not repository columns (16 §14.2). */
+export interface RepositoryCreateOptions {
+  /** Spending cap of the scan started with libraryBuildMode "scan"; null = no cap. */
+  scanSpendCapUsd: number | null;
+}
+
+/** What PATCH /api/repositories/:id may change (16 §14.2). */
+export interface RepositorySettingsChanges {
+  renderViewport?: "desktop" | "tablet" | "mobile";
+  stateAllowance?: number;
 }
 
 const STDERR_MESSAGE_MAX_CHARS = 200;
@@ -92,7 +116,8 @@ export class RepositoriesService {
       readGithubToken: deps.readGithubToken ?? (() => new SettingsStore().readGithubToken()),
       githubClientFactory: deps.githubClientFactory ?? ((token: string) => GitHubClient.fromToken(token)),
       now: deps.now ?? (() => new Date()),
-      removeWorkingTreeSnapshot: deps.removeWorkingTreeSnapshot ?? ((id) => removeWorkingTreeSnapshot(id))
+      removeWorkingTreeSnapshot: deps.removeWorkingTreeSnapshot ?? ((id) => removeWorkingTreeSnapshot(id)),
+      startScan: deps.startScan ?? ((id, input) => new HarnessLibraryService().startScan(id, input))
     };
   }
 
@@ -162,8 +187,14 @@ export class RepositoriesService {
     }
   }
 
-  /** Detects the app at the payload's localPath (and appRoot/angularProject) and inserts it (201). */
-  async create(): Promise<ApiResponse<RepositoryView>> {
+  /**
+   * Detects the app at the payload's localPath (and appRoot/angularProject) and inserts it (201). With
+   * libraryBuildMode "scan" a whole-app scan starts right after the insert (16 §10.1); when it cannot start the
+   * repository is still created and `scanStartError` says why.
+   */
+  async create(
+    options: RepositoryCreateOptions = { scanSpendCapUsd: null }
+  ): Promise<ApiResponse<RepositoryCreateResponse>> {
     try {
       // Detect the app (business validation of the folder and the selection).
       const detection = await this.deps.detector.detect(this.repositoryPayload.localPath, this.payloadSelection());
@@ -189,7 +220,8 @@ export class RepositoriesService {
         {
           name: nameOverride ?? project.suggestedName,
           ...this.detectedFields(project),
-          renderViewport: this.payloadViewport() ?? (await suggestRenderViewport(project.rootPath, project.appRoot))
+          renderViewport: this.payloadViewport() ?? (await suggestRenderViewport(project.rootPath, project.appRoot)),
+          ...this.payloadLibrarySettings() // 16f block
         },
         Table.REPOSITORIES
       );
@@ -206,7 +238,29 @@ export class RepositoriesService {
         return { status: 500, error: "Repository could not be saved", error_reason: ErrorReason.INTERNAL_ERROR };
       }
 
-      const view = toRepositoryView(new RepositoryModel(row));
+      let view = toRepositoryView(new RepositoryModel(row));
+      // --- 16f block (16 §10.1): "scan" starts the whole-app scan; a failure never undoes the registration ---
+      let scanJobId: number | null = null;
+      let scanStartError: string | null = null;
+      if (view.libraryBuildMode === LibraryBuildMode.SCAN) {
+        const started = await this.deps.startScan(view.id, { kind: "scan", spendCapUsd: options.scanSpendCapUsd });
+        if (started.status === 202 && started.data) {
+          scanJobId = started.data.id;
+        } else {
+          scanStartError = Array.isArray(started.error)
+            ? started.error.join(" ")
+            : (started.error ?? "The scan could not be started.");
+        }
+        const reloaded = await this.deps.queryHandler.validateAndSelect(
+          RepositoryModel,
+          { id: view.id },
+          Table.REPOSITORIES
+        );
+        if (reloaded) {
+          view = toRepositoryView(reloaded);
+        }
+      }
+      // --- end 16f block ---
       this.log.info(
         {
           event: "repositories.repository.registered",
@@ -222,7 +276,7 @@ export class RepositoriesService {
         },
         "Repository registered"
       );
-      return { status: 201, data: view };
+      return { status: 201, data: { ...view, scanJobId, scanStartError } };
     } catch (error: unknown) {
       return this.unexpected(error, "create");
     }
@@ -318,6 +372,27 @@ export class RepositoriesService {
           error_reason: ErrorReason.CONFLICT
         };
       }
+
+      // --- 16f block (16 §14.1): no removal while a scan or repair of the repository is active ---
+      const activeJobs = await this.deps.queryHandler.count(
+        { repositoryId: repository.id, status: Where.in([...ACTIVE_LIBRARY_JOB_STATUSES]) },
+        Table.HARNESS_LIBRARY_JOBS
+      );
+      if (activeJobs.status !== 200) {
+        this.log.error(
+          { event: "repositories.repository.count_failed", status: activeJobs.status },
+          "Active library job count failed"
+        );
+        return { status: 500, error: "Repository could not be removed", error_reason: ErrorReason.INTERNAL_ERROR };
+      }
+      if ((activeJobs.data?.count ?? 0) > 0) {
+        return {
+          status: 409,
+          error: "A scan or repair is running for this repository. Cancel it first.",
+          error_reason: ErrorReason.CONFLICT
+        };
+      }
+      // --- end 16f block ---
 
       const deleteResponse = await this.deps.queryHandler.delete(
         { id: repository.id },
@@ -639,14 +714,24 @@ export class RepositoriesService {
     return value === "desktop" || value === "tablet" || value === "mobile" ? value : null;
   }
 
-  /** PATCH /api/repositories/:id — saves user settings (the screen size). Detection results are untouched. */
-  async updateSettings(renderViewport: "desktop" | "tablet" | "mobile"): Promise<ApiResponse<RepositoryView>> {
+  /**
+   * PATCH /api/repositories/:id — saves user settings (screen size, state allowance; 16 §14.2). Detection results
+   * are untouched. Changing the allowance never starts a job (16 §10.6). 400 "Nothing to update." without a field.
+   */
+  async updateSettings(changes: RepositorySettingsChanges): Promise<ApiResponse<RepositoryView>> {
     try {
+      const values: Record<string, unknown> = {
+        ...(changes.renderViewport !== undefined ? { renderViewport: changes.renderViewport } : {}),
+        ...(changes.stateAllowance !== undefined ? { stateAllowance: changes.stateAllowance } : {})
+      };
+      if (Object.keys(values).length === 0) {
+        return { status: 400, error: "Nothing to update.", error_reason: ErrorReason.VALIDATION_FAILED };
+      }
       const existing = await this.loadRepository();
       if (!existing) {
         return this.notFound();
       }
-      const update = await this.deps.queryHandler.update({ renderViewport }, { id: existing.id }, Table.REPOSITORIES);
+      const update = await this.deps.queryHandler.update(values, { id: existing.id }, Table.REPOSITORIES);
       if (update.status !== 200) {
         return { status: 500, error: "Repository could not be saved", error_reason: ErrorReason.INTERNAL_ERROR };
       }
@@ -655,13 +740,23 @@ export class RepositoriesService {
         return this.notFound();
       }
       this.log.info(
-        { event: "repositories.repository.settings_saved", repositoryId: existing.id, renderViewport },
+        { event: "repositories.repository.settings_saved", repositoryId: existing.id, ...values },
         "Repository settings saved"
       );
       return { status: 200, data: toRepositoryView(saved) };
     } catch (error: unknown) {
       return this.unexpected(error, "updateSettings");
     }
+  }
+
+  /** 16f block: the DTO's library build mode and state allowance (defaults "grow" and STATE_ALLOWANCE_DEFAULT). */
+  private payloadLibrarySettings(): { libraryBuildMode: LibraryBuildMode; stateAllowance: number } {
+    const mode: unknown = this.repositoryPayload.libraryBuildMode;
+    const allowance: unknown = this.repositoryPayload.stateAllowance;
+    return {
+      libraryBuildMode: mode === LibraryBuildMode.SCAN ? LibraryBuildMode.SCAN : LibraryBuildMode.GROW,
+      stateAllowance: typeof allowance === "number" ? allowance : STATE_ALLOWANCE_DEFAULT
+    };
   }
 
   private payloadName(): string | null {

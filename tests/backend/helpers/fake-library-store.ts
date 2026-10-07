@@ -196,14 +196,33 @@ export class FakeLibraryStore implements HarnessLibraryStorePort {
     return Promise.resolve();
   }
 
+  /** 16c's rule: marks entries of the repository not already marked; the harness and every other field stay. */
   markOffDefaultBranch(repositoryId: number, entryIds: readonly number[]): Promise<number> {
     this.calls.push({ method: "markOffDefaultBranch", args: [repositoryId, entryIds] });
-    return Promise.resolve(0);
+    let changed = 0;
+    for (const id of entryIds) {
+      const entry = this.entries.get(id);
+      if (entry !== undefined && entry.repositoryId === repositoryId && entry.status !== "off_default_branch") {
+        this.entries.set(id, { ...entry, status: "off_default_branch" });
+        changed += 1;
+      }
+    }
+    return Promise.resolve(changed);
   }
 
+  /** 16c's rule: marked entries go back to ready (harness and no last_error) or needs_update. */
   restoreOnDefaultBranch(repositoryId: number, entryIds: readonly number[]): Promise<number> {
     this.calls.push({ method: "restoreOnDefaultBranch", args: [repositoryId, entryIds] });
-    return Promise.resolve(0);
+    let changed = 0;
+    for (const id of entryIds) {
+      const entry = this.entries.get(id);
+      if (entry !== undefined && entry.repositoryId === repositoryId && entry.status === "off_default_branch") {
+        const ready = entry.harnessSource !== null && entry.lastError === null;
+        this.entries.set(id, { ...entry, status: ready ? "ready" : "needs_update" });
+        changed += 1;
+      }
+    }
+    return Promise.resolve(changed);
   }
 
   counts(repositoryId: number, currentAllowance: number): Promise<LibraryCounts> {

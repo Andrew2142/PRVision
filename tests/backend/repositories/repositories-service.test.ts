@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test, { type TestContext } from "node:test";
 import { DeletionMode, ERROR_REASON_VALUES, Table } from "../../../backend/src/enums";
+import type { LibraryJobView } from "../../../backend/src/dtos";
 import { RepositoryModel } from "../../../backend/src/models";
 import type {
   DetectedProject,
@@ -19,7 +20,7 @@ import type { ApiResponse } from "../../../backend/src/utilities/handlers/respon
 import type { QueryHandler } from "../../../backend/src/utilities/handlers/query-handler";
 import { GitCommandError, type GitCommitEntry } from "../../../backend/src/utilities/services/git-client";
 import { GitHubClient, GitHubClientError } from "../../../backend/src/utilities/services/github-client";
-import { idModel, makeRepositoryRow, makeVisualizationRow } from "../helpers/factories";
+import { idModel, makeLibraryJobRow, makeRepositoryRow, makeVisualizationRow } from "../helpers/factories";
 import { createFakeGithubPort, rawPull } from "../helpers/fake-github-port";
 import { InMemoryQueryHandler } from "../helpers/query-handler-stub";
 import { runWithAuthContext } from "../helpers/test-context";
@@ -122,7 +123,12 @@ test("create inserts detected fields and returns 201 with RepositoryView", async
     entryFilePath: "src/main.tsx",
     globalStylePaths: ["/src/index.css"],
     lastDetectedAt: NOW.toISOString(),
-    createdAt: "2026-01-01T00:00:00.000Z"
+    createdAt: "2026-01-01T00:00:00.000Z",
+    renderViewport: "desktop",
+    libraryBuildMode: "grow",
+    stateAllowance: 3,
+    scanJobId: null,
+    scanStartError: null
   });
   const row = h.stub.row(Table.REPOSITORIES, 1);
   assert.equal(row?.isDeleted, false);
@@ -719,4 +725,141 @@ test("remove deletes the working-tree snapshot folders of the repository's runs 
     [3, 4],
     "only working-tree runs of this repository; a failure does not stop the rest"
   );
+});
+
+// ----- 16f block (16 §14.2, §10.1): library build mode, state allowance, scan on create, remove guard -----
+
+function libraryJobView(id: number): LibraryJobView {
+  return {
+    id,
+    repositoryId: 1,
+    repositoryName: "web-app",
+    kind: "scan",
+    status: "queued",
+    visualizationId: null,
+    componentIds: null,
+    stateAllowance: 4,
+    spendCapUsd: 20,
+    spentUsd: 0,
+    priceExact: true,
+    totalCount: 0,
+    writtenCount: 0,
+    failedCount: 0,
+    skippedCount: 0,
+    processedCount: 0,
+    currentLabel: null,
+    scanSha: null,
+    aiModel: "claude-opus-5-5",
+    errorMessage: null,
+    createdAt: NOW.toISOString(),
+    startedAt: null,
+    completedAt: null
+  };
+}
+
+test("create with libraryBuildMode scan stores the choices and starts the scan with the cap (16 §10.1)", async () => {
+  const h = harness();
+  const started: Array<[number, unknown]> = [];
+  const payload = createPayload("/srv/repos/web-app");
+  payload.setLibraryBuildMode("scan");
+  payload.setStateAllowance(4);
+  const response = await call(() =>
+    h
+      .service(payload, {
+        startScan: (id, input) => {
+          started.push([id, input]);
+          return Promise.resolve({ status: 202, data: libraryJobView(9) });
+        }
+      })
+      .create({ scanSpendCapUsd: 20 })
+  );
+  assert.equal(response.status, 201);
+  assert.equal(response.data?.scanJobId, 9);
+  assert.equal(response.data.scanStartError, null);
+  assert.equal(response.data.libraryBuildMode, "scan");
+  assert.equal(response.data.stateAllowance, 4);
+  assert.deepEqual(started, [[1, { kind: "scan", spendCapUsd: 20 }]]);
+  const row = h.stub.row(Table.REPOSITORIES, 1);
+  assert.equal(row?.libraryBuildMode, "scan");
+  assert.equal(row.stateAllowance, 4);
+});
+
+test("create with scan answers 201 with scanStartError when the scan cannot start (AI not ready)", async () => {
+  const h = harness();
+  const payload = createPayload("/srv/repos/web-app");
+  payload.setLibraryBuildMode("scan");
+  const response = await call(() =>
+    h
+      .service(payload, {
+        startScan: () =>
+          Promise.resolve({
+            status: 400,
+            error: "Add an Anthropic API key in Settings.",
+            error_reason: "ai_not_configured"
+          })
+      })
+      .create({ scanSpendCapUsd: null })
+  );
+  assert.equal(response.status, 201);
+  assert.equal(response.data?.scanJobId, null);
+  assert.equal(response.data.scanStartError, "Add an Anthropic API key in Settings.");
+  assert.equal(h.stub.row(Table.REPOSITORIES, 1)?.isDeleted, false, "the repository is still created");
+});
+
+test("create without a build mode stores grow and the default allowance and never starts a scan", async () => {
+  const h = harness();
+  let startCalls = 0;
+  const response = await call(() =>
+    h
+      .service(createPayload("/srv/repos/web-app"), {
+        startScan: () => {
+          startCalls += 1;
+          return Promise.resolve({ status: 202, data: libraryJobView(1) });
+        }
+      })
+      .create()
+  );
+  assert.equal(response.status, 201);
+  assert.equal(startCalls, 0);
+  assert.equal(h.stub.row(Table.REPOSITORIES, 1)?.libraryBuildMode, "grow");
+  assert.equal(h.stub.row(Table.REPOSITORIES, 1)?.stateAllowance, 3);
+});
+
+test("updateSettings saves the state allowance and the screen size; nothing to update is 400", async () => {
+  const h = harness();
+  h.stub.seed(Table.REPOSITORIES, [makeRepositoryRow({ id: 1 })]);
+  const allowance = await call(() => h.service(idModel(1)).updateSettings({ stateAllowance: 5 }));
+  assert.equal(allowance.status, 200);
+  assert.equal(allowance.data?.stateAllowance, 5);
+  assert.equal(allowance.data.renderViewport, "desktop");
+  const both = await call(() => h.service(idModel(1)).updateSettings({ renderViewport: "mobile", stateAllowance: 1 }));
+  assert.equal(both.data?.renderViewport, "mobile");
+  assert.equal(both.data.stateAllowance, 1);
+  const empty = await call(() => h.service(idModel(1)).updateSettings({}));
+  assert.deepEqual(empty, { status: 400, error: "Nothing to update.", error_reason: "validation_failed" });
+  assert.equal((await call(() => h.service(idModel(9)).updateSettings({ stateAllowance: 2 }))).status, 404);
+  assert.equal(h.stub.callsFor("insert", Table.HARNESS_LIBRARY_JOBS).length, 0, "changing the allowance starts no job");
+});
+
+test("remove returns 409 while a scan or repair of the repository is active", async () => {
+  for (const job of [
+    makeLibraryJobRow({ id: 1, status: "running", totalCount: 2 }),
+    makeLibraryJobRow({ id: 2, kind: "repair", status: "queued", visualizationId: 5, componentIds: [1] })
+  ]) {
+    const h = harness();
+    h.stub.seed(Table.REPOSITORIES, [makeRepositoryRow({ id: 1 })]);
+    h.stub.seed(Table.VISUALIZATIONS, [makeVisualizationRow({ id: 5, status: "completed", completedAt: NOW })]);
+    h.stub.seed(Table.HARNESS_LIBRARY_JOBS, [job]);
+    const response = await call(() => h.service(idModel(1)).remove());
+    assert.deepEqual(response, {
+      status: 409,
+      error: "A scan or repair is running for this repository. Cancel it first.",
+      error_reason: "conflict"
+    });
+    assert.equal(h.stub.row(Table.REPOSITORIES, 1)?.isDeleted, false);
+  }
+  const finished = harness();
+  finished.stub.seed(Table.REPOSITORIES, [makeRepositoryRow({ id: 1 })]);
+  finished.stub.seed(Table.HARNESS_LIBRARY_JOBS, [makeLibraryJobRow({ id: 1, status: "completed", completedAt: NOW })]);
+  assert.equal((await call(() => finished.service(idModel(1)).remove())).status, 200);
 });

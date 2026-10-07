@@ -41,9 +41,11 @@ export class RepositoriesController {
         return this.responseHandler.controllerResponse(errorResponse, res);
       }
 
-      // Map to model and create
+      // Map to model and create (the spending cap is not a column: passed alongside, 16 §14.2)
       const model = DTOMapper.map(dto, RepositoryModel);
-      const serviceResponse = await new RepositoriesService(model).create();
+      const serviceResponse = await new RepositoriesService(model).create({
+        scanSpendCapUsd: dto.scanSpendCapUsd ?? null
+      });
       return this.responseHandler.controllerResponse(serviceResponse, res);
     } catch (error: unknown) {
       return this.internalError(error, "create", res);
@@ -97,7 +99,7 @@ export class RepositoriesController {
     }
   }
 
-  /** PATCH /api/repositories/:id — user settings (screen size). */
+  /** PATCH /api/repositories/:id — user settings (screen size, state allowance). */
   async update(req: Request, res: Response): Promise<Response> {
     try {
       const idResult = await this.readId(req);
@@ -111,9 +113,10 @@ export class RepositoriesController {
       if (!isValid) {
         return this.responseHandler.controllerResponse(errorResponse, res);
       }
-      const serviceResponse = await new RepositoriesService(this.modelWithId(idResult.id)).updateSettings(
-        dto.renderViewport
-      );
+      const serviceResponse = await new RepositoriesService(this.modelWithId(idResult.id)).updateSettings({
+        ...(dto.renderViewport !== undefined ? { renderViewport: dto.renderViewport } : {}),
+        ...(dto.stateAllowance !== undefined ? { stateAllowance: dto.stateAllowance } : {})
+      });
       return this.responseHandler.controllerResponse(serviceResponse, res);
     } catch (error: unknown) {
       return this.internalError(error, "update", res);

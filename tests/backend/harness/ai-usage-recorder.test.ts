@@ -148,6 +148,11 @@ test("no other backend source writes aiUsage", () => {
             values.properties.some((p) => p.name !== undefined && p.name.getText(sf) === "aiUsage")
           ) {
             writers.push(path.relative(root, full));
+            // 16 §10.5: the library job recorder owns harness_library_jobs.ai_usage, never visualizations.ai_usage.
+            const table = node.arguments[2]?.getText(sf);
+            if (path.relative(root, full) === "services/harness-library/library-job-usage-recorder.ts") {
+              assert.equal(table, "Table.HARNESS_LIBRARY_JOBS");
+            }
           }
         }
         ts.forEachChild(node, visit);
@@ -156,5 +161,9 @@ test("no other backend source writes aiUsage", () => {
     }
   };
   walk(root);
-  assert.deepEqual(writers, ["services/visualizations/pipeline/ai-usage-recorder.ts"]);
+  // visualizations.ai_usage: AiUsageRecorder only (00 §14.7); harness_library_jobs.ai_usage: the job recorder (16 §10.5).
+  assert.deepEqual(writers.sort(), [
+    "services/harness-library/library-job-usage-recorder.ts",
+    "services/visualizations/pipeline/ai-usage-recorder.ts"
+  ]);
 });

@@ -12,8 +12,11 @@ import {
   createLogger,
   describeBootError,
   installGracefulShutdown,
+  type LibraryJobProcessor,
   type VisualizationJobProcessor
 } from "./utilities";
+import { LibraryJobRecovery } from "./services/harness-library/library-job-recovery";
+import { LibraryScanWorkerService } from "./services/harness-library/library-scan-worker-service";
 import { VisualizationWorkerService } from "./services/visualizations/pipeline/visualization-worker-service";
 
 const log = createLogger("worker");
@@ -23,14 +26,21 @@ const processVisualization: VisualizationJobProcessor = async ({ visualizationId
   await new VisualizationWorkerService().run({ visualizationId, jobId, signal });
 };
 
+/** [16f] Scan and rescan jobs (16 §10.4): job = { libraryJobId, jobId, signal }. */
+const processLibraryScan: LibraryJobProcessor = async (job) => {
+  await new LibraryScanWorkerService().run(job);
+};
+
 async function bootstrapWorker(): Promise<void> {
   let sweep: { stop(): void } | null = null; // [07] periodic recovery sweep, started after the worker
+  let librarySweep: { stop(): void } | null = null; // [16f] library job recovery sweep
   const shutdown = installGracefulShutdown(
     [
       {
         name: "recovery-sweep", // [07] first step: no recovery write races the shutdown of the active job
         close: () => {
           sweep?.stop();
+          librarySweep?.stop(); // [16f]
           return Promise.resolve();
         }
       },
@@ -58,6 +68,17 @@ async function bootstrapWorker(): Promise<void> {
       AuthContext.runAsLocalUser(() => processVisualization(job), { requestId: job.jobId })
     );
     sweep = VisualizationWorkerService.startRecoverySweep(); // [07]
+    // [16f] library job recovery (16 §10.8) runs before the scan worker takes jobs; then the sweep.
+    const libraryRecovery = new LibraryJobRecovery();
+    const libraryReport = await AuthContext.runAsLocalUser(() => libraryRecovery.recoverOnBoot(), {
+      requestId: "library-boot-recovery"
+    });
+    log.info({ event: "library.recovery.boot_finished", ...libraryReport }, "Library job boot recovery finished");
+    await QueueService.startLibraryScanWorker((job) =>
+      AuthContext.runAsLocalUser(() => processLibraryScan(job), { requestId: job.jobId })
+    );
+    librarySweep = libraryRecovery.startSweep(); // [16f]
+    // [end 16f]
     log.info({ event: "worker.boot.started" }, "PRVision worker started");
   } catch (error: unknown) {
     log.fatal(

@@ -85,3 +85,46 @@ test("rejects names with control characters", async () => {
   assert.ok(result.errors.includes("name must not contain control characters"));
   assert.equal((await validate({ localPath: "/srv/app", name: "tab\tname" })).ok, false);
 });
+
+// ----- 16f block (16 §14.2): library choices -----
+
+test("accepts libraryBuildMode, stateAllowance 1–5 and a cap with two decimals for a scan", async () => {
+  const result = await validate({
+    localPath: "/srv/app",
+    libraryBuildMode: "scan",
+    stateAllowance: 5,
+    scanSpendCapUsd: 12.5
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.dto?.libraryBuildMode, "scan");
+  assert.equal(result.dto.stateAllowance, 5);
+  assert.equal(result.dto.scanSpendCapUsd, 12.5);
+  assert.equal((await validate({ localPath: "/srv/app", libraryBuildMode: "grow" })).ok, true);
+  assert.equal((await validate({ localPath: "/srv/app", libraryBuildMode: "scan", scanSpendCapUsd: null })).ok, true);
+});
+
+test("rejects a spending cap without a scan with 'A spending cap only applies to a scan.'", async () => {
+  for (const body of [
+    { localPath: "/srv/app", scanSpendCapUsd: 20 },
+    { localPath: "/srv/app", libraryBuildMode: "grow", scanSpendCapUsd: 20 }
+  ]) {
+    const result = await validate(body);
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.includes("A spending cap only applies to a scan."), JSON.stringify(result.errors));
+  }
+  assert.equal((await validate({ localPath: "/srv/app", libraryBuildMode: "grow", scanSpendCapUsd: null })).ok, true);
+});
+
+test("rejects an unknown build mode, an allowance outside 1–5 and a cap outside 0.5–10 000 or with 3 decimals", async () => {
+  for (const body of [
+    { localPath: "/srv/app", libraryBuildMode: "whole" },
+    { localPath: "/srv/app", stateAllowance: 0 },
+    { localPath: "/srv/app", stateAllowance: 6 },
+    { localPath: "/srv/app", stateAllowance: 2.5 },
+    { localPath: "/srv/app", libraryBuildMode: "scan", scanSpendCapUsd: 0.25 },
+    { localPath: "/srv/app", libraryBuildMode: "scan", scanSpendCapUsd: 10_000.5 },
+    { localPath: "/srv/app", libraryBuildMode: "scan", scanSpendCapUsd: 1.005 }
+  ]) {
+    assert.equal((await validate(body)).ok, false, JSON.stringify(body));
+  }
+});

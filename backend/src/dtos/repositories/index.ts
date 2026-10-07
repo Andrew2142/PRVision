@@ -1,6 +1,7 @@
 export * from "./app-discovery-view.dto";
 export * from "./branch-list-view.dto";
 export * from "./commit-view.dto";
+export * from "./library-estimate-request.dto";
 export * from "./pull-request-view.dto";
 export * from "./repository-commits-query.dto";
 export * from "./repository-create.dto";

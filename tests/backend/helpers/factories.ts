@@ -13,7 +13,12 @@ import {
   COMPONENT_RISK_VALUES,
   COMPONENT_VISUAL_CHANGE_VALUES,
   CONSOLE_LEVEL_VALUES,
+  HARNESS_LIBRARY_ORIGIN_VALUES,
+  HARNESS_LIBRARY_STATUS_VALUES,
   LIBRARY_BUILD_MODE_VALUES,
+  LIBRARY_JOB_KIND_VALUES,
+  LIBRARY_JOB_STATUS_VALUES,
+  TERMINAL_LIBRARY_JOB_STATUSES,
   NON_TERMINAL_VISUALIZATION_STATUSES,
   PACKAGE_MANAGER_VALUES,
   REPOSITORY_FRAMEWORK_VALUES,
@@ -31,6 +36,9 @@ export type RepositoryRow = RowOf<"repositories">;
 export type VisualizationRow = RowOf<"visualizations">;
 export type ComponentRow = RowOf<"visualization_components">;
 export type ConsoleEventRow = RowOf<"visualization_console_events">;
+export type LibraryEntryRow = RowOf<"harness_library_entries">;
+export type LibraryJobRow = RowOf<"harness_library_jobs">;
+export type LibraryJobEventRow = RowOf<"harness_library_job_events">;
 
 /** Fixed timestamp used by every factory (and InMemoryQueryHandler's default clock). */
 export const FIXED_DATE = "2026-01-01T00:00:00.000Z";
@@ -335,6 +343,125 @@ export function makeConsoleEventRow(overrides: Partial<ConsoleEventRow> = {}): C
   };
   checkEnum(row.level, CONSOLE_LEVEL_VALUES, "visualization_console_events_level_check");
   checkEnum(row.stage, VISUALIZATION_STATUS_VALUES, "visualization_console_events_stage_check");
+  return row;
+}
+
+/** harness_library_entries row (16 §6.3): a ready React harness with one Default state, revision 1. */
+export function makeLibraryEntryRow(overrides: Partial<LibraryEntryRow> = {}): LibraryEntryRow {
+  const row: LibraryEntryRow = {
+    id: 1,
+    repositoryId: 1,
+    framework: "react_vite",
+    filePath: "src/components/Card.tsx",
+    exportName: "default",
+    displayName: "Card",
+    selector: null,
+    sourceFingerprint: null,
+    harnessSource: "export default definePrvisionHarness({ states: [] });",
+    mockedModules: [],
+    notes: "",
+    states: [{ name: "Default", steps: [] }],
+    stateCount: 1,
+    stateAllowance: 3,
+    status: "ready",
+    origin: "scan",
+    revision: 1,
+    lastError: null,
+    lastFailedVisualizationId: null,
+    aiModel: "claude-opus-5-5",
+    aiUsage: null,
+    costUsd: null,
+    writtenAt: at(),
+    lastRenderedAt: null,
+    createdAt: at(),
+    updatedAt: at(),
+    ...overrides
+  };
+  checkEnum(row.framework, REPOSITORY_FRAMEWORK_VALUES, "harness_library_entries_framework_check");
+  checkEnum(row.status, HARNESS_LIBRARY_STATUS_VALUES, "harness_library_entries_status_check");
+  checkEnum(row.origin, HARNESS_LIBRARY_ORIGIN_VALUES, "harness_library_entries_origin_check");
+  check(
+    (row.harnessSource === null && row.stateCount === 0) ||
+      (row.harnessSource !== null && row.stateCount >= 1 && row.stateCount <= 5),
+    "harness_library_entries_state_count_check",
+    `stateCount ${row.stateCount}`
+  );
+  check(
+    row.status !== "ready" || row.harnessSource !== null,
+    "harness_library_entries_ready_harness_check",
+    "ready without a harness"
+  );
+  check(row.stateAllowance >= 1 && row.stateAllowance <= 5, "harness_library_entries_state_allowance_check", "");
+  return row;
+}
+
+/** harness_library_jobs row (16 §6.4): a queued scan of repository 1 without a cap. */
+export function makeLibraryJobRow(overrides: Partial<LibraryJobRow> = {}): LibraryJobRow {
+  const id = overrides.id ?? 1;
+  const row: LibraryJobRow = {
+    id,
+    repositoryId: 1,
+    kind: "scan",
+    status: "queued",
+    visualizationId: null,
+    componentIds: null,
+    stateAllowance: 3,
+    spendCapUsd: null,
+    scanSha: null,
+    totalCount: 0,
+    writtenCount: 0,
+    failedCount: 0,
+    skippedCount: 0,
+    currentLabel: null,
+    spentUsd: 0,
+    aiUsage: null,
+    aiModel: "claude-opus-5-5",
+    jobId: `scan-${id}`,
+    errorMessage: null,
+    startedAt: null,
+    completedAt: null,
+    createdAt: at(),
+    updatedAt: at(),
+    ...overrides
+  };
+  checkEnum(row.kind, LIBRARY_JOB_KIND_VALUES, "harness_library_jobs_kind_check");
+  checkEnum(row.status, LIBRARY_JOB_STATUS_VALUES, "harness_library_jobs_status_check");
+  check(
+    (row.kind === "repair") === (row.visualizationId !== null) &&
+      (row.kind === "repair") === (row.componentIds !== null),
+    "harness_library_jobs_repair_check",
+    `kind ${row.kind}`
+  );
+  check(
+    row.spendCapUsd === null || (row.spendCapUsd > 0 && row.kind !== "repair"),
+    "harness_library_jobs_spend_cap_check",
+    String(row.spendCapUsd)
+  );
+  check(
+    row.writtenCount + row.failedCount + row.skippedCount <= row.totalCount,
+    "harness_library_jobs_counts_check",
+    `counts over total ${row.totalCount}`
+  );
+  const terminal = (TERMINAL_LIBRARY_JOB_STATUSES as readonly string[]).includes(row.status);
+  check(
+    row.completedAt === null || terminal,
+    "harness_library_jobs_completed_at_check",
+    `completedAt on ${row.status}`
+  );
+  return row;
+}
+
+/** harness_library_job_events row (append-only: no updatedAt). */
+export function makeLibraryJobEventRow(overrides: Partial<LibraryJobEventRow> = {}): LibraryJobEventRow {
+  const row: LibraryJobEventRow = {
+    id: 1,
+    jobId: 1,
+    level: "info",
+    message: "Scanning 3 components",
+    createdAt: at(),
+    ...overrides
+  };
+  checkEnum(row.level, CONSOLE_LEVEL_VALUES, "harness_library_job_events_level_check");
   return row;
 }
 

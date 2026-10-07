@@ -12,7 +12,7 @@
  */
 import type { ComponentSourceQueries, PipelineContext } from "../../../types/visualization-pipeline";
 import { ChangeAnalysisService } from "./change-analysis-service";
-import { HarnessGenerationService } from "./harness-generation-service";
+import { HarnessGenerationService, type HarnessGenerationDeps } from "./harness-generation-service";
 import { ImageDiffService } from "./image-diff-service";
 import { LibraryResolutionService } from "./library-resolution-service";
 import {
@@ -84,14 +84,30 @@ export function renderServiceOverrides(deps: RenderStageDeps): {
 }
 // --- end 16e block ---
 
+// --- 16f block (16 §10.4 step 7.3): generation overrides for library jobs (no row writes, job usage, spend cap) ---
+
+/** What library jobs pass to `harnessGeneration(ctx, queries, deps)`; runs pass nothing (09's defaults). */
+export type HarnessGenerationStageDeps = Pick<
+  HarnessGenerationDeps,
+  "persistence" | "usageRecorder" | "shouldStartCall"
+>;
+// --- end 16f block ---
+
 /** How the orchestrator obtains each stage (07 §5.9.2). Tests swap in fakes. */
 export interface PipelineStepFactories {
   /** 08 — default `new ChangeAnalysisService()`; one instance per job. */
   changeAnalysis(): ChangeAnalysisStage;
   /** 16d — default `new LibraryResolutionService()` for both frameworks (16 §8.7 step 1). */
   libraryResolution(): LibraryResolutionStage;
-  /** 09 — default `new HarnessGenerationService(ctx, sourceQueries)`; the same instance serves repairs for 10. */
-  harnessGeneration(ctx: PipelineContext, sourceQueries: ComponentSourceQueries): HarnessGenerationStage;
+  /**
+   * 09 — default `new HarnessGenerationService(ctx, sourceQueries, deps)`; the same instance serves repairs for 10.
+   * `deps` (16f) is passed by library jobs only.
+   */
+  harnessGeneration(
+    ctx: PipelineContext,
+    sourceQueries: ComponentSourceQueries,
+    deps?: HarnessGenerationStageDeps
+  ): HarnessGenerationStage;
   /** 10 — default `new RenderService({ repairHarness })` (10 §5.13.1; other deps use 10's defaults). */
   render(deps: RenderStageDeps): RenderStage;
   /** 11 — defaults `new ImageDiffService()`, `new StructuralDiffService()`, `new SummaryService()`. */
@@ -107,7 +123,7 @@ export function defaultPipelineStepFactories(): PipelineStepFactories {
   return {
     changeAnalysis: () => new ChangeAnalysisService(),
     libraryResolution: () => new LibraryResolutionService(), // 16d block
-    harnessGeneration: (ctx, sourceQueries) => new HarnessGenerationService(ctx, sourceQueries),
+    harnessGeneration: (ctx, sourceQueries, deps) => new HarnessGenerationService(ctx, sourceQueries, deps ?? {}), // 16f deps
     render: (deps) => new RenderService(renderServiceOverrides(deps)), // 16e block
     imageDiff: () => new ImageDiffService(),
     structuralDiff: () => new StructuralDiffService(),
