@@ -1,6 +1,7 @@
 /**
- * HTTP-facing service of the harness library (16 §10, §14.3): library summary, scan estimates (registered and
- * unregistered folders), starting scans and rescans, and the job routes (get, events, cancel). Expected failures
+ * HTTP-facing service of the harness library (16 §10, §11.3, §14.3): library summary, scan estimates (registered and
+ * unregistered folders), starting scans and rescans, the job routes (get, events, cancel) and starting repairs of a
+ * run's cards (16g). Expected failures
  * return ApiResponse; unexpected ones are logged and answered 500 internal_error.
  *
  * Owned blocks (16 §0): 16f (this file's first part), 16g appends the repair methods, 16k the export/import methods.
@@ -22,13 +23,21 @@ import { LIBRARY_JOB_EVENTS_MAX_LIMIT } from "../../dtos/harness-library/library
 import {
   ACTIVE_LIBRARY_JOB_STATUSES,
   ErrorReason,
+  isTerminalVisualizationStatus,
   LibraryBuildMode,
   LibraryJobKind,
   LibraryJobStatus,
   Table,
-  TERMINAL_LIBRARY_JOB_STATUSES
+  TERMINAL_LIBRARY_JOB_STATUSES,
+  VisualizationSourceType
 } from "../../enums";
-import { HarnessLibraryJobEventModel, HarnessLibraryJobModel, RepositoryModel } from "../../models";
+import {
+  HarnessLibraryJobEventModel,
+  HarnessLibraryJobModel,
+  RepositoryModel,
+  VisualizationComponentModel,
+  VisualizationModel
+} from "../../models";
 import type { HarnessLibraryStorePort } from "../../types/harness-library";
 import {
   AiProviderFactory,
@@ -46,6 +55,7 @@ import { HarnessLibraryStore } from "./harness-library-store";
 import { LibraryEstimateService, LibraryEstimateTimeoutError } from "./library-estimate-service";
 import { LibraryJobConsole } from "./library-job-console";
 import { isTerminalLibraryJobStatus, transitionLibraryJob } from "./library-job-state";
+import { SNAPSHOT_UNAVAILABLE_MESSAGE } from "../visualizations/run-workspace-recreator";
 
 /** What a scan start needs besides the repository (16 §10.1). */
 export interface StartScanInput {
@@ -94,6 +104,12 @@ export interface HarnessLibraryServiceDependencies {
 
 const SCAN_RUNNING_MESSAGE = "A scan is already running for this repository.";
 const QUEUE_FAILED_MESSAGE = "Could not queue the scan.";
+// 16g (16 §11.3, §17)
+const RUN_IN_PROGRESS_MESSAGE = "The run is still in progress.";
+const NOT_BROKEN_MESSAGE = "This component's harness does not need repair.";
+const NO_BROKEN_MESSAGE = "No broken harnesses in this run.";
+const REPAIR_RUNNING_MESSAGE = "A repair is already running for this run.";
+const REPAIR_QUEUE_FAILED_MESSAGE = "Could not queue the repair.";
 const ESTIMATE_TIMEOUT_MESSAGE = "Counting components took too long; the estimate is unavailable.";
 const SCAN_KINDS: readonly string[] = [LibraryJobKind.SCAN, LibraryJobKind.RESCAN];
 const JOB_GONE_STATES: readonly string[] = ["missing", "completed", "failed"];
@@ -432,6 +448,168 @@ export class HarnessLibraryService {
 
   // ----- end 16f block -----
 
+  // ----- 16g block: repair (16 §11.3, D8: only the user starts a repair; no spending cap) -----
+
+  /**
+   * POST /api/visualizations/:id/components/:componentId/repair (`[componentId]`) and
+   * POST /api/visualizations/:id/repair-broken (`"broken"`: every row with `harness_needs_update`, rank order).
+   * 404, 409 while the run is in progress, 400 ai_not_configured, 409 for a card that needs no repair, a run with no
+   * broken card, an active repair of the run or a working-tree run without its snapshot; then the job is inserted
+   * and enqueued on `harness-repairs` → 202 LibraryJobView.
+   */
+  async startRepair(
+    visualizationId: number,
+    componentIds: readonly number[] | "broken"
+  ): Promise<ApiResponse<LibraryJobView>> {
+    try {
+      // 1. The run and its repository (a removed repository hides its runs)
+      const run = await this.deps.queryHandler.validateAndSelect(
+        VisualizationModel,
+        { id: visualizationId },
+        Table.VISUALIZATIONS
+      );
+      const repository = run === null ? null : await this.loadRepository(run.repositoryId);
+      if (run === null || repository === null) {
+        return runNotFound();
+      }
+      if (!isTerminalVisualizationStatus(run.status)) {
+        return conflict(RUN_IN_PROGRESS_MESSAGE);
+      }
+
+      // 2. AI readiness (the job records the model it was started with)
+      const settings = await this.deps.readAiSettings();
+      const readiness = await this.deps.aiReadiness(settings);
+      if (!readiness.ready) {
+        return { status: 400, error: readiness.message, error_reason: ErrorReason.AI_NOT_CONFIGURED };
+      }
+
+      // 3. The cards to repair
+      const targets = await this.repairTargetIds(run.id, componentIds);
+      if (!targets.ok) {
+        return conflict(targets.message);
+      }
+
+      // 4. One active repair per run (the partial unique index enforces it too)
+      const active = await this.deps.queryHandler.validateAndSelect(
+        HarnessLibraryJobModel,
+        {
+          visualizationId: run.id,
+          kind: LibraryJobKind.REPAIR,
+          status: Where.in([...ACTIVE_LIBRARY_JOB_STATUSES])
+        },
+        Table.HARNESS_LIBRARY_JOBS
+      );
+      if (active !== null) {
+        return conflict(REPAIR_RUNNING_MESSAGE);
+      }
+
+      // 5. A working-tree run is recreated from its snapshot (16 §17)
+      if (run.sourceType === VisualizationSourceType.WORKING_TREE && !run.workingTreeSnapshot) {
+        return conflict(SNAPSHOT_UNAVAILABLE_MESSAGE);
+      }
+
+      // 6. Job row, then the queue
+      const inserted = await this.deps.queryHandler.insert(
+        {
+          repositoryId: repository.id,
+          kind: LibraryJobKind.REPAIR,
+          status: LibraryJobStatus.QUEUED,
+          visualizationId: run.id,
+          componentIds: targets.ids,
+          stateAllowance: repository.stateAllowance,
+          totalCount: targets.ids.length,
+          aiModel: settings.model
+        },
+        Table.HARNESS_LIBRARY_JOBS
+      );
+      if (inserted.status === 409) {
+        return conflict(REPAIR_RUNNING_MESSAGE);
+      }
+      const jobId = QueryHandler.firstInsertedId(inserted);
+      if (inserted.status !== 200 || jobId === null) {
+        this.log.error(
+          { event: "library.repair.insert_failed", visualizationId, status: inserted.status },
+          "Repair job insert failed"
+        );
+        return INTERNAL_ERROR;
+      }
+      let queueJobId: string;
+      try {
+        queueJobId = (await this.deps.queue.enqueueLibraryJob(LibraryJobKind.REPAIR, jobId)).jobId;
+      } catch (error: unknown) {
+        this.log.error(
+          { event: "library.repair.enqueue_failed", visualizationId, jobId, err: error },
+          "Enqueue failed"
+        );
+        await transitionLibraryJob(this.deps.queryHandler, {
+          jobId,
+          from: LibraryJobStatus.QUEUED,
+          to: LibraryJobStatus.FAILED,
+          fields: { errorMessage: REPAIR_QUEUE_FAILED_MESSAGE },
+          now: this.deps.now()
+        });
+        await this.deps.consoleFactory(jobId).error(REPAIR_QUEUE_FAILED_MESSAGE);
+        return { status: 500, error: REPAIR_QUEUE_FAILED_MESSAGE, error_reason: ErrorReason.INTERNAL_ERROR };
+      }
+      await this.deps.queryHandler.update({ jobId: queueJobId }, { id: jobId }, Table.HARNESS_LIBRARY_JOBS);
+
+      const job = await this.loadJob(jobId);
+      if (job === null) {
+        return INTERNAL_ERROR;
+      }
+      this.log.info(
+        {
+          event: "library.repair.started",
+          visualizationId,
+          jobId,
+          components: targets.ids.length,
+          broken: componentIds === "broken"
+        },
+        "Library repair queued"
+      );
+      return { status: 202, data: toLibraryJobView(job, repository.name) };
+    } catch (error: unknown) {
+      return this.unexpected(error, "startRepair");
+    }
+  }
+
+  /** §11.3: the named cards must belong to the run and need repair; "broken" = every such card, rank order. */
+  private async repairTargetIds(
+    visualizationId: number,
+    componentIds: readonly number[] | "broken"
+  ): Promise<{ ok: true; ids: number[] } | { ok: false; message: string }> {
+    if (componentIds === "broken") {
+      const rows = await this.deps.queryHandler.selectMany(
+        VisualizationComponentModel,
+        { visualizationId, harnessNeedsUpdate: true },
+        Table.VISUALIZATION_COMPONENTS,
+        {
+          orderBy: [
+            { column: "rank", direction: "asc" },
+            { column: "id", direction: "asc" }
+          ]
+        }
+      );
+      return rows.length === 0
+        ? { ok: false, message: NO_BROKEN_MESSAGE }
+        : { ok: true, ids: rows.map((row) => row.id) };
+    }
+    const ids = [...new Set(componentIds)];
+    const rows =
+      ids.length === 0
+        ? []
+        : await this.deps.queryHandler.selectMany(
+            VisualizationComponentModel,
+            { visualizationId, id: Where.in(ids) },
+            Table.VISUALIZATION_COMPONENTS
+          );
+    const byId = new Map(rows.map((row) => [row.id, row]));
+    const allNeedRepair = ids.length > 0 && ids.every((id) => byId.get(id)?.harnessNeedsUpdate === true);
+    return allNeedRepair ? { ok: true, ids } : { ok: false, message: NOT_BROKEN_MESSAGE };
+  }
+
+  // ----- end 16g block -----
+
   // ----- shared helpers (16f; 16g and 16k reuse them) -----
 
   private async runEstimate(
@@ -500,6 +678,14 @@ export class HarnessLibraryService {
 
 function repositoryNotFound(): ApiResponse<never> {
   return { status: 404, error: "Repository not found", error_reason: ErrorReason.NOT_FOUND };
+}
+
+function runNotFound(): ApiResponse<never> {
+  return { status: 404, error: "Visualization not found", error_reason: ErrorReason.NOT_FOUND };
+}
+
+function conflict(message: string): ApiResponse<never> {
+  return { status: 409, error: message, error_reason: ErrorReason.CONFLICT };
 }
 
 function jobNotFound(): ApiResponse<never> {

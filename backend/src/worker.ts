@@ -15,6 +15,7 @@ import {
   type LibraryJobProcessor,
   type VisualizationJobProcessor
 } from "./utilities";
+import { HarnessRepairWorkerService } from "./services/harness-library/harness-repair-worker-service";
 import { LibraryJobRecovery } from "./services/harness-library/library-job-recovery";
 import { LibraryScanWorkerService } from "./services/harness-library/library-scan-worker-service";
 import { VisualizationWorkerService } from "./services/visualizations/pipeline/visualization-worker-service";
@@ -29,6 +30,11 @@ const processVisualization: VisualizationJobProcessor = async ({ visualizationId
 /** [16f] Scan and rescan jobs (16 §10.4): job = { libraryJobId, jobId, signal }. */
 const processLibraryScan: LibraryJobProcessor = async (job) => {
   await new LibraryScanWorkerService().run(job);
+};
+
+/** [16g] Repair jobs (16 §11.4): job = { libraryJobId, jobId, signal }. */
+const processLibraryRepair: LibraryJobProcessor = async (job) => {
+  await new HarnessRepairWorkerService().run(job);
 };
 
 async function bootstrapWorker(): Promise<void> {
@@ -79,6 +85,11 @@ async function bootstrapWorker(): Promise<void> {
     );
     librarySweep = libraryRecovery.startSweep(); // [16f]
     // [end 16f]
+    // [16g] repair worker (library job recovery above already failed interrupted repairs and removed their worktrees)
+    await QueueService.startLibraryRepairWorker((job) =>
+      AuthContext.runAsLocalUser(() => processLibraryRepair(job), { requestId: job.jobId })
+    );
+    // [end 16g]
     log.info({ event: "worker.boot.started" }, "PRVision worker started");
   } catch (error: unknown) {
     log.fatal(

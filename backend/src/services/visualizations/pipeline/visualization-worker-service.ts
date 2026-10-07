@@ -395,6 +395,88 @@ interface SaveBackInput {
   consoleSvc: VisualizationConsoleService;
 }
 
+// --- 16g block (16 §11.4 step 4): the run counts of finish(), shared with the repair job ---
+
+/**
+ * component_count and changed_count via QueryHandler (00 §14.3 semantics). A `replaced` row always counts as changed
+ * (00 §17), also when its screenshots matched or were not compared. changed_count never exceeds component_count.
+ */
+export async function countRunComponents(
+  queryHandler: Pick<QueryHandler, "count">,
+  visualizationId: number
+): Promise<{ componentCount: number; changedCount: number }> {
+  const replaced = ComponentChangeKind.REPLACED;
+  const [all, changed, replacedUnchanged, replacedNotCompared] = await Promise.all([
+    queryHandler.count({ visualizationId }, Table.VISUALIZATION_COMPONENTS),
+    queryHandler.count(
+      { visualizationId, visualChange: Where.in(["changed", "new", "deleted"]) },
+      Table.VISUALIZATION_COMPONENTS
+    ),
+    queryHandler.count(
+      { visualizationId, changeKind: replaced, visualChange: Where.in(["unchanged"]) },
+      Table.VISUALIZATION_COMPONENTS
+    ),
+    queryHandler.count(
+      { visualizationId, changeKind: replaced, visualChange: Where.isNull() },
+      Table.VISUALIZATION_COMPONENTS
+    )
+  ]);
+  if (
+    all.status !== 200 ||
+    changed.status !== 200 ||
+    replacedUnchanged.status !== 200 ||
+    replacedNotCompared.status !== 200
+  ) {
+    throw new Error("Component count failed");
+  }
+  const componentCount = all.data?.count ?? 0;
+  const changedCount =
+    (changed.data?.count ?? 0) + (replacedUnchanged.data?.count ?? 0) + (replacedNotCompared.data?.count ?? 0);
+  return { componentCount, changedCount: Math.min(changedCount, componentCount) };
+}
+
+/**
+ * 16 §8.7 step 8: rows that reached rendering (`render_status` rendered, partial or failed) with a harness
+ * (`harness_origin` set).
+ */
+export async function countCheckedComponents(
+  queryHandler: Pick<QueryHandler, "count">,
+  visualizationId: number
+): Promise<number> {
+  const response = await queryHandler.count(
+    {
+      visualizationId,
+      renderStatus: Where.in([
+        ComponentRenderStatus.RENDERED,
+        ComponentRenderStatus.PARTIAL,
+        ComponentRenderStatus.FAILED
+      ]),
+      harnessOrigin: Where.isNotNull()
+    },
+    Table.VISUALIZATION_COMPONENTS
+  );
+  if (response.status !== 200) {
+    throw new Error("Checked count failed");
+  }
+  return response.data?.count ?? 0;
+}
+
+/** 16 §8.7 step 6: rows whose card shows "Harness needs updating". */
+export async function countNeedsUpdateComponents(
+  queryHandler: Pick<QueryHandler, "count">,
+  visualizationId: number
+): Promise<number> {
+  const response = await queryHandler.count(
+    { visualizationId, harnessNeedsUpdate: true },
+    Table.VISUALIZATION_COMPONENTS
+  );
+  if (response.status !== 200) {
+    throw new Error("needs_update_count failed");
+  }
+  return response.data?.count ?? 0;
+}
+// --- end 16g block ---
+
 // ---------------------------------------------------------------------------------------------------------------
 // Dependencies
 // ---------------------------------------------------------------------------------------------------------------
@@ -935,34 +1017,7 @@ export class VisualizationWorkerService {
    * screenshots matched or were not compared. changed_count never exceeds component_count.
    */
   private async componentCounts(visualizationId: number): Promise<{ componentCount: number; changedCount: number }> {
-    const replaced = ComponentChangeKind.REPLACED;
-    const [all, changed, replacedUnchanged, replacedNotCompared] = await Promise.all([
-      this.deps.queryHandler.count({ visualizationId }, Table.VISUALIZATION_COMPONENTS),
-      this.deps.queryHandler.count(
-        { visualizationId, visualChange: Where.in(["changed", "new", "deleted"]) },
-        Table.VISUALIZATION_COMPONENTS
-      ),
-      this.deps.queryHandler.count(
-        { visualizationId, changeKind: replaced, visualChange: Where.in(["unchanged"]) },
-        Table.VISUALIZATION_COMPONENTS
-      ),
-      this.deps.queryHandler.count(
-        { visualizationId, changeKind: replaced, visualChange: Where.isNull() },
-        Table.VISUALIZATION_COMPONENTS
-      )
-    ]);
-    if (
-      all.status !== 200 ||
-      changed.status !== 200 ||
-      replacedUnchanged.status !== 200 ||
-      replacedNotCompared.status !== 200
-    ) {
-      throw new Error("Component count failed");
-    }
-    const componentCount = all.data?.count ?? 0;
-    const changedCount =
-      (changed.data?.count ?? 0) + (replacedUnchanged.data?.count ?? 0) + (replacedNotCompared.data?.count ?? 0);
-    return { componentCount, changedCount: Math.min(changedCount, componentCount) };
+    return countRunComponents(this.deps.queryHandler, visualizationId);
   }
 
   /**
@@ -1027,22 +1082,7 @@ export class VisualizationWorkerService {
    * (`harness_origin` set).
    */
   private async checkedCount(visualizationId: number): Promise<number> {
-    const response = await this.deps.queryHandler.count(
-      {
-        visualizationId,
-        renderStatus: Where.in([
-          ComponentRenderStatus.RENDERED,
-          ComponentRenderStatus.PARTIAL,
-          ComponentRenderStatus.FAILED
-        ]),
-        harnessOrigin: Where.isNotNull()
-      },
-      Table.VISUALIZATION_COMPONENTS
-    );
-    if (response.status !== 200) {
-      throw new Error("Checked count failed");
-    }
-    return response.data?.count ?? 0;
+    return countCheckedComponents(this.deps.queryHandler, visualizationId);
   }
 
   /** 16 §11.2: the run kept its working-tree snapshot (live mode and repair can recreate the head side). */

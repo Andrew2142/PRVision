@@ -24,6 +24,7 @@ import {
   idModel,
   makeComponentRow,
   makeConsoleEventRow,
+  makeLibraryJobRow,
   makeRepositoryRow,
   makeVisualizationRow
 } from "../helpers/factories";
@@ -1098,4 +1099,31 @@ test("VisualizationsService.remove's default snapshot removal deletes <dataDir>/
   h.store.seed(Table.VISUALIZATIONS, [makeVisualizationRow({ id: 424242, status: "completed", completedAt: NOW })]);
   assert.equal((await run(() => h.service(424242).remove())).status, 200);
   assert.equal(fs.existsSync(dir), false);
+});
+
+// 16g: no removal while a repair of the run is active (16 §14.1)
+test("VisualizationsService.remove returns 409 while a repair of the run is active, and deletes once it is terminal", async (t) => {
+  const h = setup(t);
+  h.store.seed(Table.VISUALIZATIONS, [makeVisualizationRow({ id: 1, status: "completed", completedAt: NOW })]);
+  h.store.seed(Table.HARNESS_LIBRARY_JOBS, [
+    makeLibraryJobRow({
+      id: 7,
+      kind: "repair",
+      status: "running",
+      visualizationId: 1,
+      componentIds: [3],
+      totalCount: 1
+    })
+  ]);
+  assert.deepEqual(await run(() => h.service(1).remove()), {
+    status: 409,
+    error: "A repair is running for this run.",
+    error_reason: "conflict"
+  });
+  assert.equal(h.store.row(Table.VISUALIZATIONS, 1)?.isDeleted, false);
+  assert.deepEqual(h.removedArtifacts, []);
+
+  await h.store.update({ status: "completed", completedAt: NOW }, { id: 7 }, Table.HARNESS_LIBRARY_JOBS);
+  assert.deepEqual(await run(() => h.service(1).remove()), { status: 200, data: { id: 1 } });
+  assert.deepEqual(h.removedArtifacts, [1]);
 });

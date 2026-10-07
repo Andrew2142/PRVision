@@ -1,3 +1,4 @@
+export * from "./component-param.dto";
 export * from "./library-estimate-query.dto";
 export * from "./library-estimate-view.dto";
 export * from "./library-job-event-view.dto";

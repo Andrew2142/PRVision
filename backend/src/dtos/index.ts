@@ -23,6 +23,7 @@ export * from "./visualizations/visualization-continue.dto";
 export * from "./visualizations/visualization-create.dto";
 export * from "./visualizations/visualization-list-query.dto";
 export * from "./visualizations/visualization-view.dto";
+export * from "./harness-library/component-param.dto";
 export * from "./harness-library/library-estimate-query.dto";
 export * from "./harness-library/library-estimate-view.dto";
 export * from "./harness-library/library-job-event-view.dto";

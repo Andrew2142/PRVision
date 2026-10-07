@@ -548,6 +548,16 @@ export class VisualizationsService {
       if (!isTerminalVisualizationStatus(visible.visualization.status)) {
         return stillRunning();
       }
+      // 16g block (16 §14.1): a run whose cards are being repaired stays until the repair ends or is cancelled
+      const activeRepair = await this.deps.queryHandler.validateAndSelect(
+        HarnessLibraryJobModel,
+        { visualizationId: id, kind: LibraryJobKind.REPAIR, status: Where.in([...ACTIVE_LIBRARY_JOB_STATUSES]) },
+        Table.HARNESS_LIBRARY_JOBS
+      );
+      if (activeRepair !== null) {
+        return { status: 409, error: "A repair is running for this run.", error_reason: ErrorReason.CONFLICT };
+      }
+      // end 16g block
 
       // Conditioned on a terminal status, so a row that is (impossibly) running again is never deleted.
       const deleted = await this.deps.queryHandler.delete(

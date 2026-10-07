@@ -121,4 +121,17 @@ export function registerRoutes(app: Express, dependencies: RouteDependencies): v
     harnessLibraryController.cancelJob.bind(harnessLibraryController)
   );
   // ----- end 16f -----
+
+  // ----- 16g: repair (16 §14.1, §14.4) -----
+  app.post(
+    "/api/visualizations/:id/components/:componentId/repair",
+    requireLocal,
+    harnessLibraryController.repairComponent.bind(harnessLibraryController)
+  );
+  app.post(
+    "/api/visualizations/:id/repair-broken",
+    requireLocal,
+    harnessLibraryController.repairBroken.bind(harnessLibraryController)
+  );
+  // ----- end 16g -----
 }

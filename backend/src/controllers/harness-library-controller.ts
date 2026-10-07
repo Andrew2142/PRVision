@@ -1,5 +1,6 @@
 import type { Request, Response } from "express";
 import {
+  ComponentParamDTO,
   IdParamDTO,
   LibraryEstimateQueryDTO,
   LibraryEstimateRequestDTO,
@@ -155,6 +156,41 @@ export class HarnessLibraryController {
   }
 
   // ----- end 16f block -----
+
+  // ----- 16g block: repair -----
+
+  /** POST /api/visualizations/:id/components/:componentId/repair — 202 with the repair job. */
+  async repairComponent(req: Request, res: Response): Promise<Response> {
+    try {
+      const [isValid, errorResponse, dto] = await this.validation.validate(
+        this.validation.compileJsonData({ id: req.params.id, componentId: req.params.componentId }),
+        ComponentParamDTO
+      );
+      if (!isValid) {
+        return this.responseHandler.controllerResponse(errorResponse, res);
+      }
+      const serviceResponse = await new HarnessLibraryService().startRepair(dto.id, [dto.componentId]);
+      return this.responseHandler.controllerResponse(serviceResponse, res);
+    } catch (error: unknown) {
+      return this.internalError(error, "repairComponent", res);
+    }
+  }
+
+  /** POST /api/visualizations/:id/repair-broken — 202 with the repair job for every card that needs updating. */
+  async repairBroken(req: Request, res: Response): Promise<Response> {
+    try {
+      const idResult = await this.readId(req);
+      if (!idResult.ok) {
+        return this.responseHandler.controllerResponse(idResult.response, res);
+      }
+      const serviceResponse = await new HarnessLibraryService().startRepair(idResult.id, "broken");
+      return this.responseHandler.controllerResponse(serviceResponse, res);
+    } catch (error: unknown) {
+      return this.internalError(error, "repairBroken", res);
+    }
+  }
+
+  // ----- end 16g block -----
 
   /** Validate the :id route param through IdParamDTO. */
   private async readId(req: Request): Promise<IdReadResult> {
