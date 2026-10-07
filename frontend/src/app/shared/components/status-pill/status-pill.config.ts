@@ -1,7 +1,7 @@
 import { formatPillLabel } from '../../../core/utils/labels.util';
 
 export type PillTone = 'success' | 'danger' | 'warning' | 'info' | 'active' | 'accent' | 'muted' | 'outline';
-export type PillKind = 'visualization' | 'render' | 'visual' | 'risk' | 'change' | 'source' | 'console';
+export type PillKind = 'visualization' | 'render' | 'visual' | 'risk' | 'change' | 'source' | 'console' | 'libraryJob';
 
 export interface PillSpec {
   tone: PillTone;
@@ -48,6 +48,7 @@ export const STATUS_PILL_MAP: Readonly<Record<PillKind, Readonly<Record<string, 
     removed: { tone: 'outline', label: 'Removed' },
     affected_parent: { tone: 'outline', label: 'Affected parent' },
     replaced: { tone: 'accent', label: 'Replaced' },
+    rechecked: { tone: 'muted', label: 'Re-checked' },
   },
   source: {
     github_pr: { tone: 'info', label: 'Pull request' },
@@ -59,6 +60,16 @@ export const STATUS_PILL_MAP: Readonly<Record<PillKind, Readonly<Record<string, 
     info: { tone: 'muted', label: 'Info' },
     warn: { tone: 'warning', label: 'Warn' },
     error: { tone: 'danger', label: 'Error' },
+  },
+  // Scan, rescan and repair jobs (16 §15.7).
+  libraryJob: {
+    queued: { tone: 'active', label: 'Queued' },
+    preparing: { tone: 'active', label: 'Preparing', live: true },
+    running: { tone: 'active', label: 'Running', live: true },
+    completed: { tone: 'success', label: 'Completed' },
+    cap_reached: { tone: 'warning', label: 'Paused at cap' },
+    failed: { tone: 'danger', label: 'Failed' },
+    cancelled: { tone: 'muted', label: 'Cancelled' },
   },
 };
 

@@ -44,13 +44,37 @@
             <span class="pv-header-meta__item pv-code" data-testid="refs">
               <mat-icon aria-hidden="true">commit</mat-icon>{{ h.refsBase }}
               <svg class="pv-header-meta__arrow" viewBox="0 0 16 16" aria-hidden="true">
-                <path d="M2 8h11M9 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+                <path
+                  d="M2 8h11M9 4l4 4-4 4"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.5"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
               </svg>
-              <span class="sr-only">to</span>{{ h.refsHead }}
+              <span class="sr-only">to </span>{{ h.refsHead }}
             </span>
           </div>
         </ng-container>
         <ng-container pageHeaderActions>
+          @if (repairAll(); as ra) {
+            <button
+              mat-stroked-button
+              type="button"
+              class="!rounded-xl"
+              data-testid="repair-all"
+              [disabled]="ra.disabled"
+              (click)="confirmRepairAll()"
+            >
+              @if (ra.disabled) {
+                <mat-spinner diameter="18" class="!inline-block align-middle mr-2" />
+              } @else {
+                <mat-icon aria-hidden="true">build</mat-icon>
+              }
+              {{ ra.label }}
+            </button>
+          }
           @if (!store.isTerminal()) {
             <button
               mat-stroked-button
@@ -83,6 +107,13 @@
       </app-page-header>
       @if (h.summaryLine) {
         <p class="-mt-4 text-sm text-[var(--color-text-tertiary)]" data-testid="summary-line">{{ h.summaryLine }}</p>
+      }
+      @if (h.globalStyleTrigger; as trigger) {
+        <p class="-mt-3">
+          <span class="dd-pill dd-pill--info inline-flex items-center gap-1" data-testid="global-style-trigger"
+            ><mat-icon class="!h-3.5 !w-3.5 !text-sm" aria-hidden="true">palette</mat-icon>{{ trigger }}</span
+          >
+        </p>
       }
 
       <mat-card
@@ -196,13 +227,16 @@
             @if (!store.components().length) {
               <app-empty-state [title]="h.noComponentsTitle" [message]="h.noComponentsMessage" />
             } @else if (!store.filteredComponents().length) {
-              <app-empty-state
-                title="Nothing in this filter"
-                message="Choose another filter to see the remaining components."
-              />
+              <app-empty-state [title]="emptyFilterCopy().title" [message]="emptyFilterCopy().message" />
             } @else {
               @for (c of store.filteredComponents(); track c.id) {
-                <app-component-card [component]="c" [runActive]="!store.isTerminal()" [framework]="h.framework" />
+                <app-component-card
+                  [component]="c"
+                  [runActive]="!store.isTerminal()"
+                  [framework]="h.framework"
+                  [repairRequested]="store.repairRequests().has(c.id)"
+                  (repair)="repairComponent($event)"
+                />
               }
             }
           }

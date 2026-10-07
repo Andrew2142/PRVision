@@ -1,7 +1,8 @@
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideNoopAnimations } from '@angular/platform-browser/animations';
 import { type VisualizationComponentView } from '../../../../core/models/visualization.model';
-import { componentView } from '../../testing/visualization-fixtures';
+import { environment } from '../../../../../environments/environment';
+import { componentView, harnessView, stateView } from '../../testing/visualization-fixtures';
 import { ComponentCardComponent } from './component-card.component';
 
 const DIFF = ['diff --git a/x b/x', '--- a/x', '+++ b/x', '@@ -1,1 +1,2 @@', '-a', '+b', '+c'].join('\n');
@@ -286,5 +287,168 @@ describe('ComponentCardComponent', () => {
     expect(el.querySelectorAll('[data-testid="component-path"]').length).toBe(1);
     expect(el.querySelector('[data-testid="replaced-evidence"]')).toBeNull();
     expect(el.querySelector('h3')?.textContent?.trim()).toBe('CartSummary');
+  });
+
+  describe('states (16 §15.5.2)', () => {
+    const ART = environment.artifactBaseUrl;
+    const STATES = [
+      stateView(0),
+      stateView(1, {
+        name: 'Overdue',
+        visualChange: 'changed',
+        diffPixelRatio: 0.03,
+        steps: [{ action: 'click', target: { by: 'role', role: 'button', name: 'More actions' } }],
+        stepSummary: ['Click button "More actions"', 'Hover link "Docs"'],
+      }),
+      stateView(2, { name: 'Menu open', visualChange: 'changed' }),
+    ];
+    const multi = { visualChange: 'changed' as const, states: STATES, stateCount: 3, changedStateCount: 2 };
+    const srcs = (): (string | null)[] =>
+      Array.from(el.querySelectorAll('app-image-compare img')).map((i) => i.getAttribute('src'));
+    const tabs = (): HTMLButtonElement[] =>
+      Array.from(el.querySelectorAll<HTMLButtonElement>('app-state-tabs [role="tab"]'));
+
+    it('opens on the first changed state and passes its images down', () => {
+      render(multi);
+      expect(tabs().map((t) => t.getAttribute('aria-selected'))).toEqual(['false', 'true', 'false']);
+      expect(srcs()).toEqual([`${ART}/artifacts/7/11/s1/base.png`, `${ART}/artifacts/7/11/s1/head.png`]);
+      expect(el.querySelector('app-image-compare img')?.getAttribute('alt')).toBe(
+        'Base render of CartSummary · Overdue',
+      );
+      const panel = el.querySelector('[role="tabpanel"]');
+      expect(panel?.id).toBe('cmp-11-states-panel');
+      expect(panel?.getAttribute('aria-labelledby')).toBe('cmp-11-states-tab-1');
+    });
+
+    it('Default first when no state changed', () => {
+      render({
+        visualChange: 'unchanged',
+        states: [stateView(0), stateView(1, { name: 'Overdue' })],
+        stateCount: 2,
+        changedStateCount: 0,
+      });
+      el.querySelector<HTMLButtonElement>('[data-testid="show-screenshots"]')?.click();
+      fixture.detectChanges();
+      expect(tabs().map((t) => t.getAttribute('aria-selected'))).toEqual(['true', 'false']);
+    });
+
+    it('another tab shows that state, with its steps line', () => {
+      render(multi);
+      expect(el.querySelector('[data-testid="state-steps"]')?.textContent?.trim()).toBe(
+        'Reached by: Click button "More actions" → Hover link "Docs"',
+      );
+      tabs()[2]?.click();
+      fixture.detectChanges();
+      expect(srcs()).toEqual([`${ART}/artifacts/7/11/s2/base.png`, `${ART}/artifacts/7/11/s2/head.png`]);
+      expect(el.querySelector('[data-testid="state-steps"]')).toBeNull();
+    });
+
+    it('the visual pill shows the row aggregate', () => {
+      render(multi);
+      expect(pills()).toContain('2 of 3 states changed');
+    });
+
+    it('the user pick survives a refreshed row', () => {
+      render(multi);
+      tabs()[0]?.click();
+      fixture.detectChanges();
+      render({ ...multi, aiNote: 'refreshed' });
+      expect(tabs().map((t) => t.getAttribute('aria-selected'))).toEqual(['true', 'false', 'false']);
+    });
+
+    it('a single-state row shows no tabs and plain image labels', () => {
+      render();
+      expect(el.querySelector('app-state-tabs [role="tablist"]')).toBeNull();
+      expect(el.querySelector('[role="tabpanel"]')).toBeNull();
+      expect(el.querySelector('app-image-compare img')?.getAttribute('alt')).toBe('Base render of CartSummary');
+    });
+
+    it('a row without state rows falls back to its own images', () => {
+      render({ states: [] });
+      expect(srcs()).toEqual([`${ART}/artifacts/7/11/base.png`, `${ART}/artifacts/7/11/head.png`]);
+    });
+  });
+
+  describe('harness status (16 §15.5.3)', () => {
+    const chip = (): string | null => el.querySelector('[data-testid="harness-origin"]')?.textContent?.trim() ?? null;
+
+    it('harness chips per origin', () => {
+      render({ harness: harnessView({ origin: 'library' }) });
+      expect(chip()).toBe('Saved harness');
+      render({ harness: harnessView({ origin: 'written' }) });
+      expect(chip()).toBe('New harness');
+      render({ harness: harnessView({ origin: 'repaired' }) });
+      expect(chip()).toBe('Repaired harness');
+      render({ harness: harnessView({ origin: null }) });
+      expect(chip()).toBeNull();
+    });
+
+    it('source changed hint', () => {
+      render({ harness: harnessView({ origin: 'library', sourceChangedSinceWrite: true }) });
+      expect(el.querySelector('[data-testid="harness-source-changed"]')?.textContent?.trim()).toBe(
+        'The component changed since this harness was written.',
+      );
+      render({ harness: harnessView({ origin: 'library', sourceChangedSinceWrite: false }) });
+      expect(el.querySelector('[data-testid="harness-source-changed"]')).toBeNull();
+    });
+
+    it('needs updating: warning with the failing side and Repair emits the component id', () => {
+      const repaired: number[] = [];
+      fixture.componentInstance.repair.subscribe((id) => repaired.push(id));
+      render({
+        renderStatus: 'partial',
+        headError: '[render_error] TypeError: heading is undefined',
+        harness: harnessView({ origin: 'library', needsUpdate: true }),
+      });
+      const alert = el.querySelector('[data-testid="needs-update"]');
+      expect(alert?.textContent).toContain('Harness needs updating');
+      expect(alert?.textContent).toContain(
+        'The saved harness no longer renders this component on the head side. Repair asks the AI for a new harness and saves it to the library.',
+      );
+      const repair = el.querySelector<HTMLButtonElement>('[data-testid="repair"]');
+      expect(repair?.textContent?.trim()).toContain('Repair');
+      repair?.click();
+      expect(repaired).toEqual([11]);
+    });
+
+    it('a base-only failure names the base side', () => {
+      render({
+        renderStatus: 'partial',
+        baseError: 'boom',
+        harness: harnessView({ origin: 'library', needsUpdate: true }),
+      });
+      expect(el.querySelector('[data-testid="needs-update"]')?.textContent).toContain('on the base side.');
+    });
+
+    it('while repairing: spinner, "Repairing…", disabled', () => {
+      render({ harness: harnessView({ needsUpdate: true, repairing: true }) });
+      const repair = el.querySelector<HTMLButtonElement>('[data-testid="repair"]');
+      expect(repair?.disabled).toBeTrue();
+      expect(repair?.textContent?.trim()).toBe('Repairing…');
+      expect(repair?.querySelector('mat-spinner')).not.toBeNull();
+      fixture.componentRef.setInput('component', componentView({ harness: harnessView({ needsUpdate: true }) }));
+      fixture.componentRef.setInput('repairRequested', true);
+      fixture.detectChanges();
+      expect(el.querySelector<HTMLButtonElement>('[data-testid="repair"]')?.disabled).toBeTrue();
+    });
+
+    it('no Repair button while the run is still active', () => {
+      render({ harness: harnessView({ needsUpdate: true }) }, true);
+      expect(el.querySelector('[data-testid="needs-update"]')).not.toBeNull();
+      expect(el.querySelector('[data-testid="repair"]')).toBeNull();
+    });
+
+    it('re-checked rows show the Re-checked pill and their reason', () => {
+      render({
+        changeKind: 'rechecked',
+        visualChange: 'changed',
+        changeReason: 'Global style changed (src/index.css); re-checked with the saved harness',
+        harness: harnessView({ origin: 'library' }),
+      });
+      expect(pills()[0]).toBe('Re-checked');
+      expect(el.querySelector('[data-testid="what-changed-main"]')?.textContent?.trim()).toBe(
+        'Global style changed (src/index.css); re-checked with the saved harness',
+      );
+    });
   });
 });

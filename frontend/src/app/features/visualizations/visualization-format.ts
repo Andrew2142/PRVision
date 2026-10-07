@@ -1,6 +1,11 @@
-import { type RepositoryFramework, type VisualizationStatus } from '../../core/models/domain-enums.model';
+import {
+  type HarnessOrigin,
+  type RepositoryFramework,
+  type VisualizationStatus,
+} from '../../core/models/domain-enums.model';
 import { type SuccessorEvidence, type VisualizationDetailView } from '../../core/models/visualization.model';
 import { providerLabel } from '../../core/utils/labels.util';
+import { formatUsd } from '../../core/utils/library-format.util';
 import { isTerminalStatus } from '../../core/utils/visualization-status.util';
 import { formatDateTime, parseDateToUtcMs } from '../../shared/components/data-grid/data-grid-helpers';
 
@@ -32,10 +37,12 @@ export function formatDuration(ms: number): string {
 /**
  * "Started Oct 3, 12:01 PM · took 3m 12s · claude-opus-5-5 via Anthropic API · 41.2K in / 3.1K out tokens · 14 AI calls"
  * Absolute start time (a relative one would go stale on a finished run, whose header no longer recomputes).
- * "took" only when completedAt is set; parts omitted when unknown.
+ * "took" only when completedAt is set; parts omitted when unknown. Runs that rendered with harnesses lead with
+ * "201 checked, 14 changed" (16 D7, §15.5.1).
  */
 export function summaryLine(v: VisualizationDetailView): string {
   const parts: string[] = [];
+  if (v.checkedCount > 0) parts.push(`${String(v.checkedCount)} checked, ${String(v.changedCount)} changed`);
   const started = v.startedAt ? formatDateTime(v.startedAt, SUMMARY_START_FORMAT, '') : '';
   if (started) parts.push(`Started ${started}`);
   if (v.completedAt) {
@@ -170,4 +177,41 @@ export function renderErrorBlock(
     };
   }
   return { side, title: `${side} render failed`, text };
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Harness library (sheet 16 §15.5)
+// ---------------------------------------------------------------------------------------------------------------
+
+/** Chip of the run header when a global style change re-checked the library. */
+export function globalStyleTriggerText(path: string): string {
+  return `Global style change: ${path} — every saved harness was re-checked`;
+}
+
+/** Harness chip of a component card. */
+export function harnessOriginLabel(origin: HarnessOrigin | null): string | null {
+  switch (origin) {
+    case 'library':
+      return 'Saved harness';
+    case 'written':
+      return 'New harness';
+    case 'repaired':
+      return 'Repaired harness';
+    case null:
+      return null;
+  }
+}
+
+/** Visual pill of a multi-state row: "2 of 3 states changed"; null for single-state or unchanged rows. */
+export function statesChangedLabel(stateCount: number, changedStateCount: number): string | null {
+  return changedStateCount > 0 && stateCount > 1
+    ? `${String(changedStateCount)} of ${String(stateCount)} states changed`
+    : null;
+}
+
+/** Confirm text of Repair all broken (16 §15.5.1); the cost clause is left out without an estimate. */
+export function repairAllMessage(needsUpdateCount: number, repairEstimateUsd: number | null): string {
+  const components = `${String(needsUpdateCount)} component${needsUpdateCount === 1 ? '' : 's'}`;
+  const cost = repairEstimateUsd === null ? '' : `, about ${formatUsd(repairEstimateUsd)}`;
+  return `Ask the AI to write new harnesses for ${components}? This uses AI credits${cost}.`;
 }

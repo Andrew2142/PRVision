@@ -1,0 +1,107 @@
+@switch (store.loadState()) {
+  @case ('not_found') {
+    <app-not-found-page
+      title="Job not found"
+      message="The scan or repair job does not exist."
+      backLink="/repositories"
+      backLabel="Back to repositories"
+    />
+  }
+  @case ('loading') {
+    <app-loading-spinner label="Loading job" />
+  }
+  @case ('error') {
+    <app-inline-alert tone="error" title="Couldn't load this job">
+      {{ loadErrorMessage() }}
+      <button inlineAlertAction mat-stroked-button type="button" class="!rounded-xl" (click)="store.refreshNow()">
+        Retry
+      </button>
+    </app-inline-alert>
+  }
+  @case ('ready') {
+    @if (view(); as v) {
+      @if (store.job(); as job) {
+        <app-page-header [title]="v.title" [backLink]="v.backLink" [backLabel]="v.backLabel">
+          <app-status-pill
+            pageHeaderTitleAddon
+            class="shrink-0"
+            kind="libraryJob"
+            [value]="job.status"
+            ariaPrefix="Status"
+          />
+          <ng-container pageHeaderActions>
+            @if (v.active) {
+              <button
+                mat-stroked-button
+                color="warn"
+                type="button"
+                class="!rounded-xl"
+                data-testid="cancel-job"
+                [disabled]="store.cancelState() !== 'idle'"
+                (click)="confirmCancel()"
+              >
+                @if (store.cancelState() === 'requesting') {
+                  <mat-spinner diameter="18" class="!inline-block align-middle mr-2" />
+                } @else {
+                  <mat-icon aria-hidden="true">stop_circle</mat-icon>
+                }
+                {{ cancelLabel() }}
+              </button>
+            }
+            @if (v.canContinue) {
+              <button
+                mat-flat-button
+                color="primary"
+                type="button"
+                class="!rounded-xl"
+                data-testid="continue-scan"
+                [disabled]="continuing()"
+                (click)="continueScan()"
+              >
+                <mat-icon aria-hidden="true">play_arrow</mat-icon>
+                Continue scan
+              </button>
+            }
+          </ng-container>
+        </app-page-header>
+
+        @if (v.terminal; as t) {
+          <app-inline-alert [tone]="t.tone" [title]="t.title" data-testid="job-outcome">
+            <span class="whitespace-pre-wrap">{{ t.message }}</span>
+          </app-inline-alert>
+        }
+
+        <mat-card
+          class="!rounded-2xl border border-[color:var(--color-border)] bg-[var(--color-bg-secondary)] p-5 shadow-[var(--shadow-md)]"
+          data-testid="job-progress"
+        >
+          <div class="flex flex-col gap-3">
+            <mat-progress-bar mode="determinate" [value]="v.percent" aria-label="Job progress" />
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <p class="text-base font-semibold text-[var(--color-text-primary)]" data-testid="job-progress-text">
+                {{ v.progressText }}
+              </p>
+              @if (v.capText; as cap) {
+                <span class="dd-pill dd-pill--outline" data-testid="job-cap">{{ cap }}</span>
+              }
+            </div>
+            <p class="text-sm text-[var(--color-text-secondary)]" data-testid="job-counts">{{ v.countsText }}</p>
+            @if (v.currentLabel; as label) {
+              <p class="pv-code truncate text-sm text-[var(--color-text-secondary)]" data-testid="job-current">
+                {{ label }}
+              </p>
+            }
+            <p class="text-sm text-[var(--color-text-tertiary)]" data-testid="job-allowance">{{ v.allowanceText }}</p>
+          </div>
+        </mat-card>
+
+        <app-console-panel
+          [events]="consoleEvents()"
+          [live]="v.active"
+          [trimmed]="store.eventsTrimmed()"
+          [defaultOpen]="true"
+        />
+      }
+    }
+  }
+}

@@ -1,5 +1,6 @@
 import { DestroyRef, Injectable, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { Router } from '@angular/router';
 import {
   EMPTY,
   type Observable,
@@ -7,6 +8,7 @@ import {
   catchError,
   exhaustMap,
   expand,
+  filter,
   finalize,
   map,
   of,
@@ -32,28 +34,35 @@ import { type ConsoleEventView, type VisualizationDetailView } from '../../../co
 import { ApiService } from '../../../core/services/api.service';
 import { NotificationService } from '../../../core/services/notification.service';
 import { RunAlertService } from '../../../core/services/run-alert.service';
-import { userMessageFor } from '../../../core/utils/error-messages.util';
+import { errorCopyFor, userMessageFor } from '../../../core/utils/error-messages.util';
 import { isTerminalStatus } from '../../../core/utils/visualization-status.util';
 import {
   COMPONENT_FILTER_PREDICATES,
   type ComponentFilter,
   countComponents,
+  defaultComponentFilter,
   resolveStoppedStageIndex,
 } from './component-filters';
 
 export type DetailLoadState = 'loading' | 'ready' | 'not_found' | 'error';
 type DetailTick = { ok: true; detail: VisualizationDetailView } | { ok: false; error: ApiError };
 
+/** A finished run keeps being polled while a repair job of it runs (16 §15.5.1). */
+function keepPolling(detail: VisualizationDetailView): boolean {
+  return !isTerminalStatus(detail.status) || detail.activeRepairJob !== null;
+}
+
 /**
  * Component-scoped state for `/visualizations/:id` (13 §5.9.3). Provided by the page, so its DestroyRef stops
  * both pollers when the page goes away. Detail every 2 s, console every 1.5 s, never overlapping (exhaustMap),
- * stopping on a terminal status, a 404, a restart or destroy (00 §12).
+ * stopping on a terminal status (unless a repair runs, 16 §15.5.1), a 404, a restart or destroy (00 §12).
  */
 @Injectable()
 export class VisualizationDetailStore {
   private readonly api = inject(ApiService);
   private readonly notifications = inject(NotificationService);
   private readonly runAlerts = inject(RunAlertService);
+  private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
   private readonly restart$ = new Subject<void>();
 
@@ -67,6 +76,9 @@ export class VisualizationDetailStore {
   readonly cancelState = signal<'idle' | 'requesting' | 'requested'>('idle');
   readonly deleting = signal(false);
   private readonly chosenFilter = signal<ComponentFilter | null>(null);
+  /** Component ids whose Repair request is in flight (the row shows "Repairing…" until the job lists it). */
+  readonly repairRequests = signal<ReadonlySet<number>>(new Set());
+  readonly repairAllRequesting = signal(false);
 
   readonly status = computed(() => this.detail()?.status ?? null);
   readonly isTerminal = computed(() => {
@@ -79,9 +91,14 @@ export class VisualizationDetailStore {
     [...(this.detail()?.components ?? [])].sort((a, b) => a.rank - b.rank || a.id - b.id),
   );
   readonly counts = computed(() => countComponents(this.components()));
-  readonly defaultFilter = computed<ComponentFilter>(() => {
-    const c = this.counts();
-    return c.changed > 0 ? 'changed' : c.failed > 0 ? 'failed' : 'all';
+  readonly defaultFilter = computed<ComponentFilter>(() => defaultComponentFilter(this.counts(), this.components()));
+  /** The run re-checked saved harnesses because a global style changed (16 E11). */
+  readonly hasRechecked = computed(() => this.components().some((c) => c.changeKind === 'rechecked'));
+  readonly activeRepairJob = computed(() => this.detail()?.activeRepairJob ?? null);
+  /** Polling continues after a terminal status while a repair runs. */
+  private readonly polling = computed(() => {
+    const d = this.detail();
+    return d !== null && keepPolling(d);
   });
   readonly filter = computed<ComponentFilter>(() => this.chosenFilter() ?? this.defaultFilter());
   readonly filteredComponents = computed(() => this.components().filter(COMPONENT_FILTER_PREDICATES[this.filter()]));
@@ -137,7 +154,7 @@ export class VisualizationDetailStore {
           if (r.ok) this.onDetail(r.detail);
           else this.onDetailError(r.error);
         }),
-        takeWhile((r) => (r.ok ? !isTerminalStatus(r.detail.status) : !r.error.isNotFound), true),
+        takeWhile((r) => (r.ok ? keepPolling(r.detail) : !r.error.isNotFound), true),
         takeUntil(this.restart$),
         takeUntilDestroyed(this.destroyRef),
       )
@@ -154,7 +171,7 @@ export class VisualizationDetailStore {
           this.appendEvents(events);
         }),
         // inclusive: one more fetch after the detail turns terminal picks up the final events
-        takeWhile(() => !this.isTerminal() && this.loadState() !== 'not_found', true),
+        takeWhile(() => (!this.isTerminal() || this.polling()) && this.loadState() !== 'not_found', true),
         takeUntil(this.restart$),
         takeUntilDestroyed(this.destroyRef),
       )
@@ -228,6 +245,78 @@ export class VisualizationDetailStore {
           this.refreshNow();
         },
       });
+  }
+
+  /** Repair of one card (16 §15.5.3). Silent API call: every outcome is reported here. */
+  repairComponent(componentId: number): void {
+    const id = this.visualizationId();
+    if (id === null || this.repairRequests().has(componentId)) return;
+    this.repairRequests.update((set) => new Set(set).add(componentId));
+    this.api
+      .repairComponent(id, componentId)
+      .pipe(
+        finalize(() => {
+          this.repairRequests.update((set) => {
+            const next = new Set(set);
+            next.delete(componentId);
+            return next;
+          });
+        }),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe({
+        next: () => {
+          this.notifications.success('Repair started.');
+          this.refreshNow();
+        },
+        error: (e: unknown) => {
+          this.onRepairError(toApiError(e));
+        },
+      });
+  }
+
+  /** Call only after the user confirmed Repair all broken (16 §15.5.1). */
+  repairBroken(): void {
+    const id = this.visualizationId();
+    if (id === null || this.repairAllRequesting() || this.activeRepairJob() !== null) return;
+    this.repairAllRequesting.set(true);
+    this.api
+      .repairBroken(id)
+      .pipe(
+        finalize(() => {
+          this.repairAllRequesting.set(false);
+        }),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe({
+        next: () => {
+          this.notifications.success('Repair started.');
+          this.refreshNow();
+        },
+        error: (e: unknown) => {
+          this.onRepairError(toApiError(e));
+        },
+      });
+  }
+
+  /** AI not configured or rejected → the Settings prompt of 13; anything else → a toast; then a fresh detail. */
+  private onRepairError(error: ApiError): void {
+    const copy = errorCopyFor(error);
+    const route = copy.actionRoute;
+    if (route) {
+      this.notifications
+        .promptAction({
+          title: copy.title,
+          message: copy.message,
+          actionLabel: copy.actionLabel ?? 'Open settings',
+          dismissText: 'Not now',
+        })
+        .pipe(filter(Boolean), takeUntilDestroyed(this.destroyRef))
+        .subscribe(() => void this.router.navigateByUrl(route));
+    } else {
+      this.notifications.error(userMessageFor(error));
+    }
+    this.refreshNow();
   }
 
   /** Call only after the user confirmed. cancelVisualization is silent: every outcome is toasted here, once. */

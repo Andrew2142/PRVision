@@ -1,6 +1,6 @@
 import { provideHttpClient, withInterceptors } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
-import { type ComponentFixture, TestBed } from '@angular/core/testing';
+import { type ComponentFixture, TestBed, discardPeriodicTasks, fakeAsync, tick } from '@angular/core/testing';
 import { MatDialog } from '@angular/material/dialog';
 import { provideNoopAnimations } from '@angular/platform-browser/animations';
 import { Router, provideRouter } from '@angular/router';
@@ -11,6 +11,7 @@ import { type RepositoryView } from '../../../core/models/repository.model';
 import { ConfirmDialogService, GENERIC_POPUP_DIALOG_CONFIG } from '../../../core/services/confirm-dialog.service';
 import { NotificationService } from '../../../core/services/notification.service';
 import { NewVisualizationDialogComponent } from '../components/new-visualization-dialog/new-visualization-dialog.component';
+import { librarySummaryView } from '../testing/library-fixtures';
 import { RepositoryDetailComponent } from './repository-detail.component';
 
 const BASE = environment.apiBaseUrl;
@@ -27,6 +28,9 @@ function repo(id: number, overrides: Partial<RepositoryView> = {}): RepositoryVi
     appRoot: '.',
     angularProject: null,
     angularBuildConfiguration: null,
+    renderViewport: 'desktop',
+    libraryBuildMode: 'grow',
+    stateAllowance: 3,
     packageManager: 'pnpm',
     viteConfigPath: 'vite.config.ts',
     tsconfigPath: 'tsconfig.json',
@@ -70,8 +74,8 @@ describe('RepositoryDetailComponent', () => {
   });
 
   afterEach(() => {
-    // The recent visualizations card issues its own GET; it is not under test here.
-    httpMock.match((req) => req.url.includes('/visualizations'));
+    // The recent visualizations and harness library cards issue their own GETs; they are not under test here.
+    httpMock.match((req) => req.url.includes('/visualizations') || req.url.endsWith('/library'));
     httpMock.verify();
   });
 
@@ -200,6 +204,11 @@ describe('RepositoryDetailComponent', () => {
     expect(req.request.method).toBe('DELETE');
     req.flush({ status: 200, data: { id: 3 } });
     expect(confirm.confirm.calls.mostRecent().args[0].confirmColor).toBe('warn');
+    // A re-registered repository starts with an empty library (16 §6.3, §15.4).
+    expect(confirm.confirm.calls.mostRecent().args[0].message).toBe(
+      'PRVision will forget "repo-3". Your local clone is not touched. ' +
+        'Export the harness library first if you want to keep it.',
+    );
     expect(notifications.success.calls.allArgs()).toEqual([['Repository removed']]);
     expect(navigate.calls.mostRecent().args).toEqual([['/repositories']]);
   });
@@ -235,4 +244,52 @@ describe('RepositoryDetailComponent', () => {
     expect(el.textContent).toContain('default: develop');
     expect(notifications.success.calls.allArgs()).toEqual([['Detection refreshed']]);
   });
+
+  it('places the settings card under detection and the harness library card above recent visualizations (16 §15.3)', fakeAsync(() => {
+    render('3');
+    respond(3);
+    tick(0);
+    httpMock
+      .expectOne(`${BASE}/repositories/3/library`)
+      .flush({ status: 200, data: librarySummaryView({ repositoryId: 3 }) });
+    fixture.detectChanges();
+    const settings = el.querySelector('app-repository-settings-card');
+    const library = el.querySelector('app-harness-library-card');
+    const recent = el.querySelector('app-recent-visualizations');
+    expect(settings?.previousElementSibling?.tagName.toLowerCase()).toBe('app-detection-card');
+    expect(library?.nextElementSibling).toBe(recent);
+    expect(library?.textContent).toContain('40 saved · 37 ready · 3 need updating');
+    fixture.destroy();
+    httpMock.match(() => true);
+    discardPeriodicTasks();
+  }));
+
+  it('a saved state allowance updates the page and reloads the library summary', fakeAsync(() => {
+    render('3');
+    respond(3);
+    tick(0);
+    httpMock.expectOne(`${BASE}/repositories/3/library`).flush({ status: 200, data: librarySummaryView() });
+    fixture.detectChanges();
+    const select = el.querySelector<HTMLElement>('[data-testid="settings-state-allowance"]');
+    const down = new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true });
+    Object.defineProperty(down, 'keyCode', { get: () => 40 });
+    select?.dispatchEvent(down);
+    fixture.detectChanges();
+    el.querySelector<HTMLButtonElement>('[data-testid="settings-save"]')?.click();
+    const patch = httpMock.expectOne({ method: 'PATCH', url: `${BASE}/repositories/3` });
+    expect(patch.request.body).toEqual({ stateAllowance: 4 });
+    patch.flush({ status: 200, data: repo(3, { stateAllowance: 4 }) });
+    fixture.detectChanges();
+    tick(0);
+    httpMock
+      .expectOne(`${BASE}/repositories/3/library`)
+      .flush({ status: 200, data: librarySummaryView({ stateAllowance: 4 }) });
+    fixture.detectChanges();
+    expect(el.querySelector('[data-testid="settings-saved"]')?.textContent?.trim()).toBe(
+      'New harnesses use 4 states from now on.',
+    );
+    fixture.destroy();
+    httpMock.match(() => true);
+    discardPeriodicTasks();
+  }));
 });

@@ -12,7 +12,7 @@ import { NotificationService } from './notification.service';
 interface RouteCase {
   name: string;
   call: (api: ApiService) => Observable<unknown>;
-  method: 'GET' | 'POST' | 'PUT' | 'DELETE';
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   path: string;
   silent: boolean;
 }
@@ -109,6 +109,71 @@ const ROUTES: RouteCase[] = [
     path: 'visualizations/9',
     silent: false,
   },
+  {
+    name: 'updateRepository',
+    call: (a) => a.updateRepository(3, { stateAllowance: 2 }),
+    method: 'PATCH',
+    path: 'repositories/3',
+    silent: false,
+  },
+  // 16h library block (sheet 16 §15.1)
+  {
+    name: 'estimateLibraryForFolder',
+    call: (a) => a.estimateLibraryForFolder({ localPath: '/home/dev/app', stateAllowance: 3 }),
+    method: 'POST',
+    path: 'repositories/library-estimate',
+    silent: true,
+  },
+  {
+    name: 'getLibrarySummary',
+    call: (a) => a.getLibrarySummary(3),
+    method: 'GET',
+    path: 'repositories/3/library',
+    silent: true,
+  },
+  {
+    name: 'estimateLibrary',
+    call: (a) => a.estimateLibrary(3),
+    method: 'GET',
+    path: 'repositories/3/library/estimate',
+    silent: true,
+  },
+  {
+    name: 'startLibraryScan',
+    call: (a) => a.startLibraryScan(3, { kind: 'scan', spendCapUsd: null }),
+    method: 'POST',
+    path: 'repositories/3/library/scans',
+    silent: true,
+  },
+  { name: 'getLibraryJob', call: (a) => a.getLibraryJob(5), method: 'GET', path: 'library-jobs/5', silent: true },
+  {
+    name: 'getLibraryJobEvents',
+    call: (a) => a.getLibraryJobEvents(5),
+    method: 'GET',
+    path: 'library-jobs/5/events',
+    silent: true,
+  },
+  {
+    name: 'cancelLibraryJob',
+    call: (a) => a.cancelLibraryJob(5),
+    method: 'POST',
+    path: 'library-jobs/5/cancel',
+    silent: true,
+  },
+  {
+    name: 'repairComponent',
+    call: (a) => a.repairComponent(9, 11),
+    method: 'POST',
+    path: 'visualizations/9/components/11/repair',
+    silent: true,
+  },
+  {
+    name: 'repairBroken',
+    call: (a) => a.repairBroken(9),
+    method: 'POST',
+    path: 'visualizations/9/repair-broken',
+    silent: true,
+  },
 ];
 
 describe('ApiService', () => {
@@ -145,7 +210,7 @@ describe('ApiService', () => {
   });
 
   it('every typed method hits its 00 §9/§14.4 method + path', () => {
-    expect(ROUTES.length).toBe(19);
+    expect(ROUTES.length).toBe(29);
     for (const route of ROUTES) {
       let result: unknown;
       route.call(api).subscribe((v) => (result = v));
@@ -208,6 +273,40 @@ describe('ApiService', () => {
     expect(req.request.params.get('afterId')).toBe('41');
     expect(req.request.params.get('limit')).toBe('500');
     req.flush({ status: 200, data: [] });
+  });
+
+  it('estimateLibrary passes stateAllowance and kind, and omits them when absent', () => {
+    api.estimateLibrary(3, { stateAllowance: 4, kind: 'rescan' }).subscribe();
+    const req = http.expectOne((r) => r.url === `${base}/repositories/3/library/estimate`);
+    expect(req.request.params.get('stateAllowance')).toBe('4');
+    expect(req.request.params.get('kind')).toBe('rescan');
+    req.flush({ status: 200, data: {} });
+
+    api.estimateLibrary(3).subscribe();
+    const bare = http.expectOne((r) => r.url === `${base}/repositories/3/library/estimate`);
+    expect(bare.request.params.keys()).toEqual([]);
+    bare.flush({ status: 200, data: {} });
+  });
+
+  it('getLibraryJobEvents passes afterId and limit', () => {
+    api.getLibraryJobEvents(5, { afterId: 12, limit: 500 }).subscribe();
+    const req = http.expectOne((r) => r.url === `${base}/library-jobs/5/events`);
+    expect(req.request.params.get('afterId')).toBe('12');
+    expect(req.request.params.get('limit')).toBe('500');
+    req.flush({ status: 200, data: [] });
+  });
+
+  it('library mutations send their bodies unchanged', () => {
+    api.startLibraryScan(3, { kind: 'rescan', spendCapUsd: 12.5, stateAllowance: 2 }).subscribe();
+    api.updateRepository(3, { stateAllowance: 4 }).subscribe();
+    api.estimateLibraryForFolder({ localPath: '/x', appRoot: 'apps/web', stateAllowance: 1 }).subscribe();
+    const scan = http.expectOne(`${base}/repositories/3/library/scans`);
+    expect(scan.request.body).toEqual({ kind: 'rescan', spendCapUsd: 12.5, stateAllowance: 2 });
+    const patch = http.expectOne(`${base}/repositories/3`);
+    expect(patch.request.body).toEqual({ stateAllowance: 4 });
+    const estimate = http.expectOne(`${base}/repositories/library-estimate`);
+    expect(estimate.request.body).toEqual({ localPath: '/x', appRoot: 'apps/web', stateAllowance: 1 });
+    for (const r of [scan, patch, estimate]) r.flush({ status: 200, data: {} });
   });
 
   it('GETs set SUPPRESS_ERROR_TOAST true by default', () => {

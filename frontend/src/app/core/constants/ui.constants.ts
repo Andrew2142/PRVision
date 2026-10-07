@@ -22,3 +22,17 @@ export const COMMIT_SEARCH_DEBOUNCE_MS = 300;
 
 /** Recent visualizations shown on the repository detail page. */
 export const RECENT_VISUALIZATIONS_LIMIT = 5;
+
+/** States per component a repository may allow (16 D4); the default for new repositories (16 E23). */
+export const STATE_ALLOWANCE_OPTIONS = [1, 2, 3, 4, 5] as const;
+export const STATE_ALLOWANCE_DEFAULT = 3;
+
+/** Largest library file the import dialog accepts (16k; equals the API body limit). */
+export const LIBRARY_IMPORT_MAX_BYTES = 64 * 1024 * 1024;
+
+/** Scan spending cap bounds in dollars (backend LIBRARY_SPEND_CAP_MIN_USD / MAX_USD). */
+export const LIBRARY_SPEND_CAP_MIN_USD = 0.5;
+export const LIBRARY_SPEND_CAP_MAX_USD = 10_000;
+
+/** Debounce before a changed state allowance asks for a new estimate (16 §15.2). */
+export const LIBRARY_ESTIMATE_DEBOUNCE_MS = 300;

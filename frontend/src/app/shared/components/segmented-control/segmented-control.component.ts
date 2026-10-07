@@ -7,6 +7,8 @@ export interface SegmentOption<T extends string> {
   count?: number | null;
   icon?: string;
   disabled?: boolean;
+  /** A filled dot after the label (e.g. a changed state, 16 §15.5.2); `label` is its accessible text. */
+  marker?: { testId: string; label: string } | null;
 }
 
 /**
@@ -52,6 +54,14 @@ export interface SegmentOption<T extends string> {
             <mat-icon class="!h-4 !w-4 !text-base !leading-4" aria-hidden="true">{{ option.icon }}</mat-icon>
           }
           <span>{{ option.label }}</span>
+          @if (option.marker; as marker) {
+            <span
+              class="h-2 w-2 shrink-0 rounded-full bg-[var(--shell-accent)]"
+              role="img"
+              [attr.aria-label]="marker.label"
+              [attr.data-testid]="marker.testId"
+            ></span>
+          }
           @if (option.count !== undefined && option.count !== null) {
             <span class="rounded-full bg-[var(--color-bg-tertiary)] px-1.5 text-[0.6875rem] tabular-nums">{{
               option.count

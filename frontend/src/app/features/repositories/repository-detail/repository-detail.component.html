@@ -76,8 +76,14 @@
   }
 
   <div class="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
-    <app-detection-card [repository]="repo" />
-    <app-recent-visualizations [repositoryId]="repo.id" />
+    <div class="flex flex-col gap-6">
+      <app-detection-card [repository]="repo" />
+      <app-repository-settings-card [repository]="repo" (saved)="onSettingsSaved($event)" />
+    </div>
+    <div class="flex flex-col gap-6">
+      <app-harness-library-card [repository]="repo" />
+      <app-recent-visualizations [repositoryId]="repo.id" />
+    </div>
   </div>
 } @else if (notFound()) {
   <app-not-found-page

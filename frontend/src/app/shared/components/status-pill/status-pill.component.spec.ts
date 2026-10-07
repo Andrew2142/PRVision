@@ -27,6 +27,21 @@ describe('StatusPillComponent', () => {
     expect(render({ kind: 'visualization', value: 'completed' }).querySelector('.dd-pill__dot')).toBeNull();
   });
 
+  it('library jobs: active tones while running, "Paused at cap" warning, and the Re-checked change (16 §15.5.3, §15.7)', () => {
+    expect(render({ kind: 'libraryJob', value: 'running' }).className).toBe('dd-pill dd-pill--active');
+    expect(render({ kind: 'libraryJob', value: 'running' }).querySelector('.dd-pill__dot--pulse')).not.toBeNull();
+    expect(render({ kind: 'libraryJob', value: 'queued' }).className).toBe('dd-pill dd-pill--active');
+    expect(render({ kind: 'libraryJob', value: 'completed' }).className).toBe('dd-pill dd-pill--success');
+    const capped = render({ kind: 'libraryJob', value: 'cap_reached' });
+    expect(capped.className).toBe('dd-pill dd-pill--warning');
+    expect(capped.textContent?.trim()).toBe('Paused at cap');
+    expect(render({ kind: 'libraryJob', value: 'failed' }).className).toBe('dd-pill dd-pill--danger');
+    expect(render({ kind: 'libraryJob', value: 'cancelled' }).className).toBe('dd-pill dd-pill--muted');
+    const rechecked = render({ kind: 'change', value: 'rechecked' });
+    expect(rechecked.className).toBe('dd-pill dd-pill--muted');
+    expect(rechecked.textContent?.trim()).toBe('Re-checked');
+  });
+
   it('unknown value → muted + title-cased label', () => {
     const pill = render({ kind: 'visualization', value: 'brand_new_state' });
     expect(pill.className).toBe('dd-pill dd-pill--muted');

@@ -14,6 +14,7 @@ interface Inputs {
   visualChange?: VisualChange | null;
   baseError?: string | null;
   headError?: string | null;
+  stateName?: string | null;
 }
 
 const ART = environment.artifactBaseUrl;
@@ -42,6 +43,7 @@ describe('ImageCompareComponent', () => {
       visualChange: 'changed',
       baseError: null,
       headError: null,
+      stateName: null,
       ...inputs,
     };
     fixture.componentRef.setInput('label', 'CartSummary');
@@ -223,5 +225,43 @@ describe('ImageCompareComponent', () => {
     expect(imgs().length).toBe(0);
     expect(el.textContent).toContain('Not rendered');
     expect(modeButton('Slider').disabled).toBeTrue();
+  });
+
+  describe('state input (16 §15.5.2)', () => {
+    it('a named state is part of the image labels; Default keeps the plain label', () => {
+      render({ stateName: 'Menu open' });
+      expect(imgs().map((i) => i.alt)).toEqual([
+        'Base render of CartSummary · Menu open',
+        'Head render of CartSummary · Menu open',
+      ]);
+      render({ stateName: 'Default' });
+      expect(imgs().map((i) => i.alt)).toEqual(['Base render of CartSummary', 'Head render of CartSummary']);
+    });
+
+    it('a state only on head or only on base says which version lacks it', () => {
+      render({ stateName: 'Overdue', visualChange: 'new', baseUrl: null, diffUrl: null });
+      expect(el.textContent).toContain('Not in the base version');
+      expect(el.textContent).not.toContain('new component');
+      render({ stateName: 'Overdue', visualChange: 'deleted', headUrl: null, diffUrl: null });
+      expect(el.textContent).toContain('Not in the head version');
+    });
+
+    it("a failed image of one state does not hide another state's image", () => {
+      render({ stateName: 'Default' });
+      imgs()[0]?.dispatchEvent(new Event('error'));
+      fixture.detectChanges();
+      expect(el.textContent).toContain('Image unavailable');
+      render({
+        stateName: 'Menu open',
+        baseUrl: '/artifacts/7/11/s1/base.png',
+        headUrl: '/artifacts/7/11/s1/head.png',
+        diffUrl: '/artifacts/7/11/s1/diff.png',
+      });
+      expect(imgs().map((i) => i.getAttribute('src'))).toEqual([
+        `${ART}/artifacts/7/11/s1/base.png`,
+        `${ART}/artifacts/7/11/s1/head.png`,
+      ]);
+      expect(el.textContent).not.toContain('Image unavailable');
+    });
   });
 });

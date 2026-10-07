@@ -4,10 +4,14 @@ import {
   SUMMARY_START_FORMAT,
   formatDuration,
   frameworkChipLabel,
+  globalStyleTriggerText,
+  harnessOriginLabel,
   noComponentsCopy,
   plainPlaceName,
   refWithSha,
   renderErrorBlock,
+  repairAllMessage,
+  statesChangedLabel,
   structuralIntro,
   structuralSectionTitle,
   successorEvidenceLines,
@@ -54,6 +58,34 @@ describe('visualization-format', () => {
       detailView({ startedAt: null, completedAt: null, aiUsage: { inputTokens: 0, outputTokens: 0, calls: 1 } }),
     );
     expect(oneCall).toBe('claude-opus-5-5 via Anthropic API · 1 AI call');
+  });
+
+  it('summaryLine leads with "<checked> checked, <changed> changed" once harnesses rendered (16 D7)', () => {
+    const start = formatDateTime('2026-10-03T10:00:00Z', SUMMARY_START_FORMAT);
+    expect(summaryLine(detailView({ checkedCount: 201, changedCount: 14 }))).toBe(
+      `201 checked, 14 changed · Started ${start} · took 3m 12s · claude-opus-5-5 via Anthropic API · 41.2K in / 3.1K out tokens · 14 AI calls`,
+    );
+    expect(summaryLine(detailView({ checkedCount: 0 }))).not.toContain('checked');
+  });
+
+  it('harness library texts (16 §15.5)', () => {
+    expect(globalStyleTriggerText('src/index.css')).toBe(
+      'Global style change: src/index.css — every saved harness was re-checked',
+    );
+    expect(harnessOriginLabel('library')).toBe('Saved harness');
+    expect(harnessOriginLabel('written')).toBe('New harness');
+    expect(harnessOriginLabel('repaired')).toBe('Repaired harness');
+    expect(harnessOriginLabel(null)).toBeNull();
+    expect(statesChangedLabel(3, 2)).toBe('2 of 3 states changed');
+    expect(statesChangedLabel(1, 1)).toBeNull();
+    expect(statesChangedLabel(3, 0)).toBeNull();
+    expect(repairAllMessage(3, 0.84)).toBe(
+      'Ask the AI to write new harnesses for 3 components? This uses AI credits, about $0.84.',
+    );
+    expect(repairAllMessage(14, 12.3)).toBe(
+      'Ask the AI to write new harnesses for 14 components? This uses AI credits, about $12.',
+    );
+    expect(repairAllMessage(1, null)).toBe('Ask the AI to write new harnesses for 1 component? This uses AI credits.');
   });
 
   it('noComponentsCopy per status', () => {

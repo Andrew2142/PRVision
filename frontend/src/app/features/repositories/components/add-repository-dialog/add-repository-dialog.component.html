@@ -28,6 +28,131 @@
           >Pull requests need a GitHub remote. Local branches and the working tree still work.</app-inline-alert
         >
       }
+      @if (scanJobId(); as jobId) {
+        <app-inline-alert tone="success" data-testid="scan-started">
+          Scan started.
+          <a
+            class="font-medium text-[var(--shell-accent)] underline"
+            [routerLink]="['/library-jobs', jobId]"
+            (click)="closeForScan()"
+            >View progress</a
+          >
+        </app-inline-alert>
+      }
+      @if (scanStartError(); as message) {
+        <app-inline-alert tone="warning" title="The scan did not start" data-testid="scan-start-error">{{
+          message
+        }}</app-inline-alert>
+      }
+    </div>
+  } @else if (onLibraryStep()) {
+    <div class="flex flex-col gap-4" data-testid="library-step">
+      <mat-radio-group
+        class="flex flex-col gap-2"
+        aria-label="Build mode"
+        data-testid="build-mode"
+        [formControl]="buildMode"
+      >
+        <div
+          class="rounded-2xl border p-2"
+          [class.border-[color:var(--color-border)]]="buildModeValue() !== 'grow'"
+          [class.border-[color:var(--shell-accent)]]="buildModeValue() === 'grow'"
+        >
+          <mat-radio-button
+            value="grow"
+            data-mode="grow"
+            class="block [&_.mdc-form-field]:!flex [&_.mdc-form-field]:w-full [&_.mdc-form-field]:!items-start [&_label]:flex-1 [&_label]:py-1 [&_label]:pr-2"
+          >
+            <span class="font-semibold text-[var(--color-text-primary)]">Grow as you go</span>
+            <span class="mt-1 block text-sm text-[var(--color-text-secondary)]"
+              >No upfront cost. Every run saves the harnesses it writes, and the library fills in over time.</span
+            >
+          </mat-radio-button>
+        </div>
+        <div
+          class="rounded-2xl border p-2"
+          [class.border-[color:var(--color-border)]]="buildModeValue() !== 'scan'"
+          [class.border-[color:var(--shell-accent)]]="buildModeValue() === 'scan'"
+        >
+          <mat-radio-button
+            value="scan"
+            data-mode="scan"
+            class="block [&_.mdc-form-field]:!flex [&_.mdc-form-field]:w-full [&_.mdc-form-field]:!items-start [&_label]:flex-1 [&_label]:py-1 [&_label]:pr-2"
+          >
+            <span class="font-semibold text-[var(--color-text-primary)]">Scan the whole app now</span>
+            <span class="mt-1 block text-sm text-[var(--color-text-secondary)]"
+              >Writes a harness for every component now, so every later run can re-check the whole app without AI
+              cost.</span
+            >
+          </mat-radio-button>
+        </div>
+      </mat-radio-group>
+      <mat-form-field class="w-full">
+        <mat-label>States per component</mat-label>
+        <mat-select [formControl]="stateAllowance" data-testid="state-allowance">
+          @for (n of stateAllowanceOptions; track n) {
+            <mat-option [value]="n">{{ n }}</mat-option>
+          }
+        </mat-select>
+        <mat-hint
+          >A maximum, not a target. PRVision only adds states that look different; simple components get just
+          Default.</mat-hint
+        >
+      </mat-form-field>
+      <app-library-estimate-panel
+        [estimate]="estimate()"
+        [loading]="estimateLoading()"
+        [error]="estimateError()"
+        [mode]="buildModeValue()"
+      />
+      @if (buildModeValue() === 'scan') {
+        <div class="flex flex-col gap-1">
+          <div class="flex flex-wrap items-center gap-4">
+            <mat-form-field class="min-w-0 flex-1">
+              <mat-label>Spending cap</mat-label>
+              <span matTextPrefix>$&nbsp;</span>
+              <input
+                matInput
+                type="number"
+                min="0.5"
+                max="10000"
+                step="0.01"
+                data-testid="spend-cap"
+                [formControl]="spendCap"
+              />
+              @if (spendCap.hasError('min') || spendCap.hasError('max')) {
+                <mat-error>Enter an amount between $0.50 and $10,000.</mat-error>
+              } @else if (spendCap.hasError('decimals')) {
+                <mat-error>Use at most two decimals.</mat-error>
+              }
+            </mat-form-field>
+            <mat-checkbox [formControl]="noCap" data-testid="no-cap">No cap</mat-checkbox>
+          </div>
+          @if (spendCap.touched && spendCap.enabled && spendCap.value === null) {
+            <p class="text-sm text-[var(--color-error)]" data-testid="spend-cap-missing">
+              Enter a spending cap, or choose No cap.
+            </p>
+          }
+          <p class="text-sm text-[var(--color-text-tertiary)]">
+            The scan pauses when it reaches the cap. You can continue it later from the repository page.
+          </p>
+        </div>
+      }
+      @if (errorView(); as err) {
+        <app-inline-alert tone="error" [title]="err.title">
+          {{ err.message }}
+          @if (err.tip) {
+            <p class="mt-1" data-testid="rejection-tip">{{ err.tip }}</p>
+          }
+          @if (err.details.length) {
+            <ul class="mt-1 list-disc pl-5">
+              @for (detail of err.details; track detail) {
+                <li>{{ detail }}</li>
+              }
+            </ul>
+          }
+        </app-inline-alert>
+      }
     </div>
   } @else if (onAppStep()) {
     <div class="flex flex-col gap-4" data-testid="app-step">
@@ -38,7 +163,6 @@
         class="flex flex-col gap-2"
         aria-label="App"
         [value]="selectedKey()"
-        [disabled]="phase() === 'creatingApp'"
         (change)="selectApp($event.value)"
       >
         @for (option of appOptions(); track option.key) {
