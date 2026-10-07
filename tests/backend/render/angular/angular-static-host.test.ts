@@ -8,6 +8,8 @@ import {
   mimeTypeFor,
   type AngularStaticHostHandle
 } from "../../../../backend/src/services/visualizations/pipeline/render/angular/angular-static-host";
+import { liveInitScriptTag } from "../../../../backend/src/services/visualizations/pipeline/render/live/live-init-script";
+import { buildLiveCsp } from "../../../../backend/src/services/visualizations/pipeline/render/live/live-page-headers";
 import { makeTempDir } from "../../helpers/temp-dir";
 
 interface RawResponse {
@@ -17,16 +19,20 @@ interface RawResponse {
 }
 
 /** Sends the path verbatim (no URL normalization by a client library). */
-function request(origin: string, rawPath: string, method = "GET"): Promise<RawResponse> {
+function request(origin: string, rawPath: string, method = "GET", host?: string): Promise<RawResponse> {
   const url = new URL(origin);
   return new Promise((resolve, reject) => {
-    const req = http.request({ host: url.hostname, port: url.port, path: rawPath, method, agent: false }, (res) => {
-      const chunks: Buffer[] = [];
-      res.on("data", (chunk: Buffer) => chunks.push(chunk));
-      res.on("end", () => {
-        resolve({ status: res.statusCode ?? 0, headers: res.headers, body: Buffer.concat(chunks).toString("utf8") });
-      });
-    });
+    const headers = host === undefined ? {} : { Host: host };
+    const req = http.request(
+      { host: url.hostname, port: url.port, path: rawPath, method, agent: false, headers },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (chunk: Buffer) => chunks.push(chunk));
+        res.on("end", () => {
+          resolve({ status: res.statusCode ?? 0, headers: res.headers, body: Buffer.concat(chunks).toString("utf8") });
+        });
+      }
+    );
     req.on("error", reject);
     req.end();
   });
@@ -131,4 +137,74 @@ test("AngularStaticHost.start rejects a missing build folder", async () => {
     AngularStaticHost.start({ side: "base", groupKey: "none", distDir: "/nonexistent/prvision/dist" }),
     /ENOENT/
   );
+});
+
+// ----- 16i: live option (16 §12.4, §12.5) -----
+
+const LIVE_ORIGINS = ["http://localhost:4210", "http://127.0.0.1:4210"];
+
+async function startLiveHost(t: TestContext): Promise<AngularStaticHostHandle> {
+  const temp = makeTempDir("angular-static-live");
+  const dist = path.join(temp.path, "dist");
+  fs.mkdirSync(dist, { recursive: true });
+  fs.writeFileSync(
+    path.join(dist, "index.html"),
+    '<!doctype html><html lang="en"><head><meta charset="utf-8"><title>h</title></head><body><prvision-root></prvision-root></body></html>'
+  );
+  fs.writeFileSync(path.join(dist, "main.js"), "console.log(1);");
+  const host = await AngularStaticHost.start({
+    side: "base",
+    groupKey: "g1",
+    distDir: dist,
+    live: { frontendOrigins: LIVE_ORIGINS }
+  });
+  t.after(async () => {
+    await host.stop();
+    temp.cleanup();
+  });
+  return host;
+}
+
+test("a live AngularStaticHost sends the live headers on every response and injects the init script first in <head>", async (t) => {
+  const host = await startLiveHost(t);
+  const port = new URL(host.origin).port;
+  const index = await request(host.origin, "/index.html?c=1&s=Default&live=1", "GET", `127.0.0.1:${port}`);
+  assert.equal(index.status, 200);
+  assert.ok(index.body.includes(`<head>${liveInitScriptTag()}<meta charset="utf-8">`), "first child of <head>");
+  assert.equal(index.headers["content-length"], String(Buffer.byteLength(index.body)));
+  for (const response of [
+    index,
+    await request(host.origin, "/main.js", "GET", `localhost:${port}`),
+    await request(host.origin, "/missing.js", "GET", `127.0.0.1:${port}`)
+  ]) {
+    assert.equal(response.headers["content-security-policy"], buildLiveCsp(LIVE_ORIGINS));
+    assert.equal(response.headers["cache-control"], "no-store");
+    assert.equal(response.headers["x-content-type-options"], "nosniff");
+    assert.equal(response.headers["referrer-policy"], "no-referrer");
+    assert.equal(response.headers["cross-origin-resource-policy"], "same-origin");
+  }
+  const script = await request(host.origin, "/main.js", "GET", `127.0.0.1:${port}`);
+  assert.equal(script.body, "console.log(1);", "only HTML gets the script");
+});
+
+test("a live AngularStaticHost answers 403 to a foreign Host and 405 to non-GET methods", async (t) => {
+  const host = await startLiveHost(t);
+  const port = new URL(host.origin).port;
+  const evil = await request(host.origin, "/index.html", "GET", "evil.example");
+  assert.equal(evil.status, 403);
+  assert.equal(evil.body, "Forbidden host");
+  assert.equal(evil.headers["content-security-policy"], buildLiveCsp(LIVE_ORIGINS));
+  assert.equal((await request(host.origin, "/index.html", "GET", `evil.example:${port}`)).status, 403);
+  const post = await request(host.origin, "/index.html", "POST", `127.0.0.1:${port}`);
+  assert.equal(post.status, 405);
+  assert.equal(post.headers.allow, "GET, HEAD");
+  assert.equal((await request(host.origin, "/index.html", "HEAD", `127.0.0.1:${port}`)).status, 200);
+});
+
+test("a screenshot AngularStaticHost (no live option) keeps its old behaviour: no CSP, no script", async (t) => {
+  const { host } = await startHost(t);
+  const index = await request(host.origin, "/", "GET", "evil.example");
+  assert.equal(index.status, 200);
+  assert.equal(index.headers["content-security-policy"], undefined);
+  assert.ok(!index.body.includes("prvision-live-init"));
 });

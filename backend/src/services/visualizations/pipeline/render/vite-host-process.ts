@@ -5,7 +5,8 @@
  * disconnected parent closes the server and exits.
  *
  * Imports only: node built-ins, render-types, esm-import (via vite-loader), vite-loader, vite-server-config,
- * vite-harness-plugin, vite-mock-plugin, mock-rules and config-consts/render.config.ts (directly). Never the DB,
+ * vite-harness-plugin, vite-mock-plugin, mock-rules, the pure live helpers (16i: live/*, page-scripts) and
+ * config-consts/render.config.ts (directly). Never the DB,
  * Redis, the logger, AuthContext or the config-consts barrel.
  */
 import fs from "node:fs";
@@ -28,6 +29,7 @@ import {
   type ViteModuleLike,
   type VitePluginLike
 } from "./render-types";
+import { createLivePlugin } from "./live/live-vite-plugin";
 import { createHarnessPlugin } from "./vite-harness-plugin";
 import { loadTargetVite, ViteLoadError } from "./vite-loader";
 import {
@@ -349,6 +351,19 @@ async function startHost(options: ViteHostStartOptions): Promise<void> {
     }
   });
   const harnessPlugin = createHarnessPlugin({ reactDomMajor: react.major });
+  // 16i (16 §12.4, §12.5): live hosts guard Host and method, send the live headers and inject the init script.
+  const livePlugin =
+    options.live === undefined
+      ? null
+      : createLivePlugin({
+          frontendOrigins: options.live.frontendOrigins,
+          onReject: (rejection) => {
+            log(
+              "warn",
+              `live.request.rejected: ${rejection.reason} guard refused ${rejection.method} ${rejection.url} (Host ${rejection.host ?? "missing"})`
+            );
+          }
+        });
 
   // 7. Env defaults for referenced but undefined VITE_* keys.
   const envDir = path.resolve(options.viteRoot, typeof userConfig.envDir === "string" ? userConfig.envDir : ".");
@@ -400,6 +415,7 @@ async function startHost(options: ViteHostStartOptions): Promise<void> {
     userPlugins: keptPlugins,
     mockPlugin,
     harnessPlugin,
+    livePlugin,
     logger,
     fsAllow,
     envDefines,

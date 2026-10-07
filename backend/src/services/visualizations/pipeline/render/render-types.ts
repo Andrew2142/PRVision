@@ -165,6 +165,9 @@ export interface ViteHostStartOptions {
   warmupFiles: string[]; // root-relative POSIX paths: entry.tsx + this group's component files
   referencedEnvKeys: string[]; // union over both sides
   mocks: MockEntryInput[]; // this group's accepted mocks on this side
+  // --- 16i block (16 §12.4) ---
+  /** Live host: appends the live plugin (Host/method guard, live headers, init script); server.cors stays false. */
+  live?: { frontendOrigins: string[] };
 }
 
 export type ViteHostRequest = { type: "start"; options: ViteHostStartOptions } | { type: "shutdown" };

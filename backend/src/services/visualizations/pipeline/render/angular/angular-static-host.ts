@@ -10,6 +10,9 @@ import type { AddressInfo } from "node:net";
 import path from "node:path";
 import { ANGULAR_STATIC_HOST } from "../../../../../config-consts";
 import { createLogger, isPathInside } from "../../../../../utilities";
+import { injectLiveInitScript, liveInitScriptTag } from "../live/live-init-script";
+import { decideLiveRequest, livePageHeaders } from "../live/live-page-headers";
+import { rejectLiveRequest } from "../live/live-vite-plugin";
 import type { RenderSide, ViteHostLogLevel, ViteLogEntry } from "../render-types";
 
 const log = createLogger("render");
@@ -71,6 +74,9 @@ export interface AngularStaticHostOptions {
   warnings?: readonly string[];
   /** Interface to bind (tests); default ANGULAR_STATIC_HOST. */
   hostname?: string;
+  // --- 16i block (16 §12.4, §12.5) ---
+  /** Live host: Host guard (403), live headers on every response, init script in HTML responses. */
+  live?: { frontendOrigins: string[]; initScriptTag?: string };
 }
 
 class LiveStaticHost implements AngularStaticHostHandle {
@@ -84,6 +90,8 @@ class LiveStaticHost implements AngularStaticHostHandle {
   private alive = true;
   private stopReason: string | null = null;
   private stopping: Promise<void> | null = null;
+  /** 16i: live headers and init script tag, or null for screenshot hosts. */
+  private readonly live: { headers: Record<string, string>; tag: string } | null;
   origin = "";
 
   constructor(
@@ -95,6 +103,13 @@ class LiveStaticHost implements AngularStaticHostHandle {
     this.groupKey = options.groupKey;
     this.tailwindMajor = options.tailwindMajor ?? null;
     this.warnings = (options.warnings ?? []).slice(0, STATIC_HOST_WARNINGS_MAX);
+    this.live =
+      options.live === undefined
+        ? null
+        : {
+            headers: livePageHeaders(options.live.frontendOrigins),
+            tag: options.live.initScriptTag ?? liveInitScriptTag()
+          };
     for (const entry of options.buildLogs ?? []) {
       this.push(entry.level, entry.message);
     }
@@ -150,6 +165,32 @@ class LiveStaticHost implements AngularStaticHostHandle {
   async handle(request: http.IncomingMessage, response: http.ServerResponse): Promise<void> {
     response.setHeader("Cache-Control", "no-store");
     response.setHeader("X-Content-Type-Options", "nosniff");
+    if (this.live !== null) {
+      // 16i block (16 §12.5): Host guard first, then the method guard; live headers on every response.
+      const decision = decideLiveRequest({
+        method: request.method,
+        host: request.headers.host,
+        port: request.socket.localPort
+      });
+      if (!decision.ok) {
+        log.warn(
+          {
+            event: "live.request.rejected",
+            side: this.side,
+            groupKey: this.groupKey,
+            reason: decision.reason,
+            method: request.method ?? null,
+            host: request.headers.host ?? null
+          },
+          "Live host rejected a request"
+        );
+        rejectLiveRequest(response, decision, this.live.headers);
+        return;
+      }
+      for (const [name, value] of Object.entries(this.live.headers)) {
+        response.setHeader(name, value);
+      }
+    }
     if (request.method !== "GET" && request.method !== "HEAD") {
       response.writeHead(405, { Allow: "GET, HEAD" });
       response.end();
@@ -177,7 +218,11 @@ class LiveStaticHost implements AngularStaticHostHandle {
       this.notFound(response, pathname);
       return;
     }
-    response.writeHead(200, { "Content-Type": mimeTypeFor(file), "Content-Length": String(body.length) });
+    const contentType = mimeTypeFor(file);
+    if (this.live !== null && contentType.startsWith("text/html")) {
+      body = Buffer.from(injectLiveInitScript(body.toString("utf8"), this.live.tag), "utf8"); // 16i block
+    }
+    response.writeHead(200, { "Content-Type": contentType, "Content-Length": String(body.length) });
     response.end(request.method === "HEAD" ? undefined : body);
   }
 

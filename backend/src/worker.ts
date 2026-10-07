@@ -13,11 +13,14 @@ import {
   describeBootError,
   installGracefulShutdown,
   type LibraryJobProcessor,
+  type LiveSessionJobProcessor,
   type VisualizationJobProcessor
 } from "./utilities";
 import { HarnessRepairWorkerService } from "./services/harness-library/harness-repair-worker-service";
 import { LibraryJobRecovery } from "./services/harness-library/library-job-recovery";
 import { LibraryScanWorkerService } from "./services/harness-library/library-scan-worker-service";
+import { LiveSessionRecovery } from "./services/live/live-session-recovery";
+import { LiveSessionWorkerService } from "./services/live/live-session-worker-service";
 import { VisualizationWorkerService } from "./services/visualizations/pipeline/visualization-worker-service";
 
 const log = createLogger("worker");
@@ -37,9 +40,15 @@ const processLibraryRepair: LibraryJobProcessor = async (job) => {
   await new HarnessRepairWorkerService().run(job);
 };
 
+/** [16i] Live sessions (16 §12.3): job = { liveSessionId, jobId, signal } (signal: "shutdown" only). */
+const processLiveSession: LiveSessionJobProcessor = async (job) => {
+  await new LiveSessionWorkerService().run(job);
+};
+
 async function bootstrapWorker(): Promise<void> {
   let sweep: { stop(): void } | null = null; // [07] periodic recovery sweep, started after the worker
   let librarySweep: { stop(): void } | null = null; // [16f] library job recovery sweep
+  let liveSweep: { stop(): void } | null = null; // [16i] live session recovery sweep
   const shutdown = installGracefulShutdown(
     [
       {
@@ -47,6 +56,7 @@ async function bootstrapWorker(): Promise<void> {
         close: () => {
           sweep?.stop();
           librarySweep?.stop(); // [16f]
+          liveSweep?.stop(); // [16i]
           return Promise.resolve();
         }
       },
@@ -90,6 +100,17 @@ async function bootstrapWorker(): Promise<void> {
       AuthContext.runAsLocalUser(() => processLibraryRepair(job), { requestId: job.jobId })
     );
     // [end 16g]
+    // [16i] live session recovery (16 §12.7) before the live worker takes jobs; then its sweep.
+    const liveRecovery = new LiveSessionRecovery();
+    const liveReport = await AuthContext.runAsLocalUser(() => liveRecovery.recoverOnBoot(), {
+      requestId: "live-boot-recovery"
+    });
+    log.info({ event: "live.recovery.boot_finished", ...liveReport }, "Live session boot recovery finished");
+    await QueueService.startLiveSessionWorker((job) =>
+      AuthContext.runAsLocalUser(() => processLiveSession(job), { requestId: job.jobId })
+    );
+    liveSweep = liveRecovery.startSweep();
+    // [end 16i]
     log.info({ event: "worker.boot.started" }, "PRVision worker started");
   } catch (error: unknown) {
     log.fatal(

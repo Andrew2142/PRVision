@@ -1127,3 +1127,30 @@ test("VisualizationsService.remove returns 409 while a repair of the run is acti
   assert.deepEqual(await run(() => h.service(1).remove()), { status: 200, data: { id: 1 } });
   assert.deepEqual(h.removedArtifacts, [1]);
 });
+
+// ----- 16i block (16 §12.6, §14.1): deleting a run stops its live session -----
+
+test("VisualizationsService.remove stops the run's running live session (reason user), best effort", async (t) => {
+  const h = setup(t);
+  h.store.seed(Table.VISUALIZATIONS, [
+    makeVisualizationRow({ id: 1, status: "completed", completedAt: NOW }),
+    makeVisualizationRow({ id: 2, status: "completed", completedAt: NOW })
+  ]);
+  h.store.seed(Table.LIVE_SESSIONS, [
+    { id: 5, visualizationId: 1, status: "ready", hosts: [], openRequests: [], openRequestsVersion: 0 },
+    { id: 6, visualizationId: 2, status: "ready", hosts: [], openRequests: [], openRequestsVersion: 0 }
+  ]);
+  assert.deepEqual(await run(() => h.service(1).remove()), { status: 200, data: { id: 1 } });
+  assert.deepEqual(
+    [h.store.row(Table.LIVE_SESSIONS, 5)?.status, h.store.row(Table.LIVE_SESSIONS, 5)?.stopReason],
+    ["stopping", "user"]
+  );
+  assert.equal(h.store.row(Table.LIVE_SESSIONS, 6)?.status, "ready");
+
+  const failing = setup(t, { stopLiveSessions: () => Promise.reject(new Error("db down")) });
+  failing.store.seed(Table.VISUALIZATIONS, [makeVisualizationRow({ id: 3, status: "completed", completedAt: NOW })]);
+  const logs = recordLogger();
+  t.after(logs.restore);
+  assert.deepEqual(await run(() => failing.service(3).remove()), { status: 200, data: { id: 3 } });
+  assert.ok(logs.lines.some((line) => line.event === "visualization.live.stop_failed"));
+});

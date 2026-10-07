@@ -31,3 +31,7 @@ export * from "./harness-library/library-job-events-query.dto";
 export * from "./harness-library/library-job-view.dto";
 export * from "./harness-library/library-scan-create.dto";
 export * from "./harness-library/library-summary-view.dto";
+export * from "./live/live-heartbeat.dto";
+export * from "./live/live-open.dto";
+export * from "./live/live-session-view.dto";
+export * from "./live/live-stop.dto";

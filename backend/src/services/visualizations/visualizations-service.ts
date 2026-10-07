@@ -70,6 +70,7 @@ import {
   type PagedResult,
   type Transaction
 } from "../../utilities";
+import { stopLiveSessionsOfRuns } from "../live/live-session-service";
 import { SettingsStore, type SecretRead } from "../settings/settings-store";
 import { VisualizationConsoleService } from "./visualization-console-service";
 import { describeStep } from "./pipeline/harness-step-text";
@@ -120,6 +121,8 @@ export interface VisualizationsServiceDependencies {
   now: () => Date;
   /** 16d block (16 §11.2): rm -rf `<dataDir>/snapshots/<id>/` of a removed run. */
   removeWorkingTreeSnapshot: (visualizationId: number) => Promise<void>;
+  /** 16i block (16 §12.6): asks the running live sessions of these runs to stop (reason `user`). */
+  stopLiveSessions: (visualizationIds: readonly number[]) => Promise<number>;
 }
 
 type ResolvedSource = {
@@ -571,6 +574,16 @@ export class VisualizationsService {
       if (deleted.status !== 200) {
         return INTERNAL_ERROR;
       }
+      // 16i block (16 §12.6, §14.1): the run's live session stops (best effort; the worker releases its hosts)
+      try {
+        await this.deps.stopLiveSessions([id]);
+      } catch (error: unknown) {
+        this.log.warn(
+          { event: "visualization.live.stop_failed", visualizationId: id, err: error },
+          "Live session stop failed; the visualization is deleted anyway"
+        );
+      }
+      // end 16i block
 
       try {
         await this.deps.artifacts.removeVisualization(id);
@@ -883,7 +896,8 @@ function resolveVisualizationsDependencies(
     artifacts: overrides.artifacts ?? new ArtifactStore(),
     consoleFactory: overrides.consoleFactory ?? ((id) => new VisualizationConsoleService(id, queryHandler)),
     now: overrides.now ?? (() => new Date()),
-    removeWorkingTreeSnapshot: overrides.removeWorkingTreeSnapshot ?? ((id) => removeWorkingTreeSnapshot(id))
+    removeWorkingTreeSnapshot: overrides.removeWorkingTreeSnapshot ?? ((id) => removeWorkingTreeSnapshot(id)),
+    stopLiveSessions: overrides.stopLiveSessions ?? ((ids) => stopLiveSessionsOfRuns(queryHandler, ids))
   };
 }
 

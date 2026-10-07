@@ -1936,7 +1936,7 @@ export class RunWorkspaceRecreator {
   constructor(deps?: { git?: GitClient; githubClientFactory?: ...; readGithubToken?: ...; linkNodeModules?: typeof linkWorkspaceNodeModules });
   recreate(input: {
     visualization: VisualizationModel; repository: RepositoryModel;
-    rootDir: string;                  // <dataDir>/worktrees/repair-<jobId> or <dataDir>/live/<sessionId>
+    rootDir: string;                  // <dataDir>/worktrees/repair-<jobId> or <dataDir>/worktrees/live-<sessionId>
     console: PipelineContext["console"]; signal: AbortSignal;
   }): Promise<RecreatedWorkspace>;
 }
@@ -2021,7 +2021,7 @@ Nothing starts a repair automatically (D8). A run with an active live session ca
 
 ### 12.3 Session job (`LiveSessionWorkerService.run({ liveSessionId, jobId, signal })`)
 
-1. Load the row (`starting`, else skip) and the run. `RunWorkspaceRecreator.recreate` into `<dataDir>/live/<sessionId>/` within `LIVE_START_TIMEOUT_MS` (5 min; timeout → `failed` "Could not prepare the before and after code in time.").
+1. Load the row (`starting`, else skip) and the run. `RunWorkspaceRecreator.recreate` into `<dataDir>/worktrees/live-<sessionId>/` (16i build note: `GitClient.worktreeAdd` refuses any folder outside `<dataDir>/worktrees`, so live worktrees live there like scan and repair worktrees) within `LIVE_START_TIMEOUT_MS` (5 min; timeout → `failed` "Could not prepare the before and after code in time.").
 2. Plan from the run's component rows with a harness snapshot: render work items (16e's pure planning helper `planLiveItems(rows: ReadonlyArray<{ row: VisualizationComponentModel; states: HarnessStateSpec[]; baseStates: HarnessStateSpec[] | null }>, repository: RepositoryModel): RenderWorkItem[]`, which builds the same items `buildRenderInputs` builds for a run, but from the persisted rows: harness snapshot columns, change kind, paths; 16i passes the states it extracts from the snapshots with 16b's `extractHarnessStates(..., { allowLegacy: true })`, so 16e does not depend on 16b), render groups (`buildRenderGroups` + `splitLargeGroups`), group membership `componentId → groupKey` per side. Harness workspaces are prepared once per side with every harness file (React: `prepareSide` + `writeComponentHarness`; Angular: workspace writer, files per item).
 3. `ready`, `ready_at`.
 4. Loop every `LIVE_POLL_INTERVAL_MS` (500 ms) until a stop condition:
@@ -2031,12 +2031,12 @@ Nothing starts a repair automatically (D8). A run with an active live session ca
    - `now − created_at > LIVE_MAX_SESSION_MS` (4 h) → `max_duration`;
    - `signal` aborted (worker shutdown) → `shutdown`;
    - otherwise drain `open_requests`: write `[]` with `open_requests_version + 1` guarded by the version read in this tick (a concurrent append makes the update miss; the next tick re-reads and nothing is lost). The API's `open` appends with the same guard and retries up to 3 times on a miss (then 409 `conflict` "Live mode is busy; try again."). For each request, `hostManager.ensure(groupKeyOf(componentId))` for both sides where the component exists; the host entry is written as `starting`, then `ready` with `origin` and `harnessUrlPath`, or `failed` with the error.
-5. Stop: `stopping`, stop every host (process-group kill fallback as in 10/15), worktree cleanup, `rm -r <dataDir>/live/<sessionId>`, then `stopped` with `stopped_at` (or `failed` with `error_message` when the job itself failed).
+5. Stop: `stopping`, stop every host (process-group kill fallback as in 10/15), worktree cleanup, `rm -r <dataDir>/worktrees/live-<sessionId>`, then `stopped` with `stopped_at` (or `failed` with `error_message` when the job itself failed).
 
 ### 12.4 Hosts (`LiveHostManager`)
 
 - One host per **(side, render group)** (E19), started lazily, at most `LIVE_MAX_HOSTS_PER_SIDE` (4) running per side; starting a fifth stops the least recently used one (its entry becomes `stopped`; opening it again restarts it). `lastUsedAt` is updated on every open.
-- **React:** `ViteHostClient.start({ ...openHost options of 10 for the group, live: true }, harnessUrlPath, signal)`. `ViteHostStartOptions` gains `live?: { frontendOrigins: string[] }`. With `live`, `vite-server-config.ts` appends `createLivePlugin(...)` (§12.5) after the harness plugin and sets `server.cors: false` (no `Access-Control-Allow-Origin` header, so other local pages cannot read module sources); `hmr: false` and today's watcher setting stay. `harnessUrlPath = "/.prvision-harness/index.html"`.
+- **React:** `ViteHostClient.start({ ...openHost options of 10 for the group, live: true }, harnessUrlPath, signal)`. `ViteHostStartOptions` gains `live?: { frontendOrigins: string[] }`. With `live`, `vite-server-config.ts` appends `createLivePlugin(...)` (§12.5) after the harness plugin and sets `server.cors: false` (no `Access-Control-Allow-Origin` header, so other local pages cannot read module sources); `hmr: false` and today's watcher setting stay. `harnessUrlPath = "/.prvision-harness/index.html"`. 16i build note: each live host gets its own optimizer cache (`cacheDir` = `.prvision-harness/.vite-cache-live-<n>`, `<n>` the group index), because up to four hosts of one side run at once and must not rewrite one shared `deps` folder; host starts are serialized per side.
 - **Angular:** one build of the group's harnesses through the side's `AngularHostClient.build(request, signal)` (`outputPath .prvision-harness/dist/live-<n>`, where `<n>` is the group's index in the session's plan, never the raw group key; same options as 15 §5.7.6, exclusion loop included), then `AngularStaticHost.start({ ..., live: { frontendOrigins } })`; `harnessUrlPath = "/index.html"`. One `AngularHostClient` per side for the whole session.
 - Child processes use `CHILD_PROCESS_BASE_ENV` (00 §14.5); hosts bind `127.0.0.1` on ephemeral ports.
 
@@ -2067,7 +2067,7 @@ Live sessions are also stopped (`stopping`, reason `user`) when the run is delet
 
 ### 12.7 Recovery
 
-Worker boot: sessions in `starting`/`ready`/`stopping` → `failed` "PRVision restarted; start live mode again."; remove `<dataDir>/live/*`; prune worktrees. Sweep: `starting` rows older than `LIVE_START_TIMEOUT_MS` whose job is not active → `failed`.
+Worker boot: sessions in `starting`/`ready`/`stopping` → `failed` "PRVision restarted; start live mode again."; remove `<dataDir>/worktrees/live-<id>` folders; prune worktrees. Sweep: `starting` rows older than `LIVE_START_TIMEOUT_MS` whose job is not active → `failed`; `stopping` rows whose job is not active (after the 60 s running-recovery grace) → `stopped` (16i addition, so a session stopped while its job was lost does not stay `stopping`).
 
 ---
 
@@ -2553,7 +2553,7 @@ The price table is a maintenance item: the default estimate constants are uncali
 | Constant | Value |
 |---|---|
 | `LIBRARY_JOBS_DIR_NAME` | `"library-jobs"` (`<dataDir>/library-jobs/<jobId>/`) |
-| `LIVE_DIR_NAME` | `"live"` (`<dataDir>/live/<sessionId>/`) |
+| `LIVE_DIR_NAME` | `"live"` (unused since 16i: live worktrees are `<dataDir>/worktrees/live-<sessionId>/`, §12.3) |
 | `WORKING_TREE_SNAPSHOT_DIR_NAME` | `"snapshots"` (`<dataDir>/snapshots/<visualizationId>/`) |
 | `LIBRARY_IMPORT_BODY_LIMIT` | `"64mb"` |
 | `LIBRARY_EXPORT_MAX_BYTES` | `64 * 1024 * 1024` (equals the import limit) |
@@ -2768,7 +2768,7 @@ Integration tests (gated; AI through the existing scripted provider helpers, so 
 
 1. `harness-library.integration.test.ts`: run on `feature/button-restyle` writes and saves harnesses; a second run of the same branch makes **0 AI calls** and reports `reusedHarnessCount` = candidates; `qa/global-style` adds `rechecked` rows for every entry, `checked_count` = all rows, only changed ones under the changed filter; `qa/library-break` flags `Card` "Harness needs updating" with no AI call; a repair job with a scripted fixed harness clears it and stores revision 2; `working_tree` run saves `<dataDir>/snapshots/<id>/`, adds no ref to the clone and leaves `git status` of the clone unchanged; repairing that run after the clone's working copy was reset still recreates the head side from the snapshot.
 2. `library-scan.integration.test.ts`: scan of `main` saves entries in smallest-first order; a scripted usage per call makes a $0.50 cap end `cap_reached`; Continue writes only the rest; cancel ends `cancelled` with the current batch saved; Rescan at a new allowance rewrites every entry, after which `rescanSuggested` is false; a harness a run saved on `qa/states` for `InvoiceRow` (absent from `main`) survives a scan of `main` as `off_default_branch`, is left out of the summary counts, and a second run of `qa/states` reuses it with **0 AI calls** and sets it back to `ready`.
-3. `live-mode.integration.test.ts`: session on a finished fixture run; open a component; both origins serve the page with the CSP; `Host: evil.example` → 403; POST → 405; stop leaves no child processes, worktrees or `<dataDir>/live/<id>`.
+3. `live-mode.integration.test.ts`: session on a finished fixture run; open a component; both origins serve the page with the CSP; `Host: evil.example` → 403; POST → 405; stop leaves no child processes, worktrees or `<dataDir>/worktrees/live-<id>`.
 4. `library-transfer.integration.test.ts`: export from one registration of the fixture, import into another registration of a second clone of it; a run there makes 0 AI calls.
 5. `angular-pipeline.integration.test.ts` (extend): a scripted Angular harness with `states` renders every state; `qa/tailwind-config` re-checks the library.
 

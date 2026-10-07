@@ -3,3 +3,4 @@ export * from "./settings-controller";
 export * from "./repositories-controller";
 export * from "./visualizations-controller";
 export * from "./harness-library-controller";
+export * from "./live-sessions-controller";

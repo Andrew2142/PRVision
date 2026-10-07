@@ -863,3 +863,50 @@ test("remove returns 409 while a scan or repair of the repository is active", as
   finished.stub.seed(Table.HARNESS_LIBRARY_JOBS, [makeLibraryJobRow({ id: 1, status: "completed", completedAt: NOW })]);
   assert.equal((await call(() => finished.service(idModel(1)).remove())).status, 200);
 });
+
+// ----- 16i block (16 §12.6, §14.1): removing a repository stops the live sessions of its runs -----
+
+test("remove stops the running live sessions of the repository's runs (reason user), soft-deleted runs too", async () => {
+  const h = harness();
+  h.stub.seed(Table.REPOSITORIES, [makeRepositoryRow({ id: 1 }), makeRepositoryRow({ id: 2, localPath: "/r/2" })]);
+  const done = new Date("2026-01-02T00:00:00Z");
+  h.stub.seed(Table.VISUALIZATIONS, [
+    makeVisualizationRow({ id: 3, repositoryId: 1, status: "completed", completedAt: done }),
+    makeVisualizationRow({ id: 4, repositoryId: 1, status: "completed", completedAt: done, isDeleted: true }),
+    makeVisualizationRow({ id: 5, repositoryId: 2, status: "completed", completedAt: done })
+  ]);
+  const live = (id: number, visualizationId: number, status: string) => ({
+    id,
+    visualizationId,
+    status,
+    stopReason: status === "stopped" ? "idle" : null,
+    hosts: [],
+    openRequests: [],
+    openRequestsVersion: 0
+  });
+  h.stub.seed(Table.LIVE_SESSIONS, [
+    live(1, 3, "ready"),
+    live(2, 4, "starting"),
+    live(3, 5, "ready"),
+    live(4, 3, "stopped")
+  ]);
+  const response = await call(() => h.service(idModel(1)).remove());
+  assert.deepEqual(response, { status: 200, data: { id: 1 } });
+  const state = (id: number): unknown[] => [
+    h.stub.row(Table.LIVE_SESSIONS, id)?.status,
+    h.stub.row(Table.LIVE_SESSIONS, id)?.stopReason
+  ];
+  assert.deepEqual(state(1), ["stopping", "user"]);
+  assert.deepEqual(state(2), ["stopping", "user"]);
+  assert.deepEqual(state(3), ["ready", null], "another repository's session keeps running");
+  assert.deepEqual(state(4), ["stopped", "idle"]);
+});
+
+test("remove still succeeds when stopping live sessions fails", async () => {
+  const h = harness();
+  h.stub.seed(Table.REPOSITORIES, [makeRepositoryRow({ id: 1 })]);
+  const response = await call(() =>
+    h.service(idModel(1), { stopLiveSessions: () => Promise.reject(new Error("db down")) }).remove()
+  );
+  assert.deepEqual(response, { status: 200, data: { id: 1 } });
+});

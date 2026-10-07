@@ -119,6 +119,8 @@ export interface BuildInlineConfigInput {
   userPlugins: VitePluginLike[]; // flattened + filtered
   mockPlugin: VitePluginLike;
   harnessPlugin: VitePluginLike;
+  /** 16i (16 §12.4): the live plugin of a live host (`createLivePlugin`), appended after the harness plugin. */
+  livePlugin?: VitePluginLike | null;
   logger: ViteLoggerLike;
   fsAllow: string[];
   envDefines: Record<string, string>;
@@ -251,9 +253,14 @@ export function buildViteInlineConfig(input: BuildInlineConfigInput): { config: 
 
   // 4. Post-merge assignments (mergeConfig skips null and concatenates arrays).
   merged.configFile = false;
-  merged.plugins = [input.mockPlugin, ...input.userPlugins, input.harnessPlugin];
+  const livePlugin = options.live === undefined ? null : (input.livePlugin ?? null);
+  merged.plugins = [input.mockPlugin, ...input.userPlugins, input.harnessPlugin, ...(livePlugin ? [livePlugin] : [])];
   const mergedServer = asRecord(merged.server);
   mergedServer.watch = resolveWatchOption(input.viteMajor, input.viteMinor);
+  if (options.live !== undefined) {
+    // 16 §12.4: no Access-Control-Allow-Origin header (a user config cannot re-enable it for a live host).
+    mergedServer.cors = false;
+  }
   merged.server = mergedServer;
   const mergedOptimizeDeps = asRecord(merged.optimizeDeps);
   mergedOptimizeDeps.entries = [...options.optimizeEntries];

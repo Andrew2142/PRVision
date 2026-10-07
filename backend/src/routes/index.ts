@@ -2,6 +2,7 @@ import type { Express, RequestHandler } from "express";
 import type {
   HarnessLibraryController,
   HealthController,
+  LiveSessionsController,
   RepositoriesController,
   SettingsController,
   VisualizationsController
@@ -16,6 +17,8 @@ export type RouteDependencies = {
   visualizationsController: VisualizationsController;
   /** 16f: library and job routes; 16g and 16k add their routes to the same controller. */
   harnessLibraryController: HarnessLibraryController;
+  /** 16i: live mode routes. */
+  liveSessionsController: LiveSessionsController;
 };
 
 /** The single explicit route map (guidelines §4.2). Every /api route carries requireLocal. */
@@ -134,4 +137,17 @@ export function registerRoutes(app: Express, dependencies: RouteDependencies): v
     harnessLibraryController.repairBroken.bind(harnessLibraryController)
   );
   // ----- end 16g -----
+
+  // ----- 16i: live (16 §14.1, §14.6) -----
+  const { liveSessionsController } = dependencies;
+  app.post("/api/visualizations/:id/live", requireLocal, liveSessionsController.start.bind(liveSessionsController));
+  app.get("/api/visualizations/:id/live", requireLocal, liveSessionsController.get.bind(liveSessionsController));
+  app.post("/api/visualizations/:id/live/open", requireLocal, liveSessionsController.open.bind(liveSessionsController));
+  app.post(
+    "/api/visualizations/:id/live/heartbeat",
+    requireLocal,
+    liveSessionsController.heartbeat.bind(liveSessionsController)
+  );
+  app.post("/api/visualizations/:id/live/stop", requireLocal, liveSessionsController.stop.bind(liveSessionsController));
+  // ----- end 16i -----
 }

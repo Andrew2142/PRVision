@@ -271,3 +271,27 @@ test("flattenUserPlugins awaits promises, flattens nested arrays and drops falsy
   );
   assert.deepEqual(await flattenUserPlugins(undefined), []);
 });
+
+// ----- 16i: live hosts (16 §12.4) -----
+
+test("live hosts append the live plugin after the harness plugin and keep server.cors false over a user cors", () => {
+  const livePlugin: VitePluginLike = { name: "prvision:live", apply: "serve" };
+  const react: VitePluginLike = { name: "vite:react-babel" };
+  const { config } = build({
+    options: { ...OPTIONS, live: { frontendOrigins: ["http://localhost:4210", "http://127.0.0.1:4210"] } },
+    userConfig: { server: { cors: { origin: "*" } } },
+    userPlugins: [react],
+    livePlugin
+  });
+  assert.deepEqual(config.plugins, [mockPlugin, react, harnessPlugin, livePlugin]);
+  const server = record(config.server);
+  assert.equal(server.cors, false);
+  assert.equal(server.hmr, false);
+  assert.equal(server.watch, null);
+});
+
+test("a live plugin is ignored for a screenshot host (no live option)", () => {
+  const { config } = build({ livePlugin: { name: "prvision:live" } });
+  assert.deepEqual(config.plugins, [mockPlugin, harnessPlugin]);
+  assert.equal(record(config.server).cors, false);
+});
