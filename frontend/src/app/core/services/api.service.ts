@@ -18,6 +18,14 @@ import {
   type LibraryScanCreateRequest,
 } from '../models/harness-library.model';
 import {
+  type LiveHeartbeatRequest,
+  type LiveHeartbeatResponse,
+  type LiveOpenRequest,
+  type LiveSessionView,
+  type LiveStopRequest,
+  type LiveStopResponse,
+} from '../models/live-session.model';
+import {
   type AppDiscoveryView,
   type BranchListView,
   type CommitListQuery,
@@ -264,6 +272,50 @@ export class ApiService {
   }
 
   // ----- end of the 16h library block -----
+
+  // ----- 16j live block (sheet 16 §14.6, §15.6). Every call is silent: the live panel renders its own errors. -----
+
+  /** 202 with a new session, or 200 with the run's active one; 409 `conflict` when two other runs are live. */
+  startLive(visualizationId: number, o: ApiRequestOptions = {}): Observable<LiveSessionView> {
+    return this.request('POST', `visualizations/${visualizationId}/live`, { body: {}, silent: true, ...o });
+  }
+
+  /** The active session, or the most recent one; 404 when the run never had one. */
+  getLive(visualizationId: number, o: ApiRequestOptions = {}): Observable<LiveSessionView> {
+    return this.request('GET', `visualizations/${visualizationId}/live`, { silent: true, ...o });
+  }
+
+  /** 202: asks the session to start the hosts of the component's render group on both sides. */
+  openLive(visualizationId: number, body: LiveOpenRequest, o: ApiRequestOptions = {}): Observable<LiveSessionView> {
+    return this.request('POST', `visualizations/${visualizationId}/live/open`, { body, silent: true, ...o });
+  }
+
+  /** 404 once the session is no longer active. */
+  heartbeatLive(
+    visualizationId: number,
+    body: LiveHeartbeatRequest,
+    o: ApiRequestOptions = {},
+  ): Observable<LiveHeartbeatResponse> {
+    return this.request('POST', `visualizations/${visualizationId}/live/heartbeat`, { body, silent: true, ...o });
+  }
+
+  /** Idempotent: 200 `{ id: null, status: "stopped" }` when nothing is running. */
+  stopLive(visualizationId: number, body: LiveStopRequest, o: ApiRequestOptions = {}): Observable<LiveStopResponse> {
+    return this.request('POST', `visualizations/${visualizationId}/live/stop`, { body, silent: true, ...o });
+  }
+
+  /**
+   * Stop while the page unloads (`pagehide`): a beacon survives the unload where an XHR does not. The `text/plain`
+   * body needs no preflight; the API reads a missing or unreadable body as reason `left` (16 §12.6).
+   */
+  stopLiveBeacon(visualizationId: number): boolean {
+    return navigator.sendBeacon(
+      `${this.baseUrl}/visualizations/${visualizationId}/live/stop`,
+      new Blob(['{}'], { type: 'text/plain' }),
+    );
+  }
+
+  // ----- end of the 16j live block -----
 
   private request<T>(method: HttpMethod, path: string, opts: RequestSpec): Observable<T> {
     return this.http

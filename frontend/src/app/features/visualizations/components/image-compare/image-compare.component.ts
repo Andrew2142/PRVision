@@ -1,6 +1,8 @@
 import { NgTemplateOutlet } from '@angular/common';
-import { ChangeDetectionStrategy, Component, computed, input, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, effect, inject, input, signal, untracked } from '@angular/core';
+import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
+import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatSlideToggleModule } from '@angular/material/slide-toggle';
 import { type VisualChange } from '../../../../core/models/domain-enums.model';
 import { artifactUrl } from '../../../../core/utils/artifact-url.util';
@@ -9,14 +11,63 @@ import {
   SegmentedControlComponent,
 } from '../../../../shared/components/segmented-control/segmented-control.component';
 import { formatDiffPercent } from '../../../../shared/pipes/diff-percent.pipe';
+import { LiveSessionStore } from '../../visualization-detail/live-session.store';
+import { LiveCompareComponent } from '../live-compare/live-compare.component';
 
-type CompareMode = 'side' | 'slider' | 'diff';
+type CompareMode = 'side' | 'slider' | 'diff' | 'live';
 type ZoomMode = 'fit' | 'actual';
 type Side = 'base' | 'head' | 'diff';
 
 interface Placeholder {
   icon: string;
   text: string;
+}
+
+/** What Live mode opens: the card's component and the state tab currently open (16 §15.6). */
+export interface LiveTarget {
+  componentId: number;
+  stateName: string;
+  onBase: boolean;
+  onHead: boolean;
+}
+
+type LivePanelKind = 'start' | 'starting' | 'ready' | 'stopping' | 'stopped' | 'failed';
+
+interface LivePanelView {
+  kind: LivePanelKind;
+  message: string | null;
+  actionLabel: string | null;
+}
+
+/** The Live panel for a session state (16 §15.6). `idleMinutes` comes from the session's `idleTimeoutMs`. */
+function livePanel(store: LiveSessionStore): LivePanelView {
+  const session = store.session();
+  if (store.starting() || session?.status === 'starting') {
+    return { kind: 'starting', message: 'Preparing the before and after code…', actionLabel: null };
+  }
+  if (session === null) {
+    return { kind: 'start', message: store.error(), actionLabel: 'Start live mode' };
+  }
+  switch (session.status) {
+    case 'ready':
+      return { kind: 'ready', message: null, actionLabel: null };
+    case 'stopping':
+      return { kind: 'stopping', message: 'Stopping live mode…', actionLabel: null };
+    case 'failed':
+      return {
+        kind: 'failed',
+        message: store.error() ?? session.errorMessage ?? 'Live mode stopped with an error.',
+        actionLabel: 'Try again',
+      };
+    default: {
+      const minutes = Math.max(1, Math.round(session.idleTimeoutMs / 60_000));
+      const message =
+        session.stopReason === 'idle'
+          ? `Live mode stopped after ${String(minutes)} minutes idle.`
+          : 'Live mode stopped.';
+      return { kind: 'stopped', message: store.error() ?? message, actionLabel: 'Start again' };
+    }
+  }
 }
 
 /**
@@ -26,7 +77,15 @@ interface Placeholder {
 @Component({
   selector: 'app-image-compare',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [NgTemplateOutlet, MatIconModule, MatSlideToggleModule, SegmentedControlComponent],
+  imports: [
+    NgTemplateOutlet,
+    MatButtonModule,
+    MatIconModule,
+    MatProgressSpinnerModule,
+    MatSlideToggleModule,
+    SegmentedControlComponent,
+    LiveCompareComponent,
+  ],
   templateUrl: './image-compare.component.html',
   styleUrl: './image-compare.component.scss',
 })
@@ -47,6 +106,15 @@ export class ImageCompareComponent {
    * image labels and words one-sided states as "Not in the base/head version". null = the component as a whole.
    */
   readonly stateName = input<string | null>(null);
+  /** 16j: Live mode can be chosen (the run's `liveAvailable` and the row has a harness). */
+  readonly liveEnabled = input(false);
+  /** 16j: the component and open state Live mode shows. */
+  readonly liveTarget = input<LiveTarget | null>(null);
+  /** 16j: the open state's steps in words, for the "do them yourself" banner. */
+  readonly stepSummary = input<readonly string[]>([]);
+
+  /** Provided by the visualization detail page; absent elsewhere, which keeps Live off. */
+  protected readonly live = inject(LiveSessionStore, { optional: true });
 
   protected readonly mode = signal<CompareMode>('side');
   protected readonly zoom = signal<ZoomMode>('actual');
@@ -63,10 +131,17 @@ export class ImageCompareComponent {
   protected readonly diffSrc = computed(() => this.loadableSrc(this.diffUrl()));
   protected readonly canSlide = computed(() => !!this.baseSrc() && !!this.headSrc());
   protected readonly canDiff = computed(() => !!this.diffSrc() && !!this.headSrc());
+  protected readonly canLive = computed(() => this.live !== null && this.liveEnabled() && this.liveTarget() !== null);
   protected readonly effectiveMode = computed<CompareMode>(() =>
-    (this.mode() === 'slider' && !this.canSlide()) || (this.mode() === 'diff' && !this.canDiff())
+    (this.mode() === 'slider' && !this.canSlide()) ||
+    (this.mode() === 'diff' && !this.canDiff()) ||
+    (this.mode() === 'live' && !this.canLive())
       ? 'side'
       : this.mode(),
+  );
+  protected readonly isLive = computed(() => this.effectiveMode() === 'live');
+  protected readonly livePanel = computed<LivePanelView | null>(() =>
+    this.live === null || !this.isLive() ? null : livePanel(this.live),
   );
   protected readonly aspectRatio = computed(() => {
     const w = this.width();
@@ -77,6 +152,7 @@ export class ImageCompareComponent {
     { value: 'side', label: 'Side by side', icon: 'view_column' },
     { value: 'slider', label: 'Slider', icon: 'compare', disabled: !this.canSlide() },
     { value: 'diff', label: 'Diff', icon: 'difference', disabled: !this.canDiff() },
+    { value: 'live', label: 'Live', icon: 'sensors', disabled: !this.canLive(), testId: 'mode-live' },
   ]);
   protected readonly zoomOptions: SegmentOption<ZoomMode>[] = [
     { value: 'actual', label: '100%', icon: 'crop_free' },
@@ -122,6 +198,23 @@ export class ImageCompareComponent {
       ? 'Highlighted pixels differ between base and head.'
       : `Highlighted pixels differ between base and head (${formatDiffPercent(r)} of the image).`;
   });
+
+  constructor() {
+    // Live starts from the open state tab and follows tab switches (D10): ask the session for this component's hosts.
+    effect(() => {
+      const target = this.liveTarget();
+      const ready = this.live?.session()?.status === 'ready';
+      if (!this.isLive() || !ready || target === null) return;
+      untracked(() => {
+        this.live?.ensureOpen(target.componentId, target.stateName, { base: target.onBase, head: target.onHead });
+      });
+    });
+  }
+
+  /** Start live mode / Start again / Try again: one session serves every card of the run. */
+  protected startLive(): void {
+    this.live?.start();
+  }
 
   protected markFailed(side: Side): void {
     const url = side === 'base' ? this.baseUrl() : side === 'head' ? this.headUrl() : this.diffUrl();

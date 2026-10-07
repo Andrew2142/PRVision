@@ -12,7 +12,7 @@ import { StatusPillComponent } from '../../../../shared/components/status-pill/s
 import { formatDiffPercent } from '../../../../shared/pipes/diff-percent.pipe';
 import { CodeDiffComponent } from '../code-diff/code-diff.component';
 import { countDiffStats } from '../code-diff/unified-diff';
-import { ImageCompareComponent } from '../image-compare/image-compare.component';
+import { ImageCompareComponent, type LiveTarget } from '../image-compare/image-compare.component';
 import { StateTabsComponent, isChangedState } from '../state-tabs/state-tabs.component';
 import { StructuralDiffListComponent } from '../structural-diff-list/structural-diff-list.component';
 import {
@@ -104,6 +104,8 @@ export class ComponentCardComponent {
   readonly repairRequested = input(false);
   /** Repair clicked: the page starts the repair job. */
   readonly repair = output<number>();
+  /** 16j: the run can go live (`VisualizationDetailView.liveAvailable`). */
+  readonly liveAvailable = input(false);
 
   /** Sections render their content only while open; Render errors starts open. */
   private readonly openSections = signal<ReadonlySet<CardSection>>(new Set<CardSection>(['errors']));
@@ -166,6 +168,15 @@ export class ComponentCardComponent {
   protected readonly stepsText = computed(() => {
     const summary = this.state().stepSummary;
     return summary.length ? `Reached by: ${summary.join(' → ')}` : null;
+  });
+
+  // Live mode (16j, 16 §15.6): only rows that rendered with a harness can go live, from the open state tab.
+  protected readonly liveEnabled = computed(
+    () => this.liveAvailable() && !this.runActive() && this.component().harnessSource !== null,
+  );
+  protected readonly liveTarget = computed<LiveTarget>(() => {
+    const s = this.state();
+    return { componentId: this.component().id, stateName: s.name, onBase: s.onBase, onHead: s.onHead };
   });
 
   // Harness status (16 §15.5.3)

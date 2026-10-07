@@ -5,17 +5,90 @@
     [value]="effectiveMode()"
     (valueChange)="mode.set($event)"
   />
-  <app-segmented-control
-    ariaLabel="Zoom"
-    [options]="zoomOptions"
-    [value]="zoom()"
-    (valueChange)="zoom.set($event)"
-    [fullWidthOnMobile]="false"
-  />
+  @if (!isLive()) {
+    <app-segmented-control
+      ariaLabel="Zoom"
+      [options]="zoomOptions"
+      [value]="zoom()"
+      (valueChange)="zoom.set($event)"
+      [fullWidthOnMobile]="false"
+    />
+  }
 </div>
 
 <div class="mt-3">
-  @if (isActualZoom()) {
+  @if (livePanel(); as panel) {
+    @switch (panel.kind) {
+      @case ('ready') {
+        @if (liveTarget(); as target) {
+          <app-live-compare
+            data-testid="live-compare"
+            [componentId]="target.componentId"
+            [stateName]="target.stateName"
+            [label]="label()"
+            [onBase]="target.onBase"
+            [onHead]="target.onHead"
+            [stepSummary]="stepSummary()"
+          />
+        }
+      }
+      @case ('starting') {
+        <div
+          class="grid min-h-40 place-content-center justify-items-center gap-3 rounded-xl border border-[color:var(--color-border)] bg-[var(--color-bg-tertiary)] p-6 text-center text-sm text-[var(--color-text-secondary)]"
+          role="status"
+          data-testid="live-starting"
+        >
+          <mat-spinner diameter="28" />
+          <span>{{ panel.message }}</span>
+        </div>
+      }
+      @case ('stopping') {
+        <div
+          class="grid min-h-40 place-content-center justify-items-center gap-3 rounded-xl border border-[color:var(--color-border)] bg-[var(--color-bg-tertiary)] p-6 text-center text-sm text-[var(--color-text-secondary)]"
+          role="status"
+          data-testid="live-stopping"
+        >
+          <mat-spinner diameter="28" />
+          <span>{{ panel.message }}</span>
+        </div>
+      }
+      @default {
+        <div
+          class="grid min-h-40 place-content-center justify-items-center gap-3 rounded-xl border border-dashed border-[color:var(--color-border)] p-6 text-center text-sm"
+          [attr.data-testid]="'live-' + panel.kind"
+        >
+          <mat-icon class="text-[var(--shell-accent)]" aria-hidden="true">sensors</mat-icon>
+          @if (panel.kind === 'start') {
+            <p class="max-w-prose text-[var(--color-text-secondary)]">
+              Live mode runs the before and after components in your browser, each side on its own. Start it for this
+              run?
+            </p>
+          }
+          @if (panel.message) {
+            <p
+              class="max-w-prose break-words"
+              [class.text-[var(--color-error)]]="panel.kind !== 'stopped'"
+              [class.text-[var(--color-text-secondary)]]="panel.kind === 'stopped'"
+              [attr.role]="panel.kind === 'stopped' ? 'status' : 'alert'"
+              data-testid="live-message"
+            >
+              {{ panel.message }}
+            </p>
+          }
+          <button
+            mat-flat-button
+            type="button"
+            class="!rounded-xl"
+            data-testid="live-start-button"
+            (click)="startLive()"
+          >
+            <mat-icon aria-hidden="true">play_arrow</mat-icon>
+            {{ panel.actionLabel }}
+          </button>
+        </div>
+      }
+    }
+  } @else if (isActualZoom()) {
     <div
       class="max-h-[70vh] overflow-auto rounded-xl border border-[color:var(--color-border)] p-2"
       tabindex="0"

@@ -1,8 +1,15 @@
+import { provideHttpClient, withInterceptors } from '@angular/common/http';
+import { HttpTestingController, type TestRequest, provideHttpClientTesting } from '@angular/common/http/testing';
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideNoopAnimations } from '@angular/platform-browser/animations';
 import { environment } from '../../../../../environments/environment';
+import { errorInterceptor } from '../../../../core/interceptors/error.interceptor';
 import { type VisualChange } from '../../../../core/models/domain-enums.model';
-import { ImageCompareComponent } from './image-compare.component';
+import { type LiveSessionView } from '../../../../core/models/live-session.model';
+import { NotificationService } from '../../../../core/services/notification.service';
+import { liveSession, readyHosts } from '../../testing/live-fixtures';
+import { LiveSessionStore } from '../../visualization-detail/live-session.store';
+import { ImageCompareComponent, type LiveTarget } from './image-compare.component';
 
 interface Inputs {
   baseUrl?: string | null;
@@ -263,5 +270,190 @@ describe('ImageCompareComponent', () => {
       ]);
       expect(el.textContent).not.toContain('Image unavailable');
     });
+  });
+});
+
+describe('ImageCompareComponent Live mode (16j)', () => {
+  const liveUrl = `${environment.apiBaseUrl}/visualizations/7/live`;
+  const TWO_SESSIONS =
+    'Live mode is already running for 2 other runs. Leave one of them first (it also stops by itself after 10 minutes idle).';
+  const target: LiveTarget = { componentId: 11, stateName: 'Menu open', onBase: true, onHead: true };
+  let fixture: ComponentFixture<ImageCompareComponent>;
+  let el: HTMLElement;
+  let httpMock: HttpTestingController;
+  let store: LiveSessionStore;
+
+  beforeEach(async () => {
+    await TestBed.configureTestingModule({
+      imports: [ImageCompareComponent],
+      providers: [
+        provideNoopAnimations(),
+        provideHttpClient(withInterceptors([errorInterceptor])),
+        provideHttpClientTesting(),
+        LiveSessionStore,
+        { provide: NotificationService, useValue: jasmine.createSpyObj('NotificationService', ['error']) },
+      ],
+    }).compileComponents();
+    httpMock = TestBed.inject(HttpTestingController);
+    store = TestBed.inject(LiveSessionStore);
+    store.attach(7);
+    // Live pages are never loaded in tests.
+    spyOnProperty(HTMLIFrameElement.prototype, 'src', 'set');
+    fixture = TestBed.createComponent(ImageCompareComponent);
+    el = fixture.nativeElement as HTMLElement;
+  });
+
+  afterEach(() => {
+    fixture.destroy();
+    store.attach(null);
+    for (const r of httpMock.match((req) => req.url.startsWith(liveUrl))) r.flush({ status: 200, data: {} });
+  });
+
+  function render(liveEnabled = true, liveTarget: LiveTarget | null = target): void {
+    fixture.componentRef.setInput('label', 'CartSummary');
+    fixture.componentRef.setInput('baseUrl', '/artifacts/7/11/base.png');
+    fixture.componentRef.setInput('headUrl', '/artifacts/7/11/head.png');
+    fixture.componentRef.setInput('diffUrl', '/artifacts/7/11/diff.png');
+    fixture.componentRef.setInput('visualChange', 'changed');
+    fixture.componentRef.setInput('liveEnabled', liveEnabled);
+    fixture.componentRef.setInput('liveTarget', liveTarget);
+    fixture.componentRef.setInput('stepSummary', ['Click button "More actions"']);
+    fixture.detectChanges();
+  }
+  const liveButton = (): HTMLButtonElement | null => el.querySelector<HTMLButtonElement>('[data-testid="mode-live"]');
+  const testId = (id: string): HTMLElement | null => el.querySelector<HTMLElement>(`[data-testid="${id}"]`);
+  function chooseLive(): void {
+    liveButton()?.click();
+    fixture.detectChanges();
+  }
+  function clickStart(): TestRequest {
+    testId('live-start-button')?.click();
+    fixture.detectChanges();
+    return httpMock.expectOne((r) => r.method === 'POST' && r.url === liveUrl);
+  }
+  function answer(req: TestRequest, session: Partial<LiveSessionView>, status = 200): void {
+    req.flush({ status, data: liveSession(session) });
+    fixture.detectChanges();
+  }
+  function opens(): TestRequest[] {
+    return httpMock.match((r) => r.url === `${liveUrl}/open`);
+  }
+
+  it('offers Live as a fourth mode, enabled only when liveEnabled and a target are set; screenshots stay default', () => {
+    render(false);
+    expect(liveButton()?.textContent).toContain('Live');
+    expect(liveButton()?.textContent).toContain('sensors');
+    expect(liveButton()?.disabled).toBeTrue();
+    render(true, null);
+    expect(liveButton()?.disabled).toBeTrue();
+    render(true);
+    expect(liveButton()?.disabled).toBeFalse();
+    expect(liveButton()?.getAttribute('aria-pressed')).toBe('false');
+    expect(el.querySelectorAll('img').length).toBe(2);
+  });
+
+  it('Live is disabled where no LiveSessionStore is provided', async () => {
+    TestBed.resetTestingModule();
+    await TestBed.configureTestingModule({
+      imports: [ImageCompareComponent],
+      providers: [provideNoopAnimations()],
+    }).compileComponents();
+    const bare = TestBed.createComponent(ImageCompareComponent);
+    bare.componentRef.setInput('label', 'CartSummary');
+    bare.componentRef.setInput('liveEnabled', true);
+    bare.componentRef.setInput('liveTarget', target);
+    bare.detectChanges();
+    const button = (bare.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('[data-testid="mode-live"]');
+    expect(button?.disabled).toBeTrue();
+    bare.destroy();
+  });
+
+  it('choosing Live without a session asks to start it; Start posts and shows the preparing spinner', () => {
+    render();
+    chooseLive();
+    expect(testId('live-start')?.textContent).toContain(
+      'Live mode runs the before and after components in your browser, each side on its own. Start it for this run?',
+    );
+    expect(testId('live-start-button')?.textContent?.trim()).toContain('Start live mode');
+    expect(el.querySelector('[aria-label="Zoom"]')).toBeNull();
+    expect(el.querySelectorAll('img').length).toBe(0);
+    const req = clickStart();
+    expect(testId('live-starting')?.textContent).toContain('Preparing the before and after code…');
+    answer(req, { status: 'starting', readyAt: null }, 202);
+    expect(testId('live-starting')?.textContent).toContain('Preparing the before and after code…');
+    expect(opens().length).toBe(0);
+  });
+
+  it('once ready, opens the open state on both sides and shows the live compare', () => {
+    render();
+    chooseLive();
+    answer(clickStart(), { hosts: [] }, 202);
+    const [open] = opens();
+    expect(open?.request.body).toEqual({ componentId: 11, stateName: 'Menu open' });
+    open?.flush({ status: 202, data: liveSession({ hosts: readyHosts() }) });
+    fixture.detectChanges();
+    expect(testId('live-compare')).not.toBeNull();
+    expect(testId('live-frame-base')).not.toBeNull();
+    expect(testId('live-frame-head')).not.toBeNull();
+  });
+
+  it('switching the state tab while in Live opens the new state', () => {
+    render();
+    chooseLive();
+    answer(clickStart(), { hosts: readyHosts() }, 202);
+    opens()[0]?.flush({ status: 202, data: liveSession({ hosts: readyHosts() }) });
+    fixture.componentRef.setInput('liveTarget', { ...target, stateName: 'Default' });
+    fixture.detectChanges();
+    const [open] = opens();
+    expect(open?.request.body).toEqual({ componentId: 11, stateName: 'Default' });
+    open?.flush({ status: 202, data: liveSession({ hosts: readyHosts() }) });
+  });
+
+  it('the two-session limit error is shown on the start panel', () => {
+    render();
+    chooseLive();
+    clickStart().flush(
+      { status: 409, error: TWO_SESSIONS, error_reason: 'conflict' },
+      { status: 409, statusText: 'x' },
+    );
+    fixture.detectChanges();
+    expect(testId('live-message')?.textContent?.trim()).toBe(TWO_SESSIONS);
+    expect(testId('live-start-button')).not.toBeNull();
+  });
+
+  it('an idle stop says so and offers Start again', () => {
+    render();
+    chooseLive();
+    answer(clickStart(), { status: 'stopped', stopReason: 'idle', stoppedAt: '2026-10-07T10:11:00.000Z' }, 202);
+    expect(testId('live-message')?.textContent?.trim()).toBe('Live mode stopped after 10 minutes idle.');
+    expect(testId('live-start-button')?.textContent).toContain('Start again');
+    const again = clickStart();
+    expect(again.request.body).toEqual({});
+    answer(again, { id: 4, status: 'starting', readyAt: null }, 202);
+    expect(testId('live-starting')).not.toBeNull();
+  });
+
+  it('a failed session shows its error with Try again', () => {
+    render();
+    chooseLive();
+    answer(
+      clickStart(),
+      { status: 'failed', errorMessage: 'Could not prepare the before and after code in time.' },
+      202,
+    );
+    expect(testId('live-message')?.textContent?.trim()).toBe('Could not prepare the before and after code in time.');
+    expect(testId('live-start-button')?.textContent).toContain('Try again');
+  });
+
+  it('leaving Live mode returns to the screenshots', () => {
+    render();
+    chooseLive();
+    const sideBySide = Array.from(el.querySelectorAll('[aria-label="Comparison mode"] button')).find((b) =>
+      b.textContent?.includes('Side by side'),
+    ) as HTMLButtonElement;
+    sideBySide.click();
+    fixture.detectChanges();
+    expect(el.querySelectorAll('img').length).toBe(2);
+    expect(testId('live-start')).toBeNull();
   });
 });

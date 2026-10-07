@@ -65,6 +65,7 @@ import {
 } from '../visualization-format';
 import { type ComponentFilter } from './component-filters';
 import { type DetailView, defaultDetailView, parseDetailView } from './detail-views';
+import { LiveSessionStore } from './live-session.store';
 import { VisualizationDetailStore } from './visualization-detail.store';
 
 const DEFAULT_ERROR_MESSAGE = 'The pipeline stopped with an error. See the console for details.';
@@ -115,7 +116,8 @@ function refsParts(
 @Component({
   selector: 'app-visualization-detail',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  providers: [VisualizationDetailStore],
+  // 16j: LiveSessionStore lives as long as the page, so leaving the run stops its live session.
+  providers: [VisualizationDetailStore, LiveSessionStore],
   templateUrl: './visualization-detail.component.html',
   host: { class: 'flex flex-col gap-6' },
   imports: [
@@ -142,6 +144,7 @@ export class VisualizationDetailComponent {
   /** `?view=` query param (router input binding). Unknown values fall back to the default view. */
   readonly view = input<string>();
   protected readonly store = inject(VisualizationDetailStore);
+  private readonly live = inject(LiveSessionStore);
   private readonly confirm = inject(ConfirmDialogService);
   private readonly notifications = inject(NotificationService);
   private readonly router = inject(Router);
@@ -252,15 +255,23 @@ export class VisualizationDetailComponent {
   /** With no changed components the summary is a fixed text written without AI (11 §5.4). */
   protected readonly summaryByAi = computed(() => (this.store.detail()?.changedCount ?? 0) > 0);
   protected readonly loadErrorMessage = computed(() => this.store.loadError()?.message ?? '');
+  /** 16j: finished runs whose code can be recreated can go live. */
+  protected readonly liveAvailable = computed(() => this.store.detail()?.liveAvailable ?? false);
 
   constructor() {
     // Inputs are not readable in the constructor (NG0950): start the store from an effect on the parsed id.
     effect(() => {
       const id = this.parsedId();
       untracked(() => {
+        // 16j: binding the live store to another run leaves the previous run's session.
+        this.live.attach(id);
         if (id === null) this.store.markNotFound();
         else this.store.start(id);
       });
+    });
+    // 16j: leaving the run stops its live session (D10); a closing tab is covered by the store's pagehide beacon.
+    this.destroyRef.onDestroy(() => {
+      this.live.stop('left');
     });
     // Pop up the component-limit choice once per paused run; the inline alert keeps the same choices.
     effect(() => {

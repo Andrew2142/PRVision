@@ -1,0 +1,11 @@
+:host {
+  display: block;
+}
+
+iframe {
+  display: block;
+  width: 100%;
+  height: min(70vh, 40rem);
+  border: 0;
+  background: #fff;
+}
