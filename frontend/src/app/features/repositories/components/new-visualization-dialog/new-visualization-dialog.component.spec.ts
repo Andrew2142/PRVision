@@ -37,6 +37,9 @@ const REPO: RepositoryView = {
   appRoot: '.',
   angularProject: null,
   angularBuildConfiguration: null,
+  renderViewport: 'desktop',
+  libraryBuildMode: 'grow',
+  stateAllowance: 3,
   packageManager: 'pnpm',
   viteConfigPath: 'vite.config.ts',
   tsconfigPath: 'tsconfig.json',
@@ -322,7 +325,10 @@ describe('NewVisualizationDialogComponent', () => {
     expect(primary().textContent?.trim()).toBe('Start visualization');
     next();
     expect(launcher.launch.calls.allArgs()).toEqual([
-      [{ repositoryId: 3, sourceType: 'github_pr', prNumber: 42 }, 'PR #42 · Fix cart totals'],
+      [
+        { repositoryId: 3, sourceType: 'github_pr', prNumber: 42, renderViewport: 'desktop' },
+        'PR #42 · Fix cart totals',
+      ],
     ]);
     flush();
     expect(closedWith).toBe(77);
@@ -373,7 +379,16 @@ describe('NewVisualizationDialogComponent', () => {
     expect(text()).toContain('main (merge-base with feature/x)');
     next();
     expect(launcher.launch.calls.allArgs()).toEqual([
-      [{ repositoryId: 3, sourceType: 'local_branch', headRef: 'feature/x', baseRef: 'main' }, 'feature/x vs main'],
+      [
+        {
+          repositoryId: 3,
+          sourceType: 'local_branch',
+          headRef: 'feature/x',
+          baseRef: 'main',
+          renderViewport: 'desktop',
+        },
+        'feature/x vs main',
+      ],
     ]);
     flush();
   }));
@@ -430,6 +445,7 @@ describe('NewVisualizationDialogComponent', () => {
           headRef: 'feature/x',
           baseSha: list[3]?.sha ?? '',
           headSha: list[2]?.sha ?? '',
+          renderViewport: 'desktop',
         },
         `feature/x: ${sha(2)} · commit 3`,
       ],
@@ -543,6 +559,7 @@ describe('NewVisualizationDialogComponent', () => {
           headRef: 'feature/x',
           baseSha: list[4]?.sha ?? '',
           headSha: list[0]?.sha ?? '',
+          renderViewport: 'desktop',
         },
         `feature/x: ${list[4]?.shortSha ?? ''}…${list[0]?.shortSha ?? ''}`,
       ],
@@ -678,7 +695,7 @@ describe('NewVisualizationDialogComponent', () => {
     next();
     next();
     expect(launcher.launch.calls.allArgs()).toEqual([
-      [{ repositoryId: 3, sourceType: 'working_tree' }, 'working tree on feature/x'],
+      [{ repositoryId: 3, sourceType: 'working_tree', renderViewport: 'desktop' }, 'working tree on feature/x'],
     ]);
     flush();
     expect(closedWith).toBe(5);

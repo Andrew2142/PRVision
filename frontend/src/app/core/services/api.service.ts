@@ -7,13 +7,26 @@ import { SUPPRESS_ERROR_TOAST } from '../interceptors/http-context-tokens';
 import { ApiError } from '../models/api-error.model';
 import { type ApiEnvelope, type DeleteResult, type HealthView, type Paged } from '../models/api.model';
 import {
+  type CancelLibraryJobResponse,
+  type HarnessLibrarySummaryView,
+  type LibraryEstimateQuery,
+  type LibraryEstimateRequest,
+  type LibraryEstimateView,
+  type LibraryJobEventView,
+  type LibraryJobEventsQuery,
+  type LibraryJobView,
+  type LibraryScanCreateRequest,
+} from '../models/harness-library.model';
+import {
   type AppDiscoveryView,
   type BranchListView,
   type CommitListQuery,
   type CommitView,
   type PullRequestView,
   type RepositoryCreateRequest,
+  type RepositoryCreateResponse,
   type RepositoryDetectAppsRequest,
+  type RepositoryUpdateRequest,
   type RepositoryView,
 } from '../models/repository.model';
 import {
@@ -90,7 +103,8 @@ export class ApiService {
     return this.request('GET', `repositories/${id}`, { silent: true, ...o });
   }
 
-  createRepository(body: RepositoryCreateRequest, o: ApiRequestOptions = {}): Observable<RepositoryView> {
+  /** 201 with the repository plus `scanJobId` / `scanStartError` (16 §14.2). */
+  createRepository(body: RepositoryCreateRequest, o: ApiRequestOptions = {}): Observable<RepositoryCreateResponse> {
     return this.request('POST', 'repositories', { body, silent: true, ...o });
   }
 
@@ -99,12 +113,8 @@ export class ApiService {
     return this.request('POST', 'repositories/detect-apps', { body, silent: true, ...o });
   }
 
-  /** Saves repository settings (the screenshot screen size). */
-  updateRepository(
-    id: number,
-    body: { renderViewport: 'desktop' | 'tablet' | 'mobile' },
-    o: ApiRequestOptions = {},
-  ): Observable<RepositoryView> {
+  /** Saves repository settings (screen size, states per component). Not silent: the interceptor toasts errors. */
+  updateRepository(id: number, body: RepositoryUpdateRequest, o: ApiRequestOptions = {}): Observable<RepositoryView> {
     return this.request('PATCH', `repositories/${id}`, { body, silent: false, ...o });
   }
 
@@ -186,6 +196,74 @@ export class ApiService {
   removeVisualization(id: number, o: ApiRequestOptions = {}): Observable<DeleteResult> {
     return this.request('DELETE', `visualizations/${id}`, { silent: false, ...o });
   }
+
+  // ----- 16h library block (sheet 16 §15.1). 16j appends the live block and 16k the transfer block below it. -----
+
+  /** Estimate for a folder that is not registered yet (Add repository dialog). */
+  estimateLibraryForFolder(body: LibraryEstimateRequest, o: ApiRequestOptions = {}): Observable<LibraryEstimateView> {
+    return this.request('POST', 'repositories/library-estimate', { body, silent: true, ...o });
+  }
+
+  getLibrarySummary(repositoryId: number, o: ApiRequestOptions = {}): Observable<HarnessLibrarySummaryView> {
+    return this.request('GET', `repositories/${repositoryId}/library`, { silent: true, ...o });
+  }
+
+  estimateLibrary(
+    repositoryId: number,
+    q: LibraryEstimateQuery = {},
+    o: ApiRequestOptions = {},
+  ): Observable<LibraryEstimateView> {
+    return this.request('GET', `repositories/${repositoryId}/library/estimate`, {
+      params: { stateAllowance: q.stateAllowance, kind: q.kind },
+      silent: true,
+      ...o,
+    });
+  }
+
+  /** 202 with the queued job. */
+  startLibraryScan(
+    repositoryId: number,
+    body: LibraryScanCreateRequest,
+    o: ApiRequestOptions = {},
+  ): Observable<LibraryJobView> {
+    return this.request('POST', `repositories/${repositoryId}/library/scans`, { body, silent: true, ...o });
+  }
+
+  getLibraryJob(jobId: number, o: ApiRequestOptions = {}): Observable<LibraryJobView> {
+    return this.request('GET', `library-jobs/${jobId}`, { silent: true, ...o });
+  }
+
+  getLibraryJobEvents(
+    jobId: number,
+    q: LibraryJobEventsQuery = {},
+    o: ApiRequestOptions = {},
+  ): Observable<LibraryJobEventView[]> {
+    return this.request('GET', `library-jobs/${jobId}/events`, {
+      params: { afterId: q.afterId, limit: q.limit },
+      silent: true,
+      ...o,
+    });
+  }
+
+  cancelLibraryJob(jobId: number, o: ApiRequestOptions = {}): Observable<CancelLibraryJobResponse> {
+    return this.request('POST', `library-jobs/${jobId}/cancel`, { body: {}, silent: true, ...o });
+  }
+
+  /** 202 with the repair job. */
+  repairComponent(visualizationId: number, componentId: number, o: ApiRequestOptions = {}): Observable<LibraryJobView> {
+    return this.request('POST', `visualizations/${visualizationId}/components/${componentId}/repair`, {
+      body: {},
+      silent: true,
+      ...o,
+    });
+  }
+
+  /** 202 with the repair job for every row of the run whose harness needs updating. */
+  repairBroken(visualizationId: number, o: ApiRequestOptions = {}): Observable<LibraryJobView> {
+    return this.request('POST', `visualizations/${visualizationId}/repair-broken`, { body: {}, silent: true, ...o });
+  }
+
+  // ----- end of the 16h library block -----
 
   private request<T>(method: HttpMethod, path: string, opts: RequestSpec): Observable<T> {
     return this.http

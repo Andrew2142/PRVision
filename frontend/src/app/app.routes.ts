@@ -42,6 +42,14 @@ export const routes: Routes = [
           ),
       },
       {
+        path: 'library-jobs/:id',
+        title: 'Library job',
+        loadComponent: () =>
+          import('./features/library-jobs/library-job-detail/library-job-detail.component').then(
+            (m) => m.LibraryJobDetailComponent,
+          ),
+      },
+      {
         path: 'settings',
         title: 'Settings',
         canDeactivate: [settingsUnsavedChangesGuard],

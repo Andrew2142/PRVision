@@ -2,6 +2,7 @@ import { type PageQuery } from './api.model';
 import {
   type ChangeKind,
   type ConsoleLevel,
+  type HarnessOrigin,
   type RenderStatus,
   type RepositoryFramework,
   type Risk,
@@ -9,6 +10,7 @@ import {
   type VisualChange,
   type VisualizationStatus,
 } from './domain-enums.model';
+import { type HarnessStep, type LibraryJobView } from './harness-library.model';
 
 export interface VisualizationSummaryView {
   id: number;
@@ -25,6 +27,8 @@ export interface VisualizationSummaryView {
   status: VisualizationStatus;
   componentCount: number;
   changedCount: number;
+  /** Rows that reached rendering with a harness (16 §6.8); "N checked, M changed". */
+  checkedCount: number;
   createdAt: string;
   completedAt: string | null;
 }
@@ -49,6 +53,53 @@ export interface VisualizationDetailView extends VisualizationSummaryView {
   /** The confirmed component limit; null = the default (12). */
   componentLimit: number | null;
   components: VisualizationComponentView[];
+  /** Rows rendered with a saved harness on at least one side. */
+  reusedHarnessCount: number;
+  /** Harnesses written by this run. */
+  newHarnessCount: number;
+  /** Rows whose harness needs updating (16 E5). */
+  needsUpdateCount: number;
+  /** First changed file that re-checked the whole library (16 §8.5). */
+  globalStyleTrigger: string | null;
+  activeRepairJob: LibraryJobView | null;
+  /** Live mode can start for this run (16j). */
+  liveAvailable: boolean;
+  /** Estimated cost of Repair all broken; null without broken rows or AI settings. */
+  repairEstimateUsd: number | null;
+}
+
+/** One named state of a component row, ordinal order; Default first (16 §14.5). */
+export interface ComponentStateView {
+  ordinal: number;
+  name: string;
+  onBase: boolean;
+  onHead: boolean;
+  steps: HarnessStep[];
+  /** e.g. 'Click button "More actions"'. */
+  stepSummary: string[];
+  renderStatus: RenderStatus;
+  visualChange: VisualChange | null;
+  baseImageUrl: string | null;
+  headImageUrl: string | null;
+  diffImageUrl: string | null;
+  imageWidth: number | null;
+  imageHeight: number | null;
+  diffPixelRatio: number | null;
+  baseError: string | null;
+  headError: string | null;
+}
+
+/** Where the row's harness came from and whether it needs repair (16 §14.5). */
+export interface ComponentHarnessView {
+  origin: HarnessOrigin | null;
+  /** replaced rows: the base side's harness. */
+  baseOrigin: HarnessOrigin | null;
+  libraryEntryId: number | null;
+  baseLibraryEntryId: number | null;
+  needsUpdate: boolean;
+  sourceChangedSinceWrite: boolean | null;
+  /** Listed in the run's active repair job. */
+  repairing: boolean;
 }
 
 export interface ElementAddedChange {
@@ -125,6 +176,11 @@ export interface VisualizationComponentView {
   baseDisplayName: string | null;
   /** Why the two were paired ("replaced" rows only). */
   successorEvidence: SuccessorEvidence[] | null;
+  /** Ordinal order; rows from before states have one synthesized Default. */
+  states: ComponentStateView[];
+  stateCount: number;
+  changedStateCount: number;
+  harness: ComponentHarnessView;
 }
 
 export interface ConsoleEventView {

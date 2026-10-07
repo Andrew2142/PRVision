@@ -30,15 +30,20 @@ import { LoadingSpinnerComponent } from '../../../shared/components/loading-spin
 import { NotFoundPageComponent } from '../../../shared/components/not-found-page/not-found-page.component';
 import { PageHeaderComponent } from '../../../shared/components/page-header/page-header.component';
 import { DetectionCardComponent } from '../components/detection-card/detection-card.component';
+import { HarnessLibraryCardComponent } from '../components/harness-library-card/harness-library-card.component';
 import {
   NewVisualizationDialogComponent,
   type NewVisualizationDialogData,
   type NewVisualizationDialogResult,
 } from '../components/new-visualization-dialog/new-visualization-dialog.component';
 import { RecentVisualizationsComponent } from '../components/recent-visualizations/recent-visualizations.component';
+import { RepositorySettingsCardComponent } from '../components/repository-settings-card/repository-settings-card.component';
 import { appChips } from '../repository-format';
 
-/** `/repositories/:id`: detection, recent runs, and the New visualization dialog (13 §5.7, 00 §16). */
+/**
+ * `/repositories/:id`: detection, settings, the harness library, recent runs, and the New visualization dialog
+ * (13 §5.7, 00 §16, 16 §15.3–§15.4).
+ */
 @Component({
   selector: 'app-repository-detail',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -54,6 +59,8 @@ import { appChips } from '../repository-format';
     MatProgressSpinnerModule,
     DetectionCardComponent,
     RecentVisualizationsComponent,
+    HarnessLibraryCardComponent,
+    RepositorySettingsCardComponent,
   ],
 })
 export class RepositoryDetailComponent {
@@ -138,6 +145,11 @@ export class RepositoryDetailComponent {
     });
   }
 
+  /** The settings card saved: keep the page (and the library card's rescan hint) in step. */
+  protected onSettingsSaved(updated: RepositoryView): void {
+    this.repository.set(updated);
+  }
+
   protected retry(): void {
     const id = this.repositoryId();
     if (id !== null) this.load$.next(id);
@@ -180,7 +192,9 @@ export class RepositoryDetailComponent {
     this.confirm
       .confirm({
         title: 'Remove repository?',
-        message: `PRVision will forget "${repo.name}". Your local clone is not touched.`,
+        message:
+          `PRVision will forget "${repo.name}". Your local clone is not touched. ` +
+          'Export the harness library first if you want to keep it.',
         confirmText: 'Remove repository',
         confirmColor: 'warn',
       })

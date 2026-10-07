@@ -1,4 +1,4 @@
-import { type PackageManager, type RepositoryFramework } from './domain-enums.model';
+import { type LibraryBuildMode, type PackageManager, type RepositoryFramework } from './domain-enums.model';
 
 export type RenderViewport = 'desktop' | 'tablet' | 'mobile';
 
@@ -23,6 +23,10 @@ export interface RepositoryView {
   globalStylePaths: string[];
   lastDetectedAt: string;
   createdAt: string;
+  /** Grow the harness library as runs go, or the whole app was scanned (16 D3). */
+  libraryBuildMode: LibraryBuildMode;
+  /** Most states a harness may have, 1–5 (16 D4). */
+  stateAllowance: number;
 }
 
 export interface PullRequestView {
@@ -74,6 +78,26 @@ export interface RepositoryCreateRequest {
   angularProject?: string;
   /** Omitted = guessed by the backend. */
   renderViewport?: RenderViewport;
+  /** Default "grow" (16 §14.2). */
+  libraryBuildMode?: LibraryBuildMode;
+  /** Integer 1–5; default 3. */
+  stateAllowance?: number;
+  /** Only with "scan"; null = no cap; 0.5–10 000 dollars with 2 decimals. */
+  scanSpendCapUsd?: number | null;
+}
+
+/** 201 of POST /api/repositories (16 §14.2). */
+export interface RepositoryCreateResponse extends RepositoryView {
+  /** The scan started with libraryBuildMode "scan". */
+  scanJobId: number | null;
+  /** Why the scan could not start; the repository is still created. */
+  scanStartError: string | null;
+}
+
+/** PATCH /api/repositories/:id: at least one field. */
+export interface RepositoryUpdateRequest {
+  renderViewport?: RenderViewport;
+  stateAllowance?: number;
 }
 
 /** POST /api/repositories/detect-apps (15 §5.4.5). */
