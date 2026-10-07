@@ -16,16 +16,30 @@ import type {
   WorkspacePrepareInput
 } from "../../../backend/src/services/visualizations/pipeline/workspace-prepare-service";
 import { VisualizationConsoleService } from "../../../backend/src/services/visualizations/visualization-console-service";
+import type {
+  LibraryResolutionResult,
+  RenderStageDeps
+} from "../../../backend/src/services/visualizations/pipeline/stage-registry";
+import type {
+  HarnessLibraryEntryRecord,
+  SaveWrittenHarnessInput,
+  SideHarnessPlan
+} from "../../../backend/src/types/harness-library";
 import {
   AiProviderError,
   PipelineStepError,
   type AiProvider,
+  type ChangeAnalysisResult,
+  type ComponentCandidate,
+  type ComponentRenderResult,
   type HarnessRenderError,
   type HarnessRepairOutcome,
-  type PreparedWorkspace
+  type PreparedWorkspace,
+  type RenderFailureKindValue
 } from "../../../backend/src/types/visualization-pipeline";
 import { GitCommandError, type QueryHandler, type ResolvedAiSettings } from "../../../backend/src/utilities";
 import { recordLogger } from "../helpers/console-recorder";
+import { FakeLibraryStore, libraryEntry } from "../helpers/fake-library-store";
 import { makeComponentRow, makeRepositoryRow, makeVisualizationRow } from "../helpers/factories";
 import { makeJob } from "../helpers/fake-queue";
 import { InMemoryQueryHandler } from "../helpers/query-handler-stub";
@@ -36,6 +50,8 @@ import {
   fakeSteps,
   harness,
   ignoresAbort,
+  passThroughResolution,
+  render,
   untilAborted,
   type FakeStepOptions
 } from "./helpers/fakes";
@@ -55,6 +71,7 @@ const PROVIDER: AiProvider = {
 
 interface WorkerHarness {
   store: InMemoryQueryHandler;
+  library: FakeLibraryStore;
   queue: FakeQueueStatics;
   events: string[];
   prepareInputs: WorkspacePrepareInput[];
@@ -89,6 +106,7 @@ function setup(
     visualization?: Parameters<typeof makeVisualizationRow>[0] | null;
     prepare?: (input: WorkspacePrepareInput) => Promise<PreparedWorkspace>;
     limits?: VisualizationWorkerDependencies["limits"];
+    library?: FakeLibraryStore;
   } = {}
 ): WorkerHarness {
   const store = new InMemoryQueryHandler();
@@ -108,8 +126,10 @@ function setup(
   const queue = new FakeQueueStatics();
   const events: string[] = [];
   const { steps, calls } = fakeSteps(options.steps);
+  const library = options.library ?? new FakeLibraryStore();
   const h: WorkerHarness = {
     store,
+    library,
     queue,
     events,
     prepareInputs: [],
@@ -153,7 +173,10 @@ function setup(
     queue,
     consoleFactory: (id) => new VisualizationConsoleService(id, store),
     now: () => NOW,
-    limits: options.limits ?? { maxRuntimeMs: 60_000, stepAbortGraceMs: 200 }
+    limits: options.limits ?? { maxRuntimeMs: 60_000, stepAbortGraceMs: 200 },
+    libraryStore: library,
+    fingerprinter: { fingerprint: () => Promise.resolve("f".repeat(64)) },
+    createRenderPersistence: () => ({ saveRenderResult: () => Promise.resolve() })
   };
   t.after(() => {
     events.length = 0;
@@ -202,11 +225,11 @@ test("VisualizationWorkerService.run happy path writes statuses in order and com
   h = setup(t, {
     steps: {
       analysis: analysisSeeding(get, [
-        { renderStatus: "rendered", visualChange: "changed" },
-        { renderStatus: "rendered", visualChange: "new" },
-        { renderStatus: "rendered", visualChange: "deleted" },
-        { renderStatus: "rendered", visualChange: "unchanged" },
-        { renderStatus: "failed", visualChange: null },
+        { renderStatus: "rendered", visualChange: "changed", harnessOrigin: "written" },
+        { renderStatus: "rendered", visualChange: "new", harnessOrigin: "written" },
+        { renderStatus: "rendered", visualChange: "deleted", harnessOrigin: "library" },
+        { renderStatus: "rendered", visualChange: "unchanged", harnessOrigin: "library" },
+        { renderStatus: "failed", visualChange: null, harnessOrigin: "written" },
         { renderStatus: "skipped", skipReason: "cap" }
       ])
     }
@@ -229,11 +252,13 @@ test("VisualizationWorkerService.run happy path writes statuses in order and com
   assert.deepEqual(row.completedAt, NOW);
   assert.equal(row.errorMessage, null);
   assert.equal(row.failedStage, null);
-  assert.deepEqual(h.calls.order, ["analyze", "generateAll", "renderAll", "diff", "compare", "summarize"]);
+  // 16 §8.7: library resolution ends analyzing
+  assert.deepEqual(h.calls.order, ["analyze", "resolve", "generateAll", "renderAll", "diff", "compare", "summarize"]);
+  assert.equal(row.checkedCount, 5, "16 §8.7 step 8: rendered, partial or failed rows with a harness");
   assert.equal(
     h.consoleRows().at(-2)?.message,
-    "Completed: 3 of 6 component(s) changed visually.",
-    "terminal line before the cleanup line"
+    "Completed: 5 checked, 3 changed visually.",
+    "terminal line before the cleanup line (16 §8.7 step 8)"
   );
   assert.equal(h.consoleRows().at(-1)?.message, "Removing temporary worktrees.");
   assert.equal(h.consoleRows().at(-1)?.stage, "completed");
@@ -429,7 +454,7 @@ test("VisualizationWorkerService.run calls ImageDiffService.diff(ctx, renders), 
 test("VisualizationWorkerService.run zero candidates still passes every stage, skips render and diff calls, and calls summarize", async (t) => {
   const h = setup(t, { steps: { analysis: analysisWith([]) } });
   assert.equal(await h.worker().run(makeJob(1).job), "completed");
-  assert.deepEqual(h.calls.order, ["analyze", "generateAll", "summarize"]);
+  assert.deepEqual(h.calls.order, ["analyze", "resolve", "generateAll", "summarize"]);
   assert.deepEqual(h.statusUpdates(), [
     "preparing",
     "analyzing",
@@ -834,4 +859,467 @@ test("VisualizationWorkerService.run every console stage written by the worker i
       assert.ok(allowed.has(String(row.stage)), String(row.stage));
     }
   }
+});
+
+// ---------------------------------------------------------------------------------------------------------------
+// 16d: library resolution, D9 pause, reuse, save-back and counts (16 §8.7)
+// ---------------------------------------------------------------------------------------------------------------
+
+const ENTRY_SOURCE = 'export default definePrvisionHarness({ states: [{ name: "Default", render: () => <i /> }] });';
+
+function resolutionOf(
+  analysis: ChangeAnalysisResult,
+  overrides: Partial<LibraryResolutionResult> & {
+    reuse?: Record<number, HarnessLibraryEntryRecord>;
+    rechecked?: Array<{ candidate: ComponentCandidate; entry: HarnessLibraryEntryRecord }>;
+  } = {}
+): LibraryResolutionResult {
+  const base = passThroughResolution(analysis);
+  const reuse = overrides.reuse ?? {};
+  const plans = new Map<number, SideHarnessPlan[]>();
+  for (const c of analysis.candidates) {
+    const entry = reuse[c.componentId] ?? null;
+    plans.set(c.componentId, [
+      {
+        side: c.changeKind === "removed" ? "base" : "head",
+        identity: { filePath: c.filePath, exportName: c.exportName },
+        entry
+      }
+    ]);
+  }
+  for (const row of overrides.rechecked ?? []) {
+    plans.set(row.candidate.componentId, [
+      { side: "head", identity: { filePath: row.entry.filePath, exportName: row.entry.exportName }, entry: row.entry }
+    ]);
+  }
+  const { reuse: _reuse, rechecked, ...rest } = overrides;
+  return {
+    ...base,
+    plans,
+    toWrite: base.toWrite.filter((row) => reuse[row.candidate.componentId] === undefined),
+    renderCandidates: [...analysis.candidates, ...(rechecked ?? []).map((row) => row.candidate)],
+    recheckedCount: (rechecked ?? []).length,
+    ...rest
+  };
+}
+
+function failedRender(
+  componentId: number,
+  kind: RenderFailureKindValue,
+  side: "base" | "head" | "both" = "head"
+): ComponentRenderResult {
+  const result = render(componentId);
+  const fail = (s: "base" | "head"): ComponentRenderResult["base"] => ({
+    side: s,
+    ok: false,
+    imagePath: null,
+    width: null,
+    height: null,
+    error: `[${kind}] boom`,
+    consoleErrors: [],
+    durationMs: 1,
+    failureKind: kind
+  });
+  return {
+    ...result,
+    ...(side === "base" || side === "both" ? { base: fail("base") } : {}),
+    ...(side === "head" || side === "both" ? { head: fail("head") } : {})
+  };
+}
+
+test("VisualizationWorkerService.run pauses when library resolution says so (more than 12 new harnesses) with the 16 §8.4 message and no AI", async (t) => {
+  const analysis = analysisWith([candidate(1), candidate(2)]);
+  const h = setup(t, {
+    steps: {
+      analysis,
+      resolution: () =>
+        Promise.resolve({ ...passThroughResolution(analysis), pause: true, newHarnessCount: 13, reusedCount: 2 })
+    }
+  });
+  assert.equal(await h.worker().run(makeJob(1).job), "paused");
+  assert.equal(h.row()?.status, "awaiting_confirmation");
+  assert.deepEqual(h.calls.order, ["analyze", "resolve"], "no harness generation (no AI spent)");
+  assert.ok(
+    h
+      .consoleRows()
+      .some(
+        (row) =>
+          row.stage === "awaiting_confirmation" &&
+          row.message ===
+            "13 new harnesses needed (2 components reuse saved harnesses); PRVision writes 12 by default. Waiting for you to choose how many to write."
+      )
+  );
+});
+
+test("VisualizationWorkerService.run does not pause when the run has a confirmed limit, nor on analysis over_limit skips alone", async (t) => {
+  const analysis = analysisWith([candidate(1)]);
+  const confirmed = setup(t, {
+    visualization: { componentLimit: 30 },
+    steps: { analysis, resolution: () => Promise.resolve({ ...passThroughResolution(analysis), pause: true }) }
+  });
+  assert.equal(await confirmed.worker().run(makeJob(1).job), "completed");
+  assert.equal(confirmed.calls.analyzeCtx?.componentLimit, 30);
+  const skippedByAnalysis = setup(t, {
+    steps: {
+      analysis: {
+        ...analysis,
+        skipped: [
+          {
+            ...candidate(9),
+            skipReason: "over_limit: ranked 501 of 501; PRVision analyses at most 500 components per visualization"
+          }
+        ]
+      }
+    }
+  });
+  assert.equal(
+    await skippedByAnalysis.worker().run(makeJob(1).job),
+    "completed",
+    "16 §8.4: the old overLimit check is gone"
+  );
+});
+
+test("VisualizationWorkerService.run generates only the rows that need new harnesses, with their sides, and renders reused and rechecked rows with the saved harness", async (t) => {
+  const reused = libraryEntry({ id: 11, filePath: "src/components/C1.tsx", harnessSource: ENTRY_SOURCE, revision: 2 });
+  const recheckedEntry = libraryEntry({
+    id: 13,
+    filePath: "src/components/Other.tsx",
+    displayName: "Other",
+    harnessSource: ENTRY_SOURCE
+  });
+  const rechecked = candidate(3, {
+    changeKind: "rechecked",
+    filePath: "src/components/Other.tsx",
+    displayName: "Other",
+    codeDiff: null,
+    rank: 2
+  });
+  const analysis = analysisWith([candidate(1), candidate(2)]);
+  let h: WorkerHarness | null = null;
+  h = setup(t, {
+    library: new FakeLibraryStore([reused, recheckedEntry]),
+    steps: {
+      analysis: () => {
+        h?.store.seed(Table.VISUALIZATION_COMPONENTS, [
+          makeComponentRow({ id: 1, visualizationId: 1, filePath: "src/components/C1.tsx" }),
+          makeComponentRow({ id: 2, visualizationId: 1, filePath: "src/components/C2.tsx" }),
+          makeComponentRow({
+            id: 3,
+            visualizationId: 1,
+            filePath: "src/components/Other.tsx",
+            changeKind: "rechecked",
+            libraryEntryId: 13,
+            harnessOrigin: "library"
+          })
+        ]);
+        return Promise.resolve(analysis);
+      },
+      resolution: (a) =>
+        Promise.resolve(
+          resolutionOf(a, { reuse: { 1: reused }, rechecked: [{ candidate: rechecked, entry: recheckedEntry }] })
+        )
+    }
+  });
+  assert.equal(await h.worker().run(makeJob(1).job), "completed");
+  assert.deepEqual(
+    h.calls.generateAllCandidates?.map((c) => c.componentId),
+    [2]
+  );
+  assert.deepEqual(h.calls.generateAllOptions, { sides: new Map([[2, ["head"]]]) });
+  const inputs = h.calls.renderAllInputs ?? [];
+  assert.deepEqual(
+    inputs.map((input) => [input.candidate.componentId, input.harness.origin, input.harness.libraryEntryId]),
+    [
+      [1, "library", 11],
+      [2, "written", null],
+      [3, "library", 13]
+    ]
+  );
+  assert.equal(inputs[0]?.harness.notes, "From the harness library (revision 2).\nSaved notes.");
+  assert.deepEqual(inputs[0].harness.states, [{ name: "Default", steps: [] }]);
+  // the run's snapshot of every reused harness (E2), rechecked rows included
+  for (const id of [1, 3]) {
+    const row = h.store.row(Table.VISUALIZATION_COMPONENTS, id);
+    assert.equal(row?.harnessSource, ENTRY_SOURCE, `row ${String(id)} snapshot`);
+    assert.match(String(row.harnessNotes), /^From the harness library \(revision \d\)\./);
+  }
+  // structural diff and summary see the rechecked row as a candidate
+  assert.deepEqual(
+    h.calls.summarizeAnalysis?.candidates.map((c) => c.componentId),
+    [1, 2, 3]
+  );
+  assert.deepEqual(
+    h.calls.compareInput?.analysis.candidates.map((c) => c.componentId),
+    [1, 2, 3]
+  );
+});
+
+test("VisualizationWorkerService.run save-back: written harnesses saved ready or needs_update (E25 expectedRevision), generation failures saved without harness, rows flagged per E5", async (t) => {
+  const analysis = analysisWith([candidate(2), candidate(4), candidate(5), candidate(7)]);
+  const harnessLess = libraryEntry({ id: 55, filePath: "src/components/C5.tsx", harnessSource: null, revision: 3 });
+  const concurrent = libraryEntry({
+    id: 77,
+    filePath: "src/components/C7.tsx",
+    harnessSource: ENTRY_SOURCE,
+    revision: 4,
+    origin: "repair"
+  });
+  const library = new FakeLibraryStore([harnessLess]);
+  let h: WorkerHarness | null = null;
+  h = setup(t, {
+    library,
+    steps: {
+      analysis: () => {
+        h?.store.seed(
+          Table.VISUALIZATION_COMPONENTS,
+          [2, 4, 5, 7].map((id) =>
+            makeComponentRow({ id, visualizationId: 1, filePath: `src/components/C${String(id)}.tsx` })
+          )
+        );
+        return Promise.resolve(analysis);
+      },
+      resolution: (a) => {
+        // a repair saved C7 after resolution read the library (expected revision 0)
+        library.entries.set(concurrent.id, concurrent);
+        return Promise.resolve({
+          ...resolutionOf(a),
+          writeRevisions: new Map([["src/components/C5.tsx\u0000default", 3]])
+        });
+      },
+      batch: {
+        results: [2, 4, 7].map((id) => ({ ...harness(id), usage: { inputTokens: 10, outputTokens: 5, calls: 1 } })),
+        failures: [
+          {
+            componentId: 5,
+            kind: "ai_error",
+            aiReason: "network",
+            message: "Could not reach the AI provider (or it timed out)."
+          }
+        ],
+        usage: { inputTokens: 30, outputTokens: 15, calls: 3 },
+        cancelled: false
+      },
+      renders: [render(2), failedRender(4, "render_error"), render(7)]
+    }
+  });
+  const logs = recordLogger();
+  t.after(logs.restore);
+  assert.equal(await h.worker().run(makeJob(1).job), "completed");
+
+  const saves = library.callsOf("saveWritten").map((args) => args[0] as SaveWrittenHarnessInput);
+  assert.deepEqual(
+    saves.map((s) => [s.identity.filePath, s.status, s.harness === null, s.expectedRevision, s.lastError]),
+    [
+      ["src/components/C2.tsx", "ready", false, 0, null],
+      ["src/components/C4.tsx", "needs_update", false, 0, "[render_error] boom"],
+      ["src/components/C5.tsx", "needs_update", true, 3, "Could not reach the AI provider (or it timed out)."],
+      ["src/components/C7.tsx", "ready", false, 0, null]
+    ]
+  );
+  const c2 = saves[0];
+  assert.ok(c2);
+  assert.equal(c2.origin, "run");
+  assert.equal(c2.repositoryId, 1);
+  assert.equal(c2.stateAllowance, 4, "the repository's allowance snapshotted at job start");
+  assert.equal(c2.aiModel, "claude-opus-5-5");
+  assert.deepEqual(c2.aiUsage, { inputTokens: 10, outputTokens: 5, calls: 1 });
+  assert.equal(c2.sourceFingerprint, "f".repeat(64));
+  assert.deepEqual(c2.harness?.states, [{ name: "Default", steps: [] }]);
+  assert.equal(saves[1]?.lastFailedVisualizationId, 1);
+
+  const done = h;
+  const row = (id: number): Record<string, unknown> | undefined => done.store.row(Table.VISUALIZATION_COMPONENTS, id);
+  const saved = library.byIdentity({ filePath: "src/components/C2.tsx", exportName: "default" });
+  assert.equal(row(2)?.libraryEntryId, saved?.id);
+  assert.equal(row(2)?.harnessOrigin, "written");
+  assert.equal(row(2)?.harnessNeedsUpdate, false);
+  assert.equal(row(4)?.harnessNeedsUpdate, true, "E5: a harness-attributable failure flags the card");
+  assert.equal(row(5)?.harnessOrigin, null, "no harness was written for C5");
+  assert.equal(library.entries.get(55)?.revision, 4, "the harness-less entry was replaced at its revision");
+  // C7: a newer revision was kept; the row keeps its run snapshot
+  assert.equal(library.entries.get(77)?.revision, 4);
+  assert.equal(library.entries.get(77)?.origin, "repair");
+  assert.equal(row(7)?.libraryEntryId, null);
+  assert.equal(row(7)?.harnessOrigin, "written");
+  assert.ok(logs.lines.some((line) => line.event === "library.entry.kept_newer" && line.entryId === 77));
+  assert.equal(h.row()?.needsUpdateCount, 1);
+  assert.ok(
+    h
+      .consoleRows()
+      .some((r) => r.stage === "rendering" && r.message === "Saved 2 new harness(es) to the library; 1 need updating.")
+  );
+});
+
+test("VisualizationWorkerService.run save-back: reused entries get their status from the status side (E4, E5, E26) and renamed entries move", async (t) => {
+  const offBranch = libraryEntry({
+    id: 21,
+    filePath: "src/components/C1.tsx",
+    status: "off_default_branch",
+    harnessSource: ENTRY_SOURCE
+  });
+  const breaking = libraryEntry({ id: 22, filePath: "src/components/C2.tsx", harnessSource: ENTRY_SOURCE });
+  const infra = libraryEntry({ id: 23, filePath: "src/components/C3.tsx", harnessSource: ENTRY_SOURCE });
+  const renamed = libraryEntry({
+    id: 26,
+    filePath: "src/components/Old6.tsx",
+    displayName: "Old6",
+    harnessSource: ENTRY_SOURCE
+  });
+  const baseOnly = libraryEntry({ id: 28, filePath: "src/components/C8.tsx", harnessSource: ENTRY_SOURCE });
+  const library = new FakeLibraryStore([offBranch, breaking, infra, renamed, baseOnly]);
+  const analysis = analysisWith([candidate(1), candidate(2), candidate(3), candidate(6), candidate(8)]);
+  let h: WorkerHarness | null = null;
+  h = setup(t, {
+    library,
+    steps: {
+      analysis: () => {
+        h?.store.seed(
+          Table.VISUALIZATION_COMPONENTS,
+          [1, 2, 3, 6, 8].map((id) =>
+            makeComponentRow({ id, visualizationId: 1, filePath: `src/components/C${String(id)}.tsx` })
+          )
+        );
+        return Promise.resolve(analysis);
+      },
+      resolution: (a) =>
+        Promise.resolve(resolutionOf(a, { reuse: { 1: offBranch, 2: breaking, 3: infra, 6: renamed, 8: baseOnly } })),
+      renders: [
+        render(1),
+        failedRender(2, "step_failed"),
+        failedRender(3, "vite_unavailable"),
+        render(6),
+        failedRender(8, "module_load", "base")
+      ]
+    }
+  });
+  assert.equal(await h.worker().run(makeJob(1).job), "completed");
+  assert.equal(h.calls.generateAllCandidates?.length, 0, "no AI for reused harnesses");
+  assert.equal(
+    library.entries.get(21)?.status,
+    "ready",
+    "an off_default_branch entry is back to ready after a head render"
+  );
+  assert.equal(library.entries.get(22)?.status, "needs_update");
+  assert.equal(library.entries.get(22)?.lastError, "[step_failed] boom");
+  assert.equal(library.entries.get(22)?.lastFailedVisualizationId, 1);
+  assert.equal(library.entries.get(23)?.status, "ready", "an infrastructure failure leaves the entry unchanged");
+  assert.equal(
+    library.callsOf("markRenderOutcome").some((args) => args[0] === 23),
+    false
+  );
+  assert.equal(library.entries.get(28)?.status, "ready", "E5: a failure only on the other side keeps the entry");
+  assert.deepEqual(library.callsOf("moveIdentity"), [
+    [26, { filePath: "src/components/C6.tsx", exportName: "default", displayName: "C6" }]
+  ]);
+  const done = h;
+  const row = (id: number): Record<string, unknown> | undefined => done.store.row(Table.VISUALIZATION_COMPONENTS, id);
+  assert.equal(row(1)?.harnessNeedsUpdate, false);
+  assert.equal(row(2)?.harnessNeedsUpdate, true);
+  assert.equal(row(3)?.harnessNeedsUpdate, false, "infrastructure failures do not flag the card");
+  assert.equal(row(8)?.harnessNeedsUpdate, true, "any present side's harness-attributable failure flags the card");
+  assert.equal(h.row()?.needsUpdateCount, 2);
+  assert.equal(library.callsOf("saveWritten").length, 0);
+});
+
+test("VisualizationWorkerService.run save-back: a kept fix-up saves the repaired harness with origin repaired and the fix-up usage", async (t) => {
+  const repairedSource = ENTRY_SOURCE.replace("<i />", "<b />");
+  let h: WorkerHarness | null = null;
+  h = setup(t, {
+    steps: {
+      analysis: analysisSeeding(
+        () => {
+          assert.ok(h);
+          return h;
+        },
+        [{}],
+        [candidate(1)]
+      ),
+      batch: {
+        results: [{ ...harness(1), usage: { inputTokens: 100, outputTokens: 50, calls: 1 } }],
+        failures: [],
+        usage: { inputTokens: 100, outputTokens: 50, calls: 1 },
+        cancelled: false
+      },
+      repair: (_id, previous) =>
+        Promise.resolve({
+          ok: true,
+          result: {
+            ...previous,
+            harnessSource: repairedSource,
+            notes: "repaired",
+            states: [{ name: "Default", steps: [] }],
+            usage: { inputTokens: 40, outputTokens: 20, calls: 1 }
+          }
+        }),
+      renders: async () => {
+        assert.ok(h?.calls.renderDeps);
+        const deps = h.calls.renderDeps as RenderStageDeps;
+        const outcome = await deps.repairHarness(1, harness(1), {
+          sides: ["base", "head"],
+          kind: "render_error",
+          message: "x",
+          otherSideMessage: null
+        });
+        assert.ok(outcome.ok);
+        await deps.persistence?.saveRenderResult(1, {
+          renderStatus: "rendered",
+          baseImagePath: null,
+          headImagePath: null,
+          imageWidth: null,
+          imageHeight: null,
+          baseError: null,
+          headError: null,
+          harness: { harnessSource: repairedSource, harnessNotes: "repaired", mockedModules: [] },
+          states: []
+        });
+        return [render(1)];
+      }
+    }
+  });
+  assert.equal(await h.worker().run(makeJob(1).job), "completed");
+  const save = h.library.callsOf("saveWritten")[0]?.[0] as SaveWrittenHarnessInput | undefined;
+  assert.equal(save?.harness?.harnessSource, repairedSource);
+  assert.equal(save.harness.notes, "repaired");
+  assert.deepEqual(save.aiUsage, { inputTokens: 140, outputTokens: 70, calls: 2 }, "generation plus fix-up");
+  assert.equal(h.store.row(Table.VISUALIZATION_COMPONENTS, 1)?.harnessOrigin, "repaired");
+});
+
+test("VisualizationWorkerService.run save-back failure is one console warning and the run still completes", async (t) => {
+  const library = new FakeLibraryStore();
+  library.failWrites = new Error("library table locked");
+  let h: WorkerHarness | null = null;
+  h = setup(t, {
+    library,
+    steps: {
+      analysis: analysisSeeding(() => {
+        assert.ok(h);
+        return h;
+      }, [{}, {}])
+    }
+  });
+  assert.equal(await h.worker().run(makeJob(1).job), "completed");
+  const warnings = h.consoleRows().filter((r) => r.level === "warn" && r.stage === "rendering");
+  assert.deepEqual(
+    warnings.map((r) => r.message),
+    ["Could not update the harness library: library table locked"]
+  );
+});
+
+test("VisualizationWorkerService.run records working_tree_snapshot when prepare kept the snapshot; the context workspace stays the 00 §8 shape", async (t) => {
+  const h = setup(t, {
+    visualization: { sourceType: "working_tree", prNumber: null, headRef: "working-tree" },
+    prepare: (input) =>
+      Promise.resolve({
+        ...workspaceFor(input.visualizationId),
+        sourceType: "working_tree",
+        headSha: null,
+        workingTreeSnapshot: true
+      })
+  });
+  assert.equal(await h.worker().run(makeJob(1).job), "completed");
+  assert.equal(h.row()?.workingTreeSnapshot, true);
+  assert.equal("workingTreeSnapshot" in (h.calls.analyzeCtx?.workspace ?? {}), false);
+  const without = setup(t);
+  await without.worker().run(makeJob(1).job);
+  assert.equal(without.row()?.workingTreeSnapshot, false);
 });

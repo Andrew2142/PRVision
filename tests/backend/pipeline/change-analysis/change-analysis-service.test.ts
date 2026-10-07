@@ -257,24 +257,38 @@ test("Example F: ranking order and over_limit skip reasons", async (t) => {
     ]
   );
   assert.equal(rendered.size, 12);
+  // 16 §8.5.4: rankAndCap is the analysis ceiling; its skip reason names analysing, not rendering.
   assert.equal(
     skipReasons.get("src/p3.tsx\u0000default"),
-    "over_limit: ranked 13 of 15; PRVision renders at most 12 components per visualization"
+    "over_limit: ranked 13 of 15; PRVision analyses at most 12 components per visualization"
   );
   assert.equal(skipReasons.size, 3);
 
-  // Service: 13 new components → one skipped with a warning.
-  const many = Array.from({ length: 13 }, (_, i) => `export const C${String(i).padStart(2, "0")} = () => <i/>;`).join(
+  // Service: 13 new components are all analysed now (16 E10: the 12-component pause moved to library resolution).
+  const thirteen = Array.from(
+    { length: 13 },
+    (_, i) => `export const C${String(i).padStart(2, "0")} = () => <i/>;`
+  ).join("\n");
+  const { result: all } = await analyze(t, {}, { "src/Many.tsx": thirteen });
+  assert.equal(all.candidates.length, 13);
+  assert.deepEqual(all.skipped, []);
+});
+
+test("analysis ceiling: at most ANALYSIS_MAX_CANDIDATES (500) candidates, the rest skipped with the 16 §8.5.4 reason", async (t) => {
+  const many = Array.from({ length: 501 }, (_, i) => `export const C${String(i).padStart(3, "0")} = () => <i/>;`).join(
     "\n"
   );
   const { result, ctx, persistence } = await analyze(t, {}, { "src/Many.tsx": many });
-  assert.equal(result.candidates.length, 12);
+  assert.equal(result.candidates.length, 500);
   assert.deepEqual(
     result.skipped.map((s) => [s.exportName, s.rank, s.skipReason]),
-    [["C12", 12, "over_limit: ranked 13 of 13; PRVision renders at most 12 components per visualization"]]
+    [["C500", 500, "over_limit: ranked 501 of 501; PRVision analyses at most 500 components per visualization"]]
   );
-  assert.ok(ctx.consoleEvents.some((e) => e.level === "warn" && e.message === "1 components were skipped (limit 12)."));
+  assert.ok(
+    ctx.consoleEvents.some((e) => e.level === "warn" && e.message === "1 components were skipped (limit 500).")
+  );
   const inserted = persistence.inserted[0] ?? [];
+  assert.equal(inserted.length, 501);
   assert.equal(inserted.filter((row) => row.renderStatus === "skipped").length, 1);
 });
 
@@ -436,17 +450,72 @@ test("throws ANALYSIS_PERSIST_FAILED when insert fails", async (t) => {
   });
 });
 
-test("warns about tailwind.config change outside src", async (t) => {
-  const { result, ctx } = await analyze(t, { "tailwind.config.ts": "a" }, { "tailwind.config.ts": "b" });
-  assert.deepEqual(result.changedFiles, [{ path: "tailwind.config.ts", status: "M" }]);
+test("no non-src warning for tailwind.config, index.html or package.json changes (16 §8.5.4); they stay in changedFiles", async (t) => {
+  const base = { "tailwind.config.ts": "a", "index.html": "<html></html>", "package.json": "{}" };
+  const head = { "tailwind.config.ts": "b", "index.html": "<html lang=en></html>", "package.json": '{"a":1}' };
+  const { result, ctx } = await analyze(t, base, head);
+  assert.deepEqual(result.changedFiles, [
+    { path: "index.html", status: "M" },
+    { path: "package.json", status: "M" },
+    { path: "tailwind.config.ts", status: "M" }
+  ]);
   assert.deepEqual(result.candidates, []);
-  assert.ok(
-    ctx.consoleEvents.some(
-      (e) =>
-        e.level === "warn" &&
-        e.message ===
-          "tailwind.config.ts changed. PRVision does not analyse it; components may look different for reasons not shown here."
-    )
+  assert.deepEqual(result.globalStyleChanges, []);
+  assert.deepEqual(
+    ctx.consoleEvents.filter((e) => e.level === "warn"),
+    [],
+    "the warning moved to library resolution's global style re-check"
+  );
+});
+
+const GLOBAL_STYLE_BASE: FileMap = {
+  "src/main.tsx": `import "./index.css";\nimport { App } from "./App";\nexport const root = App;\n`,
+  "src/App.tsx": `import { Card } from "./components/Card";\nexport const App = () => <Card/>;\n`,
+  "src/components/Card.tsx": `export const Card = () => <div className="card"/>;\n`,
+  "src/index.css": `body { font-size: 16px; }\n`
+};
+
+test("a global stylesheet change yields globalStyleChanges and no representative rows (16 §8.5.2, §8.5.4)", async (t) => {
+  const head = { ...GLOBAL_STYLE_BASE, "src/index.css": `body { font-size: 18px; }\n` };
+  for (const globalStylePaths of [["/src/index.css"], []]) {
+    // Listed in globalStylePaths, or only imported by non-component modules (the old fallback condition).
+    const { result, ctx } = await analyze(t, GLOBAL_STYLE_BASE, head, {
+      repo: { globalStylePaths, entryFilePath: "src/main.tsx" }
+    });
+    assert.deepEqual(result.candidates, [], `no representative rows (globalStylePaths ${globalStylePaths.join()})`);
+    assert.deepEqual(result.skipped, []);
+    assert.deepEqual(result.globalStyleChanges, ["src/index.css"]);
+    assert.equal(
+      ctx.consoleEvents.some((e) => e.message.includes("representative")),
+      false,
+      "no representative console line"
+    );
+  }
+});
+
+test("a changed partial @imported by a global stylesheet is a global style change; a component stylesheet is not", async (t) => {
+  const base: FileMap = {
+    ...GLOBAL_STYLE_BASE,
+    "src/App.tsx": `import "./index.css";\nimport { Card } from "./components/Card";\nexport const App = () => <Card/>;\n`,
+    "src/main.tsx": `import { App } from "./App";\nexport const root = App;\n`,
+    "src/index.css": `@import "./theme.css";\nbody { margin: 0; }\n`,
+    "src/theme.css": `:root { --radius: 4px; }\n`,
+    "src/components/Card.css": `.card { color: red; }\n`,
+    "src/components/Card.tsx": `import "./Card.css";\nexport const Card = () => <div className="card"/>;\n`
+  };
+  const head: FileMap = {
+    ...base,
+    "src/theme.css": `:root { --radius: 8px; }\n`,
+    "src/components/Card.css": `.card { color: blue; }\n`
+  };
+  const { result } = await analyze(t, base, head, { repo: { globalStylePaths: ["/src/index.css"] } });
+  assert.deepEqual(result.globalStyleChanges, ["src/theme.css"]);
+  assert.deepEqual(
+    result.candidates.map((c) => [c.filePath, c.exportName, c.changeKind]),
+    [
+      ["src/components/Card.tsx", "Card", "modified"],
+      ["src/App.tsx", "App", "affected_parent"]
+    ]
   );
 });
 

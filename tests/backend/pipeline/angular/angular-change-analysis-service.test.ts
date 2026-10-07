@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { MAX_COMPONENTS } from "../../../../backend/src/config-consts";
+import { ANALYSIS_MAX_CANDIDATES, MAX_COMPONENTS } from "../../../../backend/src/config-consts";
 import { Table } from "../../../../backend/src/enums";
 import { PipelineStepError } from "../../../../backend/src/types/visualization-pipeline";
 import { stubPersistence } from "../change-analysis/helpers/worktree-fixture";
@@ -238,51 +238,50 @@ test("AngularChangeAnalysisService.analyze reports per-class candidates for two 
   assert.equal(result.candidates[0]?.exportName, "BComponent");
 });
 
-test("AngularChangeAnalysisService.analyze shows representatives ordered by usage for a global stylesheet change", async (t) => {
+test("AngularChangeAnalysisService.analyze reports a global stylesheet change in globalStyleChanges and adds no representative rows (16 §8.5.4)", async (t) => {
   const host = `${APP_DIR}/shared/badge-host.component.ts`;
   const base = withChanges({
     [host]: `import { Component } from "@angular/core";\nimport { BadgeComponent } from "./badge/badge.component";\n@Component({ selector: "app-badge-host", imports: [BadgeComponent], template: '<app-badge label="a" /><app-badge label="b" />' })\nexport class BadgeHostComponent {}\n`
   });
   const head = withChanges({ [`${SRC}/styles.css`]: '@import "./styles/base.css";\n.card { padding: 2rem; }\n' }, base);
   const { result, ctx } = await analyzeAngular(t, base, head);
-  const reason = `Global stylesheet changed: ${SRC}/styles.css`;
-  assert.ok(result.candidates.every((c) => c.changeKind === "affected_parent" && c.reason === reason));
-  assert.deepEqual(
-    result.candidates.map((c) => c.displayName),
-    [
-      "BadgeComponent", // used by two components
-      "OrderListComponent", // used once each, then by path
-      "OrderSummaryComponent",
-      "LegacyChipComponent",
-      "AppComponent", // never used in a template: last, by path
-      "NotificationBellComponent",
-      "BadgeHostComponent",
-      "SignalCardComponent"
-    ]
-  );
+  assert.deepEqual(result.candidates, [], "no representative rows: library resolution re-checks the saved harnesses");
+  assert.deepEqual(result.skipped, []);
+  assert.deepEqual(result.globalStyleChanges, [`${SRC}/styles.css`]);
+  assert.deepEqual(result.changedFiles, [{ path: `${SRC}/styles.css`, status: "M" }]);
   assert.equal(
-    ctx.consoleEvents.filter((e) => e.message === "Global change: showing 8 widely used components.").length,
-    1,
-    "console info once"
+    ctx.consoleEvents.some((e) => e.message.startsWith("Global change: showing")),
+    false,
+    "no representative console line"
   );
 });
 
 test("AngularChangeAnalysisService.analyze treats a partial of a global stylesheet as a global style", async (t) => {
   const head = withChanges({ [`${SRC}/styles/base.css`]: "body { margin: 4px; }\n" });
   const { result } = await analyzeAngular(t, MAIN, head);
-  assert.equal(result.candidates[0]?.reason, `Global stylesheet changed: ${SRC}/styles/base.css`);
+  assert.deepEqual(result.globalStyleChanges, [`${SRC}/styles/base.css`]);
+  assert.deepEqual(result.candidates, []);
 });
 
-test("AngularChangeAnalysisService.analyze treats angular.json and tailwind config as build configuration changes", async (t) => {
+test("AngularChangeAnalysisService.analyze adds no rows for angular.json, tailwind config or index.html; they stay in changedFiles for the trigger check", async (t) => {
   const head = withChanges({ [`${APP}/tailwind.config.js`]: "module.exports = { content: [] };\n" });
   const { result } = await analyzeAngular(t, MAIN, head);
-  assert.equal(result.candidates[0]?.reason, `Build configuration changed: ${APP}/tailwind.config.js`);
+  assert.deepEqual(result.candidates, []);
+  assert.deepEqual(result.globalStyleChanges, [], "a config file is a trigger (16 §8.5.1), not a global stylesheet");
+  assert.deepEqual(result.changedFiles, [{ path: `${APP}/tailwind.config.js`, status: "M" }]);
   const { result: tsconfig } = await analyzeAngular(
     t,
     MAIN,
     withChanges({ [`${APP}/tsconfig.json`]: JSON.stringify({ compilerOptions: { strict: true } }) })
   );
-  assert.equal(tsconfig.candidates[0]?.reason, `Build configuration changed: ${APP}/tsconfig.json`);
+  assert.deepEqual(tsconfig.candidates, []);
+  const { result: index } = await analyzeAngular(
+    t,
+    MAIN,
+    withChanges({ [`${SRC}/index.html`]: "<!doctype html><html><body><app-root></app-root><!-- y --></body></html>\n" })
+  );
+  assert.deepEqual(index.candidates, [], "index.html produces no candidates");
+  assert.deepEqual(index.changedFiles, [{ path: `${SRC}/index.html`, status: "M" }]);
 });
 
 test("AngularChangeAnalysisService.analyze maps a changed asset to templates that reference it", async (t) => {
@@ -303,28 +302,49 @@ test("AngularChangeAnalysisService.analyze ignores files outside the app and the
   assert.equal(result.changedFiles.length, 3);
 });
 
-test("AngularChangeAnalysisService.analyze ranks and caps with 08's rankAndCap", async (t) => {
+function bulkComponents(count: number): { base: Record<string, string>; head: Record<string, string> } {
   const extra: Record<string, string> = {};
   const changed: Record<string, string> = {};
-  for (let index = 0; index < MAX_COMPONENTS + 2; index++) {
-    const path = `${APP_DIR}/bulk/c${String(index).padStart(2, "0")}.component.ts`;
+  for (let index = 0; index < count; index++) {
+    const path = `${APP_DIR}/bulk/c${String(index).padStart(3, "0")}.component.ts`;
     const body = (text: string): string =>
       `import { Component } from "@angular/core";\n@Component({ selector: "app-c${String(index)}", template: "<i>${text}</i>" })\nexport class C${String(index)}Component {}\n`;
     extra[path] = body("a");
     changed[path] = body("b");
   }
   const base = withChanges(extra);
+  return { base, head: withChanges(changed, base) };
+}
+
+test("AngularChangeAnalysisService.analyze ranks with 08's rankAndCap and no longer caps at MAX_COMPONENTS (16 E10)", async (t) => {
+  const { base, head } = bulkComponents(MAX_COMPONENTS + 2);
   const persistence = stubPersistence();
-  const { result, ctx } = await analyzeAngular(t, base, withChanges(changed, base), { persistence });
-  assert.equal(result.candidates.length, MAX_COMPONENTS);
-  assert.equal(result.skipped.length, 2);
-  assert.match(result.skipped[0]?.skipReason ?? "", /^over_limit: ranked 13 of 14;/);
-  assert.ok(
-    ctx.consoleEvents.some((e) => e.message === `2 components were skipped (limit ${String(MAX_COMPONENTS)}).`)
+  const { result } = await analyzeAngular(t, base, head, { persistence });
+  assert.equal(result.candidates.length, MAX_COMPONENTS + 2);
+  assert.deepEqual(result.skipped, []);
+  assert.deepEqual(
+    result.candidates.map((c) => c.rank),
+    Array.from({ length: MAX_COMPONENTS + 2 }, (_, index) => index)
   );
   const inserted = persistence.inserted[0] ?? [];
   assert.equal(inserted.length, MAX_COMPONENTS + 2);
-  assert.equal(inserted.filter((row) => row.renderStatus === "skipped").length, 2);
+  assert.equal(inserted.filter((row) => row.renderStatus === "skipped").length, 0);
+});
+
+test("AngularChangeAnalysisService.analyze caps at the analysis ceiling ANALYSIS_MAX_CANDIDATES (500)", async (t) => {
+  const { base, head } = bulkComponents(ANALYSIS_MAX_CANDIDATES + 1);
+  const persistence = stubPersistence();
+  const { result, ctx } = await analyzeAngular(t, base, head, { persistence });
+  assert.equal(result.candidates.length, ANALYSIS_MAX_CANDIDATES);
+  assert.equal(result.skipped.length, 1);
+  assert.equal(
+    result.skipped[0]?.skipReason,
+    "over_limit: ranked 501 of 501; PRVision analyses at most 500 components per visualization"
+  );
+  assert.ok(ctx.consoleEvents.some((e) => e.message === "1 components were skipped (limit 500)."));
+  const inserted = persistence.inserted[0] ?? [];
+  assert.equal(inserted.length, ANALYSIS_MAX_CANDIDATES + 1);
+  assert.equal(inserted.filter((row) => row.renderStatus === "skipped").length, 1);
 });
 
 test("AngularChangeAnalysisService.analyze persists rows through the shared helper", async (t) => {

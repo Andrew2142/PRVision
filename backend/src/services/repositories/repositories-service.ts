@@ -12,8 +12,14 @@ import {
   type RepositoryCommitsQueryDTO,
   type RepositoryView
 } from "../../dtos";
-import { DeletionMode, ErrorReason, Table, TERMINAL_VISUALIZATION_STATUSES } from "../../enums";
-import { RepositoryModel } from "../../models";
+import {
+  DeletionMode,
+  ErrorReason,
+  Table,
+  TERMINAL_VISUALIZATION_STATUSES,
+  VisualizationSourceType
+} from "../../enums";
+import { RepositoryModel, VisualizationModel } from "../../models";
 import {
   ArtifactStore,
   GitClient,
@@ -28,6 +34,7 @@ import {
   type GitCommitEntry
 } from "../../utilities";
 import { SettingsStore, type SecretRead } from "../settings/settings-store";
+import { removeWorkingTreeSnapshot } from "../visualizations/pipeline/workspace-prepare-service";
 import {
   ProjectDetectionService,
   suggestRenderViewport,
@@ -53,6 +60,8 @@ export interface RepositoriesServiceDependencies {
   /** GitHubClient.fromToken */
   githubClientFactory: (token: string) => Pick<GitHubClient, "listOpenPullRequests">;
   now: () => Date;
+  /** 16d block (16 §11.2): rm -rf `<dataDir>/snapshots/<id>/` of one of the repository's runs. */
+  removeWorkingTreeSnapshot: (visualizationId: number) => Promise<void>;
 }
 
 const STDERR_MESSAGE_MAX_CHARS = 200;
@@ -82,7 +91,8 @@ export class RepositoriesService {
       git: deps.git ?? new GitClient(),
       readGithubToken: deps.readGithubToken ?? (() => new SettingsStore().readGithubToken()),
       githubClientFactory: deps.githubClientFactory ?? ((token: string) => GitHubClient.fromToken(token)),
-      now: deps.now ?? (() => new Date())
+      now: deps.now ?? (() => new Date()),
+      removeWorkingTreeSnapshot: deps.removeWorkingTreeSnapshot ?? ((id) => removeWorkingTreeSnapshot(id))
     };
   }
 
@@ -326,6 +336,7 @@ export class RepositoriesService {
       }
 
       await this.removeAngularCache(repository.id);
+      await this.removeWorkingTreeSnapshots(repository.id); // 16d block
       this.log.info({ event: "repositories.repository.removed", repositoryId: repository.id }, "Repository removed");
       return { status: 200, data: { id: repository.id } };
     } catch (error: unknown) {
@@ -582,6 +593,34 @@ export class RepositoriesService {
   }
 
   /** Best effort: removes `<dataDir>/cache/angular/<id>` (15 §5.4.5); a failure is logged, never returned. */
+  // --- 16d block (16 §11.2): working-tree snapshots of the repository's runs are deleted with it (best effort) ---
+  private async removeWorkingTreeSnapshots(repositoryId: number): Promise<void> {
+    try {
+      // isDeleted given explicitly so soft-deleted runs' leftover snapshots are removed too
+      const runs = await this.deps.queryHandler.selectMany(
+        VisualizationModel,
+        { repositoryId, sourceType: VisualizationSourceType.WORKING_TREE, isDeleted: Where.isNotNull() },
+        Table.VISUALIZATIONS
+      );
+      for (const run of runs) {
+        try {
+          await this.deps.removeWorkingTreeSnapshot(run.id);
+        } catch (error: unknown) {
+          this.log.warn(
+            { event: "repositories.snapshot.remove_failed", repositoryId, visualizationId: run.id, err: error },
+            "Working-tree snapshot could not be removed"
+          );
+        }
+      }
+    } catch (error: unknown) {
+      this.log.warn(
+        { event: "repositories.snapshot.remove_failed", repositoryId, err: error },
+        "Working-tree snapshots could not be listed"
+      );
+    }
+  }
+  // --- end 16d block ---
+
   private async removeAngularCache(repositoryId: number): Promise<void> {
     try {
       const cacheDir = this.deps.artifacts.resolveSafe(`${ANGULAR_CACHE_DIR_NAME}/${String(repositoryId)}`);

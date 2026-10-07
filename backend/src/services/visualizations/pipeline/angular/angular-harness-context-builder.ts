@@ -38,6 +38,7 @@ import {
   truncateLinesDetailed,
   truncateSourceDetailed,
   truncateToTokens,
+  type HarnessContextOptions,
   type MergedImport,
   type SectionDraft,
   type SectionId,
@@ -389,9 +390,10 @@ export class AngularHarnessContextBuilder {
   /**
    * Assembles and budgets the context package.
    *
+   * @param options - 16 §8.6.2: purpose and state allowance; default change review with the repository's allowance.
    * @throws Error when the component file exists on neither side (the caller records a context_error).
    */
-  async build(candidate: ComponentCandidate): Promise<AngularHarnessContextPackage> {
+  async build(candidate: ComponentCandidate, options?: HarnessContextOptions): Promise<AngularHarnessContextPackage> {
     const paths = await this.queries.componentPaths(candidate.filePath);
     const sidesPresent = { base: paths.base !== null, head: paths.head !== null };
     if (!sidesPresent.base && !sidesPresent.head) {
@@ -482,8 +484,8 @@ export class AngularHarnessContextBuilder {
       directImports,
       sections: [],
       estimatedTokens: 0,
-      purpose: "change", // 16a shim: 16d adds the library purpose
-      stateAllowance: this.ctx.library.stateAllowance,
+      purpose: options?.purpose ?? "change",
+      stateAllowance: options?.stateAllowance ?? this.ctx.library.stateAllowance,
       angular: { className, selector: meta?.selector ?? null, appRoot }
     };
     const budgeted = applyBudget(

@@ -4,6 +4,7 @@
  * Pure helpers exported here are also used by sheets 10 and 11: `classifySourcePath`, `buildUnifiedDiff`,
  * `truncateDiff`, `basePathFor`, `headPathFor` and `readConfinedText` (the single confinement helper of 08 §8).
  */
+import { createHash } from "node:crypto";
 import type { Dirent } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -419,6 +420,94 @@ function toPosixRelative(from: string, to: string): string {
   return path.relative(from, to).split(path.sep).join("/");
 }
 
+/**
+ * What a working-tree run compares outside the source root (16 §8.5.3): the app root (for the app-level folders),
+ * the Vite config (its folder's index.html) and the repository's global stylesheets.
+ */
+export interface WorkingTreeTriggerScope {
+  appRoot: string;
+  viteConfigPath: string | null;
+  globalStylePaths: readonly string[];
+}
+
+const TRIGGER_BASENAMES: readonly string[] = [
+  ...["js", "cjs", "mjs", "ts", "cts", "mts"].map((ext) => `tailwind.config.${ext}`),
+  ...["js", "cjs", "mjs", "ts", "cts", "mts", "json"].map((ext) => `postcss.config.${ext}`),
+  ".postcssrc",
+  ...["json", "yaml", "yml", "js", "cjs", "mjs"].map((ext) => `.postcssrc.${ext}`),
+  "index.html",
+  "src/index.html",
+  "angular.json"
+];
+
+function triggerFolder(folder: string): string {
+  const normalized = path.posix.normalize(folder.replace(/\\/g, "/")).replace(/\/+$/, "");
+  return normalized === "." ? "" : normalized.replace(/^\.\//, "");
+}
+
+function joinFolder(folder: string, name: string): string {
+  return folder === "" ? name : `${folder}/${name}`;
+}
+
+/**
+ * Repo-relative candidate trigger files of a working-tree run (16 §8.5.3): for every app-level folder (the
+ * repository root, the app root and every folder between) the fixed config basenames, `index.html`,
+ * `src/index.html` and `angular.json`; the Vite root's `index.html`; and every repo file named by
+ * `globalStylePaths`. Sorted, unique, unsafe paths dropped.
+ */
+export function workingTreeTriggerCandidates(scope: WorkingTreeTriggerScope): string[] {
+  const appRoot = triggerFolder(scope.appRoot);
+  const folders = [""];
+  if (appRoot !== "") {
+    const segments = appRoot.split("/");
+    for (let index = 1; index <= segments.length; index++) {
+      folders.push(segments.slice(0, index).join("/"));
+    }
+  }
+  const out = new Set<string>();
+  for (const folder of folders) {
+    for (const name of TRIGGER_BASENAMES) {
+      out.add(joinFolder(folder, name));
+    }
+  }
+  if (scope.viteConfigPath !== null) {
+    out.add(joinFolder(triggerFolder(path.posix.dirname(scope.viteConfigPath)), "index.html"));
+  }
+  for (const specifier of scope.globalStylePaths) {
+    if (specifier.startsWith("/")) {
+      out.add(specifier.slice(1));
+    }
+  }
+  return [...out].filter(isSafeRepoPath).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+}
+
+/** A regular file's size and sha256, null when absent; "other" for symlinks and non-files (ignored, 16 §8.5.3). */
+async function regularFileDigest(
+  root: string,
+  repoPath: string
+): Promise<{ size: number; hash: () => Promise<string> } | null | "other"> {
+  const absolute = path.join(root, repoPath);
+  if (!isPathInside(root, absolute)) {
+    return "other";
+  }
+  let stats;
+  try {
+    stats = await fs.lstat(absolute);
+  } catch {
+    return null;
+  }
+  if (!stats.isFile()) {
+    return "other";
+  }
+  return {
+    size: stats.size,
+    hash: async () =>
+      createHash("sha256")
+        .update(await fs.readFile(absolute))
+        .digest("hex")
+  };
+}
+
 /** Changed-file discovery for commit and working-tree modes (08 §5.4) and side-aware reads (08 §5.6). */
 export class ChangeSource {
   /** git's similarity (percent) of every reported rename, by `<previousPath>\0<path>` (00 §17 `git_rename`). */
@@ -428,7 +517,9 @@ export class ChangeSource {
     private readonly git: Pick<GitClient, "diffNameStatus" | "diffNameStatusNoIndex">,
     private readonly workspace: PreparedWorkspace,
     private readonly signal: AbortSignal,
-    private readonly sourceRoot: string = ANALYSIS_SOURCE_ROOT
+    private readonly sourceRoot: string = ANALYSIS_SOURCE_ROOT,
+    /** 16 §8.5.3: trigger files outside the source root compared on working-tree runs; absent = none. */
+    private readonly triggerScope: WorkingTreeTriggerScope | null = null
   ) {}
 
   /**
@@ -496,7 +587,51 @@ export class ChangeSource {
     };
   }
 
+  /** Source-root directory diff plus the trigger files outside it (16 §8.5.3). */
   private async listWorkingTreeChanges(): Promise<RawChange[]> {
+    const changes = await this.listWorkingTreeSourceChanges();
+    const triggers = await this.listWorkingTreeTriggerChanges(new Set(changes.map((change) => change.path)));
+    if (triggers.length === 0) {
+      return changes;
+    }
+    return [...changes, ...triggers].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  }
+
+  /**
+   * 16 §8.5.3: compares the candidate trigger files outside the source root between the two worktrees (lstat,
+   * size, then sha256). One side only → A/D, different content → M. Symlinks and non-files are ignored. No git
+   * command, nothing written.
+   */
+  private async listWorkingTreeTriggerChanges(known: ReadonlySet<string>): Promise<RawChange[]> {
+    if (this.triggerScope === null) {
+      return [];
+    }
+    const { baseDir, headDir } = this.workspace;
+    const out: RawChange[] = [];
+    for (const candidate of workingTreeTriggerCandidates(this.triggerScope)) {
+      this.signal.throwIfAborted();
+      if (known.has(candidate) || candidate.startsWith(`${this.sourceRoot}/`)) {
+        continue; // the source-root directory diff already covers it
+      }
+      const [base, head] = await Promise.all([
+        regularFileDigest(baseDir, candidate),
+        regularFileDigest(headDir, candidate)
+      ]);
+      if (base === "other" || head === "other" || (base === null && head === null)) {
+        continue;
+      }
+      if (base === null) {
+        out.push({ path: candidate, status: "A" });
+      } else if (head === null) {
+        out.push({ path: candidate, status: "D" });
+      } else if (base.size !== head.size || (await base.hash()) !== (await head.hash())) {
+        out.push({ path: candidate, status: "M" });
+      }
+    }
+    return out;
+  }
+
+  private async listWorkingTreeSourceChanges(): Promise<RawChange[]> {
     const { baseDir, headDir } = this.workspace;
     const [baseHasSrc, headHasSrc] = await Promise.all([
       directoryExists(path.join(baseDir, this.sourceRoot)),

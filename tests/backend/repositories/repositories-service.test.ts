@@ -662,3 +662,61 @@ test("unexpected failures return 500 internal_error and every error response car
     assert.ok(response.error_reason && ERROR_REASON_VALUES.includes(response.error_reason), JSON.stringify(response));
   }
 });
+
+test("remove deletes the working-tree snapshot folders of the repository's runs (soft-deleted runs too), best effort (16 §11.2)", async () => {
+  const h = harness();
+  h.stub.seed(Table.REPOSITORIES, [makeRepositoryRow({ id: 1 }), makeRepositoryRow({ id: 2, localPath: "/r/2" })]);
+  const done = new Date("2026-01-02T00:00:00Z");
+  h.stub.seed(Table.VISUALIZATIONS, [
+    makeVisualizationRow({
+      id: 3,
+      repositoryId: 1,
+      sourceType: "working_tree",
+      prNumber: null,
+      status: "completed",
+      completedAt: done
+    }),
+    makeVisualizationRow({
+      id: 4,
+      repositoryId: 1,
+      sourceType: "working_tree",
+      prNumber: null,
+      status: "failed",
+      completedAt: done,
+      isDeleted: true
+    }),
+    makeVisualizationRow({
+      id: 5,
+      repositoryId: 1,
+      sourceType: "local_branch",
+      prNumber: null,
+      status: "completed",
+      completedAt: done
+    }),
+    makeVisualizationRow({
+      id: 6,
+      repositoryId: 2,
+      sourceType: "working_tree",
+      prNumber: null,
+      status: "completed",
+      completedAt: done
+    })
+  ]);
+  const removed: number[] = [];
+  const response = await call(() =>
+    h
+      .service(idModel(1), {
+        removeWorkingTreeSnapshot: (id) => {
+          removed.push(id);
+          return id === 3 ? Promise.reject(new Error("EACCES")) : Promise.resolve();
+        }
+      })
+      .remove()
+  );
+  assert.deepEqual(response, { status: 200, data: { id: 1 } });
+  assert.deepEqual(
+    removed.sort(),
+    [3, 4],
+    "only working-tree runs of this repository; a failure does not stop the rest"
+  );
+});

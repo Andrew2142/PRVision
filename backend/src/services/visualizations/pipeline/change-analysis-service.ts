@@ -1,7 +1,8 @@
 /**
  * ChangeAnalysisService (08): decides which React components a change touches, persists one
- * `visualization_components` row per component and returns a ranked, capped `ChangeAnalysisResult` whose
- * `sourceQueries` object is the only hand-off to sheet 09 (00 §14.7).
+ * `visualization_components` row per component and returns a ranked `ChangeAnalysisResult` (every candidate up to
+ * ANALYSIS_MAX_CANDIDATES, 16 E10) whose `sourceQueries` object is the only hand-off to sheet 09 (00 §14.7). Which
+ * candidates get a new harness, and the component pause, are decided afterwards by library resolution (16 §8.4).
  *
  * Everything is static analysis; nothing in the target repo is executed (08 §8).
  */
@@ -11,6 +12,7 @@ import type ts from "typescript";
 import {
   AFFECTED_PARENT_MAX_DEPTH,
   ANALYSIS_GRAPH_BUDGET_MS,
+  ANALYSIS_MAX_CANDIDATES,
   ANALYSIS_MAX_CHANGED_FILES,
   ANALYSIS_MAX_FILE_BYTES,
   ANALYSIS_MAX_PARSED_FILES,
@@ -18,7 +20,6 @@ import {
   ANALYSIS_TIMEOUT_MS,
   CHANGED_FILES_MAX_ENTRIES,
   CODE_DIFF_MAX_LINES,
-  MAX_COMPONENTS,
   MAX_PARENTS_PER_MODULE
 } from "../../../config-consts";
 import type { DraftCandidate, ExportInfo, FileChange, Seed, Side } from "../../../types/change-analysis";
@@ -73,7 +74,7 @@ export interface ChangeAnalysisDeps {
 const STAGE = "analyzing";
 const CONSOLE_MAX_CHARS = 500;
 const REASON_MAX_CHARS = 300;
-const NON_SRC_WARNING = /^(tailwind|postcss|vite)\.config\.[cm]?[jt]s$/;
+const STYLE_SEED = /\.(css|scss)$/;
 const KIND_ORDER: Record<DraftCandidate["changeKind"], number> = {
   modified: 0,
   added: 1,
@@ -134,10 +135,13 @@ function compareDrafts(a: DraftCandidate, b: DraftCandidate): number {
   return byString(a.exportName, b.exportName);
 }
 
-/** Ranks drafts (08 §5.12) and splits them into rendered and skipped with skip reasons. */
+/**
+ * Ranks drafts (08 §5.12) and splits them into kept and skipped with skip reasons. The cap is the analysis ceiling
+ * ANALYSIS_MAX_CANDIDATES (16 E10); the new-harness limit and the pause are library resolution's (16 §8.4).
+ */
 export function rankAndCap(
   drafts: readonly DraftCandidate[],
-  maxComponents: number = MAX_COMPONENTS
+  maxComponents: number = ANALYSIS_MAX_CANDIDATES
 ): { ordered: DraftCandidate[]; rendered: Set<string>; skipReasons: Map<string, string> } {
   const ordered = [...drafts].sort(compareDrafts);
   const rendered = new Set<string>();
@@ -151,10 +155,36 @@ export function rankAndCap(
     skipReasons.set(
       key,
       draft.forcedSkipReason ??
-        `over_limit: ranked ${String(rank + 1)} of ${String(ordered.length)}; PRVision renders at most ${String(maxComponents)} components per visualization`
+        `over_limit: ranked ${String(rank + 1)} of ${String(ordered.length)}; PRVision analyses at most ${String(maxComponents)} components per visualization`
     );
   });
   return { ordered, rendered, skipReasons };
+}
+
+/**
+ * True when a stylesheet that (transitively) `@import`s / `@use`s `stylePath` through style edges satisfies
+ * `isGlobal` (16 §8.5.2 "style-import closure parents"). Cycles are followed once.
+ */
+function styleClosureReaches(graph: ImportGraph, stylePath: string, isGlobal: (path: string) => boolean): boolean {
+  const visited = new Set<string>([stylePath]);
+  const queue = [stylePath];
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (current === undefined) {
+      break;
+    }
+    for (const edge of graph.importersOf(current)) {
+      if (edge.kind !== "style" || !STYLE_SEED.test(edge.from) || visited.has(edge.from)) {
+        continue;
+      }
+      if (isGlobal(edge.from)) {
+        return true;
+      }
+      visited.add(edge.from);
+      queue.push(edge.from);
+    }
+  }
+  return false;
 }
 
 function seedReasonLabel(path: string, names: Set<string> | "*"): string {
@@ -305,7 +335,11 @@ export class ChangeAnalysisService {
     );
 
     // 1. changed files
-    const source = new ChangeSource(this.deps.gitClient, workspace, run.signal, run.sourceRoot);
+    const source = new ChangeSource(this.deps.gitClient, workspace, run.signal, run.sourceRoot, {
+      appRoot: repository.appRoot,
+      viteConfigPath: repository.viteConfigPath,
+      globalStylePaths: repository.globalStylePaths
+    });
     const rawChanges = await source.listChanges();
     let changedFiles: ChangeAnalysisResult["changedFiles"] = rawChanges.map((change) =>
       change.previousPath === undefined
@@ -329,14 +363,8 @@ export class ChangeAnalysisService {
     let analysable = rawChanges.filter(
       (change) => classifySourcePath(change.path, { sourceRoot: run.sourceRoot }).analysable
     );
-    for (const change of rawChanges) {
-      if (NON_SRC_WARNING.test(change.path) || change.path === "index.html" || change.path === "package.json") {
-        await this.warn(
-          run,
-          `${change.path} changed. PRVision does not analyse it; components may look different for reasons not shown here.`
-        );
-      }
-    }
+    // 16 §8.5.4: config files and index.html outside src/ no longer warn here; library resolution re-checks the
+    // saved harnesses when they are global style triggers.
     await this.info(
       run,
       `${String(rawChanges.length)} changed files, ${String(analysable.length)} of them React/TS/CSS sources under src/`
@@ -432,17 +460,16 @@ export class ChangeAnalysisService {
     }
     await this.checkpoint(run);
 
-    // 8. propagation
-    if (headGraph !== null) {
-      await this.propagate(run, headGraph, seeds, changes, drafts);
-    }
+    // 8. propagation (and the global stylesheets of 16 §8.5.2)
+    const globalStyleChanges =
+      headGraph !== null ? await this.propagate(run, headGraph, seeds, changes, drafts) : new Set<string>();
 
     // 8b. successor matching (00 §17): removed + added pairs become one `replaced` draft
     await this.matchReplacements(run, source, changes, rawChanges, drafts, headResolver);
     await this.checkpoint(run);
 
-    // 9. rank and cap
-    const limit = run.ctx.componentLimit ?? MAX_COMPONENTS;
+    // 9. rank and cap at the analysis ceiling (16 E10)
+    const limit = ANALYSIS_MAX_CANDIDATES;
     const { ordered, rendered, skipReasons } = rankAndCap([...drafts.values()], limit);
     const skippedCount = ordered.length - rendered.size;
     if (skippedCount > 0) {
@@ -504,13 +531,12 @@ export class ChangeAnalysisService {
       sourceRoot: run.sourceRoot,
       now: () => this.deps.now()
     });
-    // 16a compile shim (16 §6.12): 16d fills globalStyleChanges (§8.5.2).
     return {
       candidates,
       skipped,
       changedFiles,
       sourceQueries: new AnalysisSourceQueries(state),
-      globalStyleChanges: []
+      globalStyleChanges: [...globalStyleChanges].sort(byString)
     };
   }
 
@@ -721,17 +747,22 @@ export class ChangeAnalysisService {
     return true;
   }
 
-  /** Step 8 (08 §5.11): style ownership, affected parents and global stylesheet fallback. */
+  /**
+   * Step 8 (08 §5.11): style ownership and affected parents. Returns the changed stylesheets that are global
+   * (16 §8.5.2): `Seed.global` ones, those whose head importers are only non-component modules (the old
+   * representative-fallback condition), and changed partials whose style-import closure reaches either. No
+   * representative rows are added any more (16 §8.5.4): library resolution re-checks the saved harnesses instead.
+   */
   private async propagate(
     run: RunState,
     graph: ImportGraph,
     seeds: readonly Seed[],
     changes: ReadonlyMap<string, FileChange>,
     drafts: Map<string, DraftCandidate>
-  ): Promise<void> {
+  ): Promise<Set<string>> {
     const extraSeeds = new Map<string, number>();
     const directKeys = new Set(drafts.keys());
-    const entryFilePath = run.ctx.repository.entryFilePath;
+    const global = new Set<string>();
     for (const seed of [...seeds].sort((a, b) => byString(a.path, b.path))) {
       const parents = graph.findAffectedParents(seed, {
         maxDepth: AFFECTED_PARENT_MAX_DEPTH,
@@ -739,7 +770,7 @@ export class ChangeAnalysisService {
         isAlreadyCovered: (path, exportName) => directKeys.has(keyOf({ filePath: path, exportName }))
       });
       const rendered: string[] = [];
-      const seedIsStyle = /\.(css|scss)$/.test(seed.path);
+      const seedIsStyle = STYLE_SEED.test(seed.path);
       const styleDiff = changes.get(seed.path)?.codeDiff ?? "";
       for (const parent of parents) {
         const key = keyOf({ filePath: parent.path, exportName: parent.exportInfo.exportName });
@@ -785,26 +816,8 @@ export class ChangeAnalysisService {
           forcedSkipReason: null
         });
       }
-      const importers = graph.importersOf(seed.path);
-      if (parents.length === 0 && entryFilePath !== null && (seed.global || (seedIsStyle && importers.length > 0))) {
-        for (const representative of graph.componentsFromEntry(entryFilePath, {
-          maxDepth: 3,
-          limit: MAX_PARENTS_PER_MODULE
-        })) {
-          const key = keyOf({ filePath: representative.path, exportName: representative.exportInfo.exportName });
-          rendered.push(representative.exportInfo.displayName);
-          this.addParent(drafts, extraSeeds, key, {
-            filePath: representative.path,
-            exportName: representative.exportInfo.exportName,
-            displayName: representative.exportInfo.displayName,
-            changeKind: "affected_parent",
-            codeDiff: changes.get(seed.path)?.codeDiff ?? null,
-            reason: clip(`Global stylesheet ${seed.path} changed; representative component`, REASON_MAX_CHARS),
-            diffSize: seed.changedLines,
-            depth: Math.max(1, representative.depth),
-            forcedSkipReason: null
-          });
-        }
+      if (seedIsStyle && (seed.global || (parents.length === 0 && graph.importersOf(seed.path).length > 0))) {
+        global.add(seed.path);
       }
       const unique = [...new Set(rendered)];
       await this.info(
@@ -820,6 +833,15 @@ export class ChangeAnalysisService {
         draft.reason = `${draft.reason} (+${String(extra)} more changed modules)`;
       }
     }
+    const globalSpecifiers = new Set(run.ctx.repository.globalStylePaths);
+    for (const seed of seeds) {
+      if (STYLE_SEED.test(seed.path) && !global.has(seed.path)) {
+        if (styleClosureReaches(graph, seed.path, (path) => global.has(path) || globalSpecifiers.has(`/${path}`))) {
+          global.add(seed.path);
+        }
+      }
+    }
+    return global;
   }
 
   private addParent(

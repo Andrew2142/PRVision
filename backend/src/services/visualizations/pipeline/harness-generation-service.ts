@@ -4,8 +4,10 @@
  * repairHarness() after a render failure.
  *
  * - generateAll persists every generation outcome (harness fields, or render_status skipped/failed with the side
- *   errors for components that never render, 00 §14.7) and throws only PipelineStepError (auth/config AI errors,
- *   persistence failures).
+ *   errors for components that never render, 00 §14.7) through a HarnessResultPersistence (default: the
+ *   visualization_components row; scans pass NoopHarnessPersistence, 16 §8.6.1) and throws only PipelineStepError
+ *   (auth/config AI errors, persistence failures). Options (16 §8.6.1) pick the sides to write per row, the state
+ *   allowance and the prompt purpose; `shouldStartCall` (scans' spending cap, 16 §10.5) can stop new AI calls.
  * - repairHarness never writes visualization_components and never throws: 10 persists the attempt it keeps.
  * - Every AI call's usage, including usage attached to AiProviderError, goes through AiUsageRecorder.
  */
@@ -37,7 +39,12 @@ import {
 } from "../../../types/visualization-pipeline";
 import { QueryHandler, ZERO_USAGE, addUsage, createLogger, getErrorMessage, redactSecrets } from "../../../utilities";
 import { AiUsageRecorder } from "./ai-usage-recorder";
-import { HarnessContextBuilder, SafeFileReader, type HarnessContextPackage } from "./harness-context-builder";
+import {
+  HarnessContextBuilder,
+  SafeFileReader,
+  type HarnessContextOptions,
+  type HarnessContextPackage
+} from "./harness-context-builder";
 import { REACT_HARNESS_PROMPTS, type HarnessAiResponse, type HarnessPromptSet } from "./harness-prompts";
 import {
   HarnessValidator,
@@ -60,6 +67,48 @@ const UNKNOWN_MESSAGE_MAX_CHARS = 200;
 const TRUNCATED_SUFFIX = "… [truncated]";
 const NOT_RENDERED_ERROR = "Not rendered: harness generation failed.";
 
+/** Options of one generateAll call (16 §8.6.1). */
+export interface HarnessGenerationOptions {
+  /** Maximum number of states per harness; default ctx.library.stateAllowance. */
+  stateAllowance: number;
+  /** Prompt purpose; default `ctx.libraryJob ? "library" : "change"`. */
+  purpose: "change" | "library";
+  /** Sides to write per componentId; absent = every side the row needs (today). Only `replaced` rows have two. */
+  sides?: ReadonlyMap<number, readonly WorktreeSide[]>;
+}
+
+/** Where generation outcomes are written (16 §8.6.1). */
+export interface HarnessResultPersistence {
+  /** Writes one row's generation outcome (harness columns, or the failure status). Throws on failure. */
+  saveGenerated(componentId: number, values: Record<string, unknown>): Promise<void>;
+}
+
+/** Default persistence: one update of the run's visualization_components row (09 §5.11). */
+export class QueryHandlerHarnessPersistence implements HarnessResultPersistence {
+  constructor(
+    private readonly visualizationId: number,
+    private readonly queryHandler: QueryHandler = new QueryHandler()
+  ) {}
+
+  async saveGenerated(componentId: number, values: Record<string, unknown>): Promise<void> {
+    const response = await this.queryHandler.update(
+      values,
+      { id: componentId, visualizationId: this.visualizationId },
+      Table.VISUALIZATION_COMPONENTS
+    );
+    if (response.status !== 200) {
+      throw new Error(`Saving harness results failed (${String(response.status)})`);
+    }
+  }
+}
+
+/** Writes nothing: scans keep results in memory and save them to the library themselves (16 §10.4). */
+export class NoopHarnessPersistence implements HarnessResultPersistence {
+  saveGenerated(): Promise<void> {
+    return Promise.resolve();
+  }
+}
+
 /** Injectable collaborators (tests); every field defaults to the real implementation. */
 export interface HarnessGenerationDeps {
   queryHandler?: QueryHandler;
@@ -68,7 +117,12 @@ export interface HarnessGenerationDeps {
   validator?: Pick<HarnessValidator, "validate">;
   /** System prompt, schema and prompt builders (15 §5.6.2); default REACT_HARNESS_PROMPTS. */
   prompts?: HarnessPromptSet;
-  usageRecorder?: AiUsageRecorder;
+  /** Default AiUsageRecorder of the visualization; scans pass a job recorder (16 §8.6.1). */
+  usageRecorder?: Pick<AiUsageRecorder, "add">;
+  /** Default QueryHandlerHarnessPersistence (the run's component rows). */
+  persistence?: HarnessResultPersistence;
+  /** Checked before every AI call (corrections and repairs included); false stops like cancellation (16 §10.5). */
+  shouldStartCall?: () => Promise<boolean>;
   sleep?: (ms: number, signal: AbortSignal) => Promise<void>; // abortable; tests inject instant sleep
   now?: () => number;
 }
@@ -81,6 +135,7 @@ class HarnessPersistError extends Error {
 type AiCallOutcome =
   | { kind: "data"; data: HarnessAiResponse }
   | { kind: "cancelled" }
+  | { kind: "stopped" } // shouldStartCall refused the call (spending cap)
   | { kind: "fatal"; error: PipelineStepError }
   | { kind: "error"; error: AiProviderError }
   | { kind: "budget_exhausted" };
@@ -91,17 +146,20 @@ interface AiCallContext {
   displayName: string;
   signal: AbortSignal;
   budget: { calls: number; readonly max: number };
+  /** Usage of every call made for this harness (16 §8.6.1). */
+  usage: AiUsage;
 }
 
 type GenerationOutcome =
   | { kind: "ok"; result: HarnessGenerationResult }
   | { kind: "failure"; failure: HarnessGenerationFailure }
   | { kind: "cancelled" }
+  | { kind: "stopped" }
   | { kind: "fatal"; error: PipelineStepError };
 
 /** Outcome of one harness (one component side) before anything is persisted. */
 type HarnessAttempt =
-  | { kind: "ok"; harness: SideHarness; calls: number; warnings: number }
+  | { kind: "ok"; harness: SideHarness; calls: number; warnings: number; usage: AiUsage }
   | { kind: "cannot_render"; response: HarnessAiResponse }
   | {
       kind: "failed";
@@ -113,7 +171,13 @@ type HarnessAttempt =
       issues: readonly HarnessValidationIssue[];
     }
   | { kind: "cancelled" }
+  | { kind: "stopped" }
   | { kind: "fatal"; error: PipelineStepError };
+
+/** A finished (not cancelled, stopped or fatal) attempt of one side. */
+type SettledAttempt = Exclude<HarnessAttempt, { kind: "cancelled" | "stopped" | "fatal" }>;
+
+const SIDE_ORDER: readonly WorktreeSide[] = ["head", "base"];
 
 /** Key of a context package: the component id, plus `:base` for the base harness of a `replaced` row (00 §17). */
 function packageKey(componentId: number, side: WorktreeSide = "head"): string {
@@ -207,10 +271,14 @@ export class HarnessGenerationService {
   private readonly contextBuilder: Pick<HarnessContextBuilder, "build">;
   private readonly validator: Pick<HarnessValidator, "validate">;
   private readonly prompts: HarnessPromptSet;
-  private readonly usageRecorder: AiUsageRecorder;
+  private readonly usageRecorder: Pick<AiUsageRecorder, "add">;
+  private readonly persistence: HarnessResultPersistence;
+  private readonly shouldStartCall: (() => Promise<boolean>) | null;
   private readonly sleep: (ms: number, signal: AbortSignal) => Promise<void>;
   private readonly now: () => number;
   private stageUsage: AiUsage = ZERO_USAGE;
+  /** Options of the running generateAll call (repairs use the defaults). */
+  private options: HarnessGenerationOptions;
 
   constructor(
     private readonly ctx: PipelineContext,
@@ -225,6 +293,9 @@ export class HarnessGenerationService {
       new HarnessValidator(queries, (side, repoRelativePath) => reader.exists(side, repoRelativePath));
     this.prompts = deps.prompts ?? REACT_HARNESS_PROMPTS;
     this.usageRecorder = deps.usageRecorder ?? new AiUsageRecorder(ctx.visualizationId, this.queryHandler);
+    this.persistence = deps.persistence ?? new QueryHandlerHarnessPersistence(ctx.visualizationId, this.queryHandler);
+    this.shouldStartCall = deps.shouldStartCall ?? null;
+    this.options = this.defaultOptions();
     this.sleep = deps.sleep ?? ((ms, signal) => delay(ms, undefined, { signal }));
     this.now = deps.now ?? Date.now;
     this.log = createLogger("pipeline.harness", { visualizationId: ctx.visualizationId });
@@ -233,13 +304,19 @@ export class HarnessGenerationService {
   /**
    * Generates a validated harness for every candidate, in rank order: the first one alone, then up to the
    * provider's concurrency. Per-component failures are persisted and returned; cancellation returns
-   * `cancelled: true` without throwing.
+   * `cancelled: true` (stopReason "cancelled") without throwing; a refused AI call (`shouldStartCall`) stops
+   * starting work and returns stopReason "spend_cap" while calls in flight finish (16 §10.5).
    *
+   * @param options - 16 §8.6.1: sides to write per row, state allowance and prompt purpose.
    * @throws PipelineStepError (stage generating_harnesses) for auth/config AI errors and persistence failures.
    */
-  async generateAll(candidates: readonly ComponentCandidate[]): Promise<HarnessGenerationBatchResult> {
+  async generateAll(
+    candidates: readonly ComponentCandidate[],
+    options: Partial<HarnessGenerationOptions> = {}
+  ): Promise<HarnessGenerationBatchResult> {
     const ordered = [...candidates].sort((a, b) => a.rank - b.rank);
     this.stageUsage = ZERO_USAGE;
+    this.options = { ...this.defaultOptions(), ...options };
     if (ordered.length === 0) {
       await this.ctx.console.info(STAGE, "No components to generate harnesses for.");
       return { results: [], failures: [], usage: ZERO_USAGE, cancelled: false };
@@ -258,10 +335,10 @@ export class HarnessGenerationService {
 
     const internal = new AbortController();
     const signal = AbortSignal.any([this.ctx.signal, internal.signal]); // Node ≥ 22.12
-    const state: { fatal: PipelineStepError | null } = { fatal: null };
+    const state: { fatal: PipelineStepError | null; spendCap: boolean } = { fatal: null, spendCap: false };
     const results: HarnessGenerationResult[] = [];
     const failures: HarnessGenerationFailure[] = [];
-    const stop = (): boolean => state.fatal !== null || signal.aborted;
+    const stop = (): boolean => state.fatal !== null || state.spendCap || signal.aborted;
 
     const processOne = async (candidate: ComponentCandidate): Promise<void> => {
       if (stop()) {
@@ -287,6 +364,9 @@ export class HarnessGenerationService {
         case "cancelled":
           internal.abort("cancelled");
           return;
+        case "stopped":
+          state.spendCap = true; // calls in flight finish; nothing new starts (16 E16)
+          return;
         case "fatal":
           if (state.fatal === null) {
             state.fatal = outcome.error;
@@ -306,7 +386,7 @@ export class HarnessGenerationService {
       throw state.fatal; // every in-flight call has settled; nothing else is persisted
     }
 
-    const cancelled = this.ctx.signal.aborted || (await this.ctx.isCancelled());
+    const cancelled = !state.spendCap && (this.ctx.signal.aborted || (await this.ctx.isCancelled()));
     const rank = new Map(ordered.map((candidate) => [candidate.componentId, candidate.rank]));
     results.sort((a, b) => (rank.get(a.componentId) ?? 0) - (rank.get(b.componentId) ?? 0));
     const skipped = failures.filter((failure) => failure.kind === "cannot_render").length;
@@ -326,7 +406,11 @@ export class HarnessGenerationService {
       },
       "Harness generation finished"
     );
-    return { results, failures, usage, cancelled };
+    if (state.spendCap) {
+      await this.ctx.console.warn(STAGE, "Stopped starting new AI calls: the spending cap was reached.");
+      return { results, failures, usage, cancelled: false, stopReason: "spend_cap" };
+    }
+    return { results, failures, usage, cancelled, ...(cancelled ? { stopReason: "cancelled" as const } : {}) };
   }
 
   /**
@@ -388,6 +472,7 @@ export class HarnessGenerationService {
     const attempt = await this.generateHarness(candidate, signal, packageKey(candidate.componentId));
     switch (attempt.kind) {
       case "cancelled":
+      case "stopped":
       case "fatal":
         return attempt;
       case "cannot_render":
@@ -405,7 +490,11 @@ export class HarnessGenerationService {
       case "ok":
         break;
     }
-    const result: HarnessGenerationResult = { componentId: candidate.componentId, ...attempt.harness };
+    const result: HarnessGenerationResult = {
+      componentId: candidate.componentId,
+      ...attempt.harness,
+      usage: attempt.usage
+    };
     await this.persist(candidate.componentId, {
       harnessSource: result.harnessSource,
       mockedModules: result.mockedModules,
@@ -433,86 +522,110 @@ export class HarnessGenerationService {
    * 00 §17: a `replaced` row gets two harnesses — head for A from head sources, base for R from base sources — each
    * generated, validated and corrected by that side's own rules. Both are persisted in one update (head in the
    * harness columns, base in the base_harness columns). A row renders only when both sides have a harness.
+   *
+   * 16 §8.6.1: with `options.sides` naming one side, only that side is generated and only its columns are written.
+   * `["head"]` returns the head harness with `baseHarness: null`; `["base"]` returns `baseHarness` with empty
+   * top-level placeholders. The worker fills the other side from the library before rendering.
    */
   private async generateReplaced(candidate: ReplacedCandidate, signal: AbortSignal): Promise<GenerationOutcome> {
     const started = this.now();
-    const sides: Record<WorktreeSide, HarnessAttempt> = {
-      head: await this.generateHarness(
-        replacedSideCandidate(candidate, "head"),
+    const wanted = this.sidesToWrite(candidate.componentId);
+    const sides: Partial<Record<WorktreeSide, SettledAttempt>> = {};
+    for (const side of SIDE_ORDER) {
+      if (!wanted.includes(side)) {
+        continue;
+      }
+      const attempt = await this.generateHarness(
+        replacedSideCandidate(candidate, side),
         signal,
-        packageKey(candidate.componentId, "head")
-      ),
-      base: { kind: "cancelled" }
-    };
-    if (sides.head.kind === "cancelled" || sides.head.kind === "fatal") {
-      return sides.head;
-    }
-    sides.base = await this.generateHarness(
-      replacedSideCandidate(candidate, "base"),
-      signal,
-      packageKey(candidate.componentId, "base")
-    );
-    if (sides.base.kind === "cancelled" || sides.base.kind === "fatal") {
-      return sides.base;
+        packageKey(candidate.componentId, side)
+      );
+      if (attempt.kind === "cancelled" || attempt.kind === "stopped" || attempt.kind === "fatal") {
+        return attempt;
+      }
+      sides[side] = attempt;
     }
     const { head, base } = sides;
     const label = `${candidate.predecessor.displayName} → ${candidate.displayName}`;
-    if (head.kind === "ok" && base.kind === "ok") {
-      const result: HarnessGenerationResult = {
-        componentId: candidate.componentId,
-        ...head.harness,
-        baseHarness: base.harness
-      };
-      await this.persist(candidate.componentId, {
-        harnessSource: head.harness.harnessSource,
-        mockedModules: head.harness.mockedModules,
-        harnessNotes: head.harness.notes,
-        baseHarnessSource: base.harness.harnessSource,
-        baseMockedModules: base.harness.mockedModules,
-        baseHarnessNotes: base.harness.notes
-      });
-      await this.ctx.console.info(
-        STAGE,
-        `Harnesses ready for ${label}: ${count(base.harness.mockedModules.length)} mocks before, ${count(head.harness.mockedModules.length)} after.`
-      );
-      this.log.info(
-        {
-          event: "harness.generated",
-          componentId: candidate.componentId,
-          replaced: true,
-          mocks: head.harness.mockedModules.length + base.harness.mockedModules.length,
-          calls: head.calls + base.calls,
-          durationMs: this.now() - started,
-          warnings: head.warnings + base.warnings
-        },
-        "Harnesses generated for a replaced component"
-      );
-      return { kind: "ok", result };
+    const allOk = (head === undefined || head.kind === "ok") && (base === undefined || base.kind === "ok");
+    if (!allOk) {
+      return this.failReplaced(candidate, sides);
     }
-    return this.failReplaced(candidate, { head, base });
+    const headHarness = head?.kind === "ok" ? head.harness : null;
+    const baseHarness = base?.kind === "ok" ? base.harness : null;
+    const usage = addUsage(
+      head?.kind === "ok" ? head.usage : ZERO_USAGE,
+      base?.kind === "ok" ? base.usage : ZERO_USAGE
+    );
+    const result: HarnessGenerationResult = {
+      componentId: candidate.componentId,
+      ...(headHarness ?? {
+        harnessSource: "",
+        mockedModules: [],
+        notes: "",
+        states: [],
+        origin: "written" as const,
+        libraryEntryId: null
+      }),
+      baseHarness,
+      usage
+    };
+    await this.persist(candidate.componentId, {
+      ...(headHarness !== null
+        ? {
+            harnessSource: headHarness.harnessSource,
+            mockedModules: headHarness.mockedModules,
+            harnessNotes: headHarness.notes
+          }
+        : {}),
+      ...(baseHarness !== null
+        ? {
+            baseHarnessSource: baseHarness.harnessSource,
+            baseMockedModules: baseHarness.mockedModules,
+            baseHarnessNotes: baseHarness.notes
+          }
+        : {})
+    });
+    const before = baseHarness === null ? "saved harness" : `${count(baseHarness.mockedModules.length)} mocks`;
+    const after = headHarness === null ? "saved harness" : count(headHarness.mockedModules.length);
+    await this.ctx.console.info(STAGE, `Harnesses ready for ${label}: ${before} before, ${after} after.`);
+    this.log.info(
+      {
+        event: "harness.generated",
+        componentId: candidate.componentId,
+        replaced: true,
+        sides: wanted,
+        mocks: (headHarness?.mockedModules.length ?? 0) + (baseHarness?.mockedModules.length ?? 0),
+        calls: (head?.kind === "ok" ? head.calls : 0) + (base?.kind === "ok" ? base.calls : 0),
+        durationMs: this.now() - started,
+        warnings: (head?.kind === "ok" ? head.warnings : 0) + (base?.kind === "ok" ? base.warnings : 0)
+      },
+      "Harnesses generated for a replaced component"
+    );
+    return { kind: "ok", result };
   }
 
-  /** Persists a replaced row whose base or head harness could not be produced (00 §17); nothing is rendered. */
+  /**
+   * Persists a replaced row whose base or head harness could not be produced (00 §17); nothing is rendered. Only the
+   * columns of the sides that were written in this call are touched (16 §8.6.1).
+   */
   private async failReplaced(
     candidate: ReplacedCandidate,
-    sides: Record<WorktreeSide, Exclude<HarnessAttempt, { kind: "cancelled" | "fatal" }>>
+    sides: Partial<Record<WorktreeSide, SettledAttempt>>
   ): Promise<GenerationOutcome> {
     const names: Record<WorktreeSide, string> = {
       base: candidate.predecessor.displayName,
       head: candidate.displayName
     };
+    const present = SIDE_ORDER.filter((side) => sides[side] !== undefined);
     // the side that stops the row: a failed side first (head before base), else the side that cannot render
     const side: WorktreeSide =
-      sides.head.kind === "failed"
-        ? "head"
-        : sides.base.kind === "failed"
-          ? "base"
-          : sides.head.kind === "ok"
-            ? "base"
-            : "head";
+      present.find((candidateSide) => sides[candidateSide]?.kind === "failed") ??
+      present.find((candidateSide) => sides[candidateSide]?.kind === "cannot_render") ??
+      "head";
     const failing = sides[side];
-    const anyFailed = sides.head.kind === "failed" || sides.base.kind === "failed";
-    const sideNotes = (attempt: Exclude<HarnessAttempt, { kind: "cancelled" | "fatal" }>): string => {
+    const anyFailed = present.some((candidateSide) => sides[candidateSide]?.kind === "failed");
+    const sideNotes = (attempt: SettledAttempt): string => {
       switch (attempt.kind) {
         case "ok":
           return attempt.harness.notes;
@@ -531,14 +644,14 @@ export class HarnessGenerationService {
           );
       }
     };
-    const harnessOf = (attempt: Exclude<HarnessAttempt, { kind: "cancelled" | "fatal" }>): SideHarness | null => {
+    const harnessOf = (attempt: SettledAttempt): SideHarness | null => {
       if (attempt.kind === "ok") {
         return attempt.harness;
       }
       if (attempt.kind === "failed" && attempt.lastHarness !== null && attempt.lastHarness.trim() !== "") {
         // The last (invalid) attempt is kept as a snapshot only; its states are read best effort (16 §7.7.1).
         const extraction = extractHarnessStates(attempt.lastHarness, this.ctx.repository.framework, {
-          stateAllowance: this.ctx.library.stateAllowance,
+          stateAllowance: this.options.stateAllowance,
           allowLegacy: true
         });
         return {
@@ -552,28 +665,34 @@ export class HarnessGenerationService {
       }
       return null;
     };
-    const headHarness = harnessOf(sides.head);
-    const baseHarness = harnessOf(sides.base);
+    const columns: Record<string, unknown> = {};
+    if (sides.head !== undefined) {
+      const harness = harnessOf(sides.head);
+      columns.harnessSource = harness?.harnessSource ?? null;
+      columns.mockedModules = harness?.mockedModules ?? [];
+      columns.harnessNotes = sideNotes(sides.head);
+    }
+    if (sides.base !== undefined) {
+      const harness = harnessOf(sides.base);
+      columns.baseHarnessSource = harness?.harnessSource ?? null;
+      columns.baseMockedModules = harness?.mockedModules ?? [];
+      columns.baseHarnessNotes = sideNotes(sides.base);
+    }
     const message =
-      failing.kind === "failed"
+      failing?.kind === "failed"
         ? failing.message
-        : failing.kind === "cannot_render"
+        : failing?.kind === "cannot_render"
           ? firstLine(capText(failing.response.notes.trim(), HARNESS_RESPONSE_NOTES_MAX_CHARS))
           : "";
     const sideMessage = `${side === "base" ? "before" : "after"} (${names[side]}): ${message}`;
     await this.persist(candidate.componentId, {
-      harnessSource: headHarness?.harnessSource ?? null,
-      mockedModules: headHarness?.mockedModules ?? [],
-      harnessNotes: sideNotes(sides.head),
-      baseHarnessSource: baseHarness?.harnessSource ?? null,
-      baseMockedModules: baseHarness?.mockedModules ?? [],
-      baseHarnessNotes: sideNotes(sides.base),
+      ...columns,
       renderStatus: anyFailed ? ComponentRenderStatus.FAILED : ComponentRenderStatus.SKIPPED,
       baseError: anyFailed ? NOT_RENDERED_ERROR : null,
       headError: anyFailed ? NOT_RENDERED_ERROR : null
     });
-    const kind: HarnessGenerationFailure["kind"] = failing.kind === "failed" ? failing.failureKind : "cannot_render";
-    const aiReason = failing.kind === "failed" ? failing.aiReason : null;
+    const kind: HarnessGenerationFailure["kind"] = failing?.kind === "failed" ? failing.failureKind : "cannot_render";
+    const aiReason = failing?.kind === "failed" ? failing.aiReason : null;
     const label = `${candidate.predecessor.displayName} → ${candidate.displayName}`;
     if (anyFailed) {
       await this.ctx.console.warn(STAGE, `Harness generation failed for ${label}, ${sideMessage}`);
@@ -595,6 +714,25 @@ export class HarnessGenerationService {
     };
   }
 
+  /** 16 §8.6.1: the sides of a `replaced` row to generate in this call (default both). */
+  private sidesToWrite(componentId: number): readonly WorktreeSide[] {
+    const requested = this.options.sides?.get(componentId);
+    return requested !== undefined && requested.length > 0 ? requested : SIDE_ORDER;
+  }
+
+  /** Defaults of HarnessGenerationOptions from the context (16 §8.6.1). */
+  private defaultOptions(): HarnessGenerationOptions {
+    return {
+      stateAllowance: this.ctx.library.stateAllowance,
+      purpose: this.ctx.libraryJob !== undefined ? "library" : "change"
+    };
+  }
+
+  /** Package options of the running call (16 §8.6.2). */
+  private contextOptions(): HarnessContextOptions {
+    return { purpose: this.options.purpose, stateAllowance: this.options.stateAllowance };
+  }
+
   /**
    * One harness: context package, AI call, static checks and at most one correction (09 §5.9.3). Persists nothing;
    * the package is kept under `key` for repair.
@@ -606,7 +744,7 @@ export class HarnessGenerationService {
   ): Promise<HarnessAttempt> {
     let pkg: HarnessContextPackage;
     try {
-      pkg = await this.contextBuilder.build(candidate);
+      pkg = await this.contextBuilder.build(candidate, this.contextOptions());
     } catch (error: unknown) {
       if (signal.aborted) {
         return { kind: "cancelled" };
@@ -622,7 +760,8 @@ export class HarnessGenerationService {
       componentId: candidate.componentId,
       displayName: candidate.displayName,
       signal,
-      budget: { calls: 0, max: HARNESS_MAX_CALLS_PER_COMPONENT }
+      budget: { calls: 0, max: HARNESS_MAX_CALLS_PER_COMPONENT },
+      usage: ZERO_USAGE
     };
     let outcome = await this.callAi(request, call);
     let last: HarnessAiResponse | null = null;
@@ -680,7 +819,8 @@ export class HarnessGenerationService {
         libraryEntryId: null
       },
       calls: call.budget.calls,
-      warnings: report.warnings.length
+      warnings: report.warnings.length,
+      usage: call.usage
     };
   }
 
@@ -726,11 +866,15 @@ export class HarnessGenerationService {
       if (call.budget.calls >= call.budget.max) {
         return { kind: "budget_exhausted" };
       }
+      if (this.shouldStartCall !== null && !(await this.shouldStartCall())) {
+        return { kind: "stopped" };
+      }
       call.budget.calls += 1;
       const attempt = call.budget.calls;
       const started = this.now();
       try {
         const result = await this.ctx.ai.generateStructured<HarnessAiResponse>(request);
+        call.usage = addUsage(call.usage, result.usage);
         await this.recordUsage(result.usage);
         this.log.info(
           {
@@ -751,6 +895,7 @@ export class HarnessGenerationService {
           throw error; // persistence failure or a bug: handled by the caller
         }
         if (error.usage !== undefined) {
+          call.usage = addUsage(call.usage, error.usage);
           await this.recordUsage(error.usage);
         }
         if (error.reason === "aborted" || call.signal.aborted) {
@@ -815,6 +960,8 @@ export class HarnessGenerationService {
     switch (outcome.kind) {
       case "cancelled":
         return { kind: "cancelled" };
+      case "stopped":
+        return { kind: "stopped" };
       case "fatal":
         return { kind: "fatal", error: outcome.error };
       case "error":
@@ -950,21 +1097,12 @@ export class HarnessGenerationService {
     }
   }
 
-  /** One component row update; anything but 200 is an infrastructure failure (09 §5.11). */
+  /** One row's outcome through the persistence port; any failure is an infrastructure failure (09 §5.11). */
   private async persist(componentId: number, values: Record<string, unknown>): Promise<void> {
-    let status: number;
     try {
-      const response = await this.queryHandler.update(
-        values,
-        { id: componentId, visualizationId: this.ctx.visualizationId },
-        Table.VISUALIZATION_COMPONENTS
-      );
-      status = response.status;
+      await this.persistence.saveGenerated(componentId, values);
     } catch (error: unknown) {
       throw new HarnessPersistError("Saving harness results failed", { cause: error });
-    }
-    if (status !== 200) {
-      throw new HarnessPersistError(`Saving harness results failed (${status})`);
     }
   }
 
@@ -1007,13 +1145,16 @@ export class HarnessGenerationService {
       componentId,
       displayName: pkg.candidate.displayName,
       signal,
-      budget: { calls: 0, max: HARNESS_REPAIR_CALL_BUDGET }
+      budget: { calls: 0, max: HARNESS_REPAIR_CALL_BUDGET },
+      usage: ZERO_USAGE
     };
     let outcome = await this.callAi(request, call);
     for (let corrected = false; ; corrected = true) {
       switch (outcome.kind) {
         case "cancelled":
           return { ok: false, reason: "cancelled", message: "Cancelled." };
+        case "stopped":
+          return { ok: false, reason: "cancelled", message: "Stopped: the spending cap was reached." };
         case "budget_exhausted":
           return { ok: false, reason: "budget_exhausted", message: "The AI call budget for this repair was used up." };
         case "fatal":
@@ -1057,7 +1198,8 @@ export class HarnessGenerationService {
             notes: capText(repairedNotes, HARNESS_NOTES_MAX_CHARS),
             states: report.states ?? [], // a valid report always carries its states (16 §7.7.3)
             origin: "written",
-            libraryEntryId: null
+            libraryEntryId: null,
+            usage: call.usage // the repair calls of this outcome (16 §8.6.1)
           }
         };
       }
@@ -1123,7 +1265,7 @@ export class HarnessGenerationService {
     };
     try {
       const target = isReplacedCandidate(candidate) ? replacedSideCandidate(candidate, side) : candidate;
-      return { ok: true, pkg: await this.contextBuilder.build(target) };
+      return { ok: true, pkg: await this.contextBuilder.build(target, this.contextOptions()) };
     } catch (error: unknown) {
       return { ok: false, message: redactSecrets(getErrorMessage(error)) };
     }

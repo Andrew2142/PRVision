@@ -14,6 +14,8 @@ import type {
   ChangeAnalysisStage,
   HarnessGenerationStage,
   ImageDiffStage,
+  LibraryResolutionResult,
+  LibraryResolutionStage,
   PipelineStepFactories,
   RenderComponentInput,
   RenderStage,
@@ -462,8 +464,45 @@ export function render(componentId: number, ok = true): ComponentRenderResult {
 /** Behaviour of one fake step: return a value, throw, or run custom code (e.g. wait for the abort). */
 export type StepBehaviour<T> = T | ((ctx: PipelineContext) => Promise<T>);
 
+/**
+ * 16 §8.4 without a library: every analysed candidate needs a new harness (head, or base for removed rows), renders,
+ * and nothing pauses or is re-checked. Keeps every pre-16d worker test's meaning.
+ */
+export function passThroughResolution(analysis: ChangeAnalysisResult): LibraryResolutionResult {
+  const candidates = [...analysis.candidates].sort((a, b) => a.rank - b.rank);
+  const sideOf = (candidate: ComponentCandidate): "base" | "head" =>
+    candidate.changeKind === "removed" ? "base" : "head";
+  return {
+    plans: new Map(
+      candidates.map((candidate) => [
+        candidate.componentId,
+        [
+          {
+            side: sideOf(candidate),
+            identity: { filePath: candidate.filePath, exportName: candidate.exportName },
+            entry: null
+          }
+        ]
+      ])
+    ),
+    newHarnessCount: candidates.length,
+    reusedCount: 0,
+    recheckedCount: 0,
+    globalStyleTrigger: null,
+    pause: false,
+    skippedOverLimit: [],
+    toWrite: candidates.map((candidate) => ({ candidate, sides: [sideOf(candidate)] })),
+    renderCandidates: candidates,
+    writeRevisions: new Map()
+  };
+}
+
 export interface FakeStepOptions {
   analysis?: StepBehaviour<ChangeAnalysisResult>;
+  /** 16d: 09's repairHarness; default `{ ok: true, result: previous }`. */
+  repair?: RepairHarnessFn;
+  /** 16d: library resolution; default passThroughResolution(analysis). */
+  resolution?: (analysis: ChangeAnalysisResult, ctx: PipelineContext) => Promise<LibraryResolutionResult>;
   batch?: StepBehaviour<HarnessGenerationBatchResult>;
   renders?: StepBehaviour<ComponentRenderResult[]>;
   diffs?: StepBehaviour<ImageDiffResult[]>;
@@ -477,6 +516,9 @@ export interface StepCalls {
   analyzeCtx: PipelineContext | null;
   harnessFactoryArgs: { ctx: PipelineContext; sourceQueries: ComponentSourceQueries } | null;
   generateAllCandidates: readonly ComponentCandidate[] | null;
+  /** 16d: the options generateAll received (sides per row). */
+  generateAllOptions: unknown;
+  resolveAnalysis: ChangeAnalysisResult | null;
   renderDeps: { repairHarness: RepairHarnessFn } | null;
   renderAllInputs: RenderComponentInput[] | null;
   diffRenders: ComponentRenderResult[] | null;
@@ -511,6 +553,8 @@ export function fakeSteps(options: FakeStepOptions = {}): { steps: PipelineStepF
     analyzeCtx: null,
     harnessFactoryArgs: null,
     generateAllCandidates: null,
+    generateAllOptions: null,
+    resolveAnalysis: null,
     renderDeps: null,
     renderAllInputs: null,
     diffRenders: null,
@@ -525,14 +569,23 @@ export function fakeSteps(options: FakeStepOptions = {}): { steps: PipelineStepF
       return resolve(options.analysis ?? analysisWith(defaultCandidates), ctx);
     }
   };
+  const resolutionStage: LibraryResolutionStage = {
+    resolve: (ctx, analysis) => {
+      calls.order.push("resolve");
+      calls.resolveAnalysis = analysis;
+      return options.resolution ? options.resolution(analysis, ctx) : Promise.resolve(passThroughResolution(analysis));
+    }
+  };
   const steps: PipelineStepFactories = {
     changeAnalysis: () => analysisStage,
+    libraryResolution: () => resolutionStage,
     harnessGeneration: (ctx, sourceQueries) => {
       calls.harnessFactoryArgs = { ctx, sourceQueries };
       const instance: HarnessGenerationStage = {
-        generateAll: (candidates) => {
+        generateAll: (candidates, generateOptions) => {
           calls.order.push("generateAll");
           calls.generateAllCandidates = candidates;
+          calls.generateAllOptions = generateOptions;
           return resolve(
             options.batch ?? {
               results: candidates.map((c) => harness(c.componentId)),
@@ -543,9 +596,11 @@ export function fakeSteps(options: FakeStepOptions = {}): { steps: PipelineStepF
             ctx
           );
         },
-        repairHarness: (componentId, previous) => {
+        repairHarness: (componentId, previous, renderError) => {
           calls.order.push(`repair:${componentId}`);
-          return Promise.resolve({ ok: true, result: previous });
+          return options.repair
+            ? options.repair(componentId, previous, renderError)
+            : Promise.resolve({ ok: true, result: previous });
         }
       };
       calls.harnessInstance = instance;

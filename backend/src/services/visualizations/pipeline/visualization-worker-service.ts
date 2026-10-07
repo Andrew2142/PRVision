@@ -14,8 +14,11 @@ import {
 import {
   ACTIVE_VISUALIZATION_STATUSES,
   ComponentChangeKind,
+  ComponentHarnessOrigin,
   ComponentRenderStatus,
   ConsoleLevel,
+  HarnessLibraryOrigin,
+  HarnessLibraryStatus,
   Table,
   VisualizationSourceType,
   VisualizationStatus,
@@ -24,15 +27,31 @@ import {
 } from "../../../enums";
 import { RepositoryModel, VisualizationModel } from "../../../models";
 import {
+  identityKey,
+  type HarnessLibraryEntryRecord,
+  type HarnessLibraryStorePort,
+  type HarnessStateSpec,
+  type SideHarnessPlan
+} from "../../../types/harness-library";
+import {
   AiProviderError,
   isPipelineStepError,
   PipelineStepError,
   type AiProvider,
+  type AiUsage,
+  type ChangeAnalysisResult,
+  type ComponentCandidate,
+  type ComponentRenderResult,
+  type HarnessGenerationBatchResult,
   type HarnessGenerationResult,
   type HarnessRenderError,
   type HarnessRepairOutcome,
+  type MockedModule,
   type PipelineContext,
-  type PreparedWorkspace
+  type PreparedWorkspace,
+  type RenderFailureKindValue,
+  type SideHarness,
+  type WorktreeSide
 } from "../../../types/visualization-pipeline";
 import {
   AiProviderFactory,
@@ -45,23 +64,42 @@ import {
   Where,
   createLogger,
   redactSecrets,
+  addUsage,
   type ResolvedAiSettings,
   type Transaction,
   type VisualizationJob
 } from "../../../utilities";
+import { HarnessLibraryStore } from "../../harness-library/harness-library-store";
+import { LibraryFingerprinter } from "../../harness-library/library-fingerprint";
 import { SettingsStore } from "../../settings/settings-store";
 import { VisualizationConsoleService } from "../visualization-console-service";
 import { transitionVisualization, type VisualizationTransitionFields } from "../visualization-state-machine";
+import { readConfinedText } from "./change-source";
 import { stepFactoriesFor } from "./frameworks";
-import { buildRenderInputs } from "./render-service";
-import { type HarnessGenerationStage, type PipelineStepFactories, type RepairHarnessFn } from "./stage-registry";
-import { WorkspacePrepareService } from "./workspace-prepare-service";
+import { capText, HARNESS_NOTES_MAX_CHARS } from "./harness-generation-service";
+import { extractHarnessStates } from "./harness-states";
+import { newHarnessPauseMessage } from "./library-resolution-service";
+import { isReplacedCandidate } from "./replaced-components";
+import { isRepairableFailure } from "./render/render-errors";
+import {
+  buildRenderInputs,
+  QueryHandlerRenderPersistence,
+  type ComponentRenderPayload,
+  type ComponentRenderPersistence
+} from "./render-service";
+import {
+  type HarnessGenerationStage,
+  type LibraryResolutionResult,
+  type PipelineStepFactories,
+  type RepairHarnessFn
+} from "./stage-registry";
+import { defaultSnapshotsRoot, removeSnapshotTemps, WorkspacePrepareService } from "./workspace-prepare-service";
 
 // ---------------------------------------------------------------------------------------------------------------
 // Errors and pure helpers (07 §5.9.1)
 // ---------------------------------------------------------------------------------------------------------------
 
-/** Abort reason of the 45-minute overall limit (00 §14.6). */
+/** Abort reason of the overall limit (00 §14.6; 90 minutes since 16 §16.3). */
 export class VisualizationTimeoutError extends Error {
   constructor(readonly limitMs: number) {
     super("Visualization timed out");
@@ -200,6 +238,164 @@ export function toRepairHarnessFn(harnessService: Pick<HarnessGenerationStage, "
 }
 
 // ---------------------------------------------------------------------------------------------------------------
+// Library save-back helpers (16 §8.7 steps 4 and 6)
+// ---------------------------------------------------------------------------------------------------------------
+
+/** One side of one row's render over every state (16 E5). */
+export interface SideRenderOutcome {
+  /** At least one state rendered or failed on that side. */
+  present: boolean;
+  /** Present and every state rendered on that side. */
+  allOk: boolean;
+  /** The first failing state's error on that side (any kind). */
+  firstError: string | null;
+  /** The first failure with a harness-attributable kind (module_load, render_error, timeout, step_failed). */
+  harnessError: string | null;
+}
+
+/** Evaluates one side of a render result over its states (Default only when `states` is empty). */
+export function sideRenderOutcome(render: ComponentRenderResult, side: WorktreeSide): SideRenderOutcome {
+  const states =
+    render.states.length > 0
+      ? render.states
+      : [{ ordinal: 0, stateName: "Default", base: render.base, head: render.head }];
+  let present = false;
+  let failed = false;
+  let firstError: string | null = null;
+  let harnessError: string | null = null;
+  for (const state of states) {
+    const result = state[side];
+    if (result === null) {
+      continue;
+    }
+    present = true;
+    if (result.ok) {
+      continue;
+    }
+    failed = true;
+    const prefix = state.stateName === "Default" ? "" : `State "${state.stateName}": `;
+    const message = `${prefix}${result.error ?? "render failed"}`;
+    firstError ??= message;
+    if (result.failureKind !== null && isHarnessAttributable(result.failureKind)) {
+      harnessError ??= message;
+    }
+  }
+  return { present, allOk: present && !failed, firstError, harnessError };
+}
+
+/** 16 E5: module_load, render_error, timeout and step_failed blame the harness; the rest is infrastructure. */
+export function isHarnessAttributable(kind: RenderFailureKindValue): boolean {
+  return isRepairableFailure(kind);
+}
+
+/** Notes of a reused harness (16 §8.7 step 4): the entry's notes prefixed with its library revision. */
+export function reusedHarnessNotes(entry: Pick<HarnessLibraryEntryRecord, "notes" | "revision">): string {
+  const prefix = `From the harness library (revision ${String(entry.revision)}).`;
+  return capText(entry.notes.trim() === "" ? prefix : `${prefix}\n${entry.notes}`, HARNESS_NOTES_MAX_CHARS);
+}
+
+/** A saved harness as the side harness of a run row (origin library, the entry id and states). */
+export function sideHarnessFromEntry(entry: HarnessLibraryEntryRecord): SideHarness {
+  return {
+    harnessSource: entry.harnessSource ?? "",
+    mockedModules: entry.mockedModules,
+    notes: reusedHarnessNotes(entry),
+    states: entry.states,
+    origin: "library",
+    libraryEntryId: entry.id
+  };
+}
+
+/**
+ * Joins written and reused harnesses into one HarnessGenerationResult per row that reaches rendering (16 §8.7
+ * step 4): reused sides come from their entries; a `replaced` row with one reused side gets the other side from
+ * generation (whose placeholder side is replaced). Rows whose written side failed generation get no result.
+ */
+export function mergeRunHarnesses(
+  resolution: Pick<LibraryResolutionResult, "plans" | "renderCandidates" | "toWrite">,
+  written: readonly HarnessGenerationResult[]
+): HarnessGenerationResult[] {
+  const byId = new Map(written.map((result) => [result.componentId, result]));
+  const writes = new Map(resolution.toWrite.map((row) => [row.candidate.componentId, row.sides]));
+  const out: HarnessGenerationResult[] = [];
+  for (const candidate of resolution.renderCandidates) {
+    const plans = resolution.plans.get(candidate.componentId) ?? [];
+    const generated = byId.get(candidate.componentId);
+    const writeSides = writes.get(candidate.componentId) ?? [];
+    if (writeSides.length > 0 && generated === undefined) {
+      continue; // generation failed or was skipped for a side this row needs
+    }
+    const reused = (side: WorktreeSide): HarnessLibraryEntryRecord | null =>
+      plans.find((plan) => plan.side === side && plan.entry !== null)?.entry ?? null;
+    if (isReplacedCandidate(candidate)) {
+      const headEntry = reused("head");
+      const baseEntry = reused("base");
+      const head: SideHarness | null =
+        headEntry !== null
+          ? sideHarnessFromEntry(headEntry)
+          : generated !== undefined
+            ? topLevelHarness(generated)
+            : null;
+      const base: SideHarness | null =
+        baseEntry !== null ? sideHarnessFromEntry(baseEntry) : (generated?.baseHarness ?? null);
+      if (head === null || base === null) {
+        continue;
+      }
+      out.push({
+        componentId: candidate.componentId,
+        ...head,
+        baseHarness: base,
+        ...(generated?.usage !== undefined ? { usage: generated.usage } : {})
+      });
+      continue;
+    }
+    const entry = plans.find((plan) => plan.entry !== null)?.entry ?? null;
+    if (entry !== null) {
+      out.push({ componentId: candidate.componentId, ...sideHarnessFromEntry(entry) });
+    } else if (generated !== undefined) {
+      out.push(generated);
+    }
+  }
+  return out;
+}
+
+function topLevelHarness(result: HarnessGenerationResult): SideHarness {
+  return {
+    harnessSource: result.harnessSource,
+    mockedModules: result.mockedModules,
+    notes: result.notes,
+    states: result.states,
+    origin: result.origin,
+    libraryEntryId: result.libraryEntryId
+  };
+}
+
+/** Wraps the run's render persistence and remembers the last payload per component (kept repaired harnesses). */
+class RecordingRenderPersistence implements ComponentRenderPersistence {
+  readonly payloads = new Map<number, ComponentRenderPayload>();
+
+  constructor(private readonly inner: ComponentRenderPersistence) {}
+
+  async saveRenderResult(componentId: number, payload: ComponentRenderPayload): Promise<void> {
+    await this.inner.saveRenderResult(componentId, payload);
+    this.payloads.set(componentId, payload);
+  }
+}
+
+/** Everything the library save-back needs from one run (16 §8.7 step 6). */
+interface SaveBackInput {
+  ctx: PipelineContext;
+  resolution: LibraryResolutionResult;
+  batch: HarnessGenerationBatchResult;
+  renders: readonly ComponentRenderResult[];
+  /** Successful fix-up results by `<componentId>:<side>` (the side whose harness was repaired). */
+  repairs: ReadonlyMap<string, HarnessGenerationResult>;
+  /** Render payloads as persisted (the repaired harness when the repaired attempt was kept). */
+  payloads: ReadonlyMap<number, ComponentRenderPayload>;
+  consoleSvc: VisualizationConsoleService;
+}
+
+// ---------------------------------------------------------------------------------------------------------------
 // Dependencies
 // ---------------------------------------------------------------------------------------------------------------
 
@@ -220,6 +416,12 @@ export interface VisualizationWorkerDependencies {
   now: () => Date;
   /** VISUALIZATION_MAX_RUNTIME_MS, STEP_ABORT_GRACE_MS. */
   limits: { maxRuntimeMs: number; stepAbortGraceMs: number };
+  /** 16 §8.7 step 6: the repository's harness library (save-back). */
+  libraryStore: HarnessLibraryStorePort;
+  /** 16 §8.1: fingerprints of written harnesses' components (status side). */
+  fingerprinter: Pick<LibraryFingerprinter, "fingerprint">;
+  /** The render stage's persistence; the worker wraps it to see which harness each row kept. */
+  createRenderPersistence: (visualizationId: number) => ComponentRenderPersistence;
 }
 
 /** Outcome of one run() call. "skipped": the job did not belong to a queued row (no writes). */
@@ -231,6 +433,8 @@ export interface BootRecoveryReport {
   failedLostQueued: number[];
   cleanedWorktrees: number[];
   skippedEntries: string[];
+  /** 16 §11.2: `<dataDir>/snapshots/<id>.tmp` folders of interrupted snapshot saves. */
+  removedSnapshotTemps: string[];
 }
 
 /** Dependencies of boot recovery and the periodic sweep (07 §5.10). */
@@ -245,6 +449,8 @@ export interface RecoveryDependencies {
   now: () => Date;
   /** RECOVERY_SWEEP_INTERVAL_MS. */
   intervalMs: number;
+  /** `<dataDir>/snapshots` (16 §11.2). */
+  snapshotsRoot: string;
 }
 
 interface RunState {
@@ -357,7 +563,7 @@ export class VisualizationWorkerService {
 
       // 6. Workspace (cleanup runs in finally even if prepare fails halfway).
       workspaceStarted = true;
-      const workspace = await this.awaitStep(
+      const prepared = await this.awaitStep(
         this.deps.workspace.prepare({
           visualizationId,
           sourceType: visualization.sourceType,
@@ -381,6 +587,10 @@ export class VisualizationWorkerService {
         signal,
         state
       );
+      const { workingTreeSnapshot, ...workspace } = prepared;
+      if (workingTreeSnapshot === true) {
+        await this.recordWorkingTreeSnapshot(visualizationId);
+      }
       const baseCtx = this.buildContext(visualizationId, workspace, repo, ai, settings, consoleSvc, signal);
       const ctx = {
         ...baseCtx,
@@ -405,19 +615,24 @@ export class VisualizationWorkerService {
         `${analysis.changedFiles.length} changed file(s); ${analysis.candidates.length} component(s) to render, ${analysis.skipped.length} skipped.`
       );
 
-      // 7b. More components than the default limit and the user has not chosen yet: pause and ask (no AI spent).
-      const overLimit = analysis.skipped.filter((entry) => entry.skipReason.startsWith("over_limit")).length;
-      if (visualization.componentLimit === null && overLimit > 0) {
-        const total = analysis.candidates.length + overLimit;
+      // 7b. Library resolution (16 §8.4): reuse, new harnesses, the D9 pause and the whole-library re-check.
+      const resolution = await this.awaitStep(steps.libraryResolution().resolve(ctx, analysis), signal, state);
+      if (visualization.componentLimit === null && resolution.pause) {
         await this.advance(
           state,
           VisualizationStatus.AWAITING_CONFIRMATION,
           consoleSvc,
           {},
-          `${String(total)} components changed; PRVision renders ${String(MAX_COMPONENTS)} by default. Waiting for you to choose how many to render.`
+          newHarnessPauseMessage(resolution.newHarnessCount, resolution.reusedCount)
         );
         log.info(
-          { event: "visualization.run.paused", visualizationId, components: total, limit: MAX_COMPONENTS },
+          {
+            event: "visualization.run.paused",
+            visualizationId,
+            newHarnesses: resolution.newHarnessCount,
+            reused: resolution.reusedCount,
+            limit: MAX_COMPONENTS
+          },
           "Visualization paused for confirmation"
         );
         return "paused";
@@ -425,30 +640,40 @@ export class VisualizationWorkerService {
 
       // 8. generating_harnesses (09 owns concurrency and per-component cancellation checks)
       await this.checkpoint(ctx);
+      const toWrite = resolution.toWrite;
       await this.advance(
         state,
         VisualizationStatus.GENERATING_HARNESSES,
         consoleSvc,
         {},
-        analysis.candidates.length > 0
-          ? `Generating render harnesses for ${analysis.candidates.length} component(s).`
+        toWrite.length > 0
+          ? `Generating render harnesses for ${toWrite.length} component(s).`
           : "No components to generate harnesses for."
       );
       const harnessService = steps.harnessGeneration(ctx, analysis.sourceQueries);
-      const batch = await this.awaitStep(harnessService.generateAll(analysis.candidates), signal, state);
+      const batch = await this.awaitStep(
+        harnessService.generateAll(
+          toWrite.map((row) => row.candidate),
+          { sides: new Map(toWrite.map((row) => [row.candidate.componentId, row.sides])) }
+        ),
+        signal,
+        state
+      );
       if (batch.cancelled) {
         throw new RunCancelledSignal();
       }
-      if (analysis.candidates.length > 0) {
+      if (toWrite.length > 0) {
         await consoleSvc.info(
           VisualizationStatus.GENERATING_HARNESSES,
           `${batch.results.length} harness(es) ready, ${batch.failures.length} failed.`
         );
       }
+      const harnesses = mergeRunHarnesses(resolution, batch.results);
+      await this.persistReusedHarnesses(ctx, resolution);
 
       // 9. rendering
       await this.checkpoint(ctx);
-      const renderInputs = buildRenderInputs(analysis.candidates, batch.results, analysis.changedFiles); // 10 §5.13.1
+      const renderInputs = buildRenderInputs(resolution.renderCandidates, harnesses, analysis.changedFiles); // 10 §5.13.1
       await this.advance(
         state,
         VisualizationStatus.RENDERING,
@@ -458,10 +683,14 @@ export class VisualizationWorkerService {
           ? `Rendering ${renderInputs.length} component(s) on base and head.`
           : "Nothing to render."
       );
+      const repairs = new Map<string, HarnessGenerationResult>();
+      const persistence = new RecordingRenderPersistence(this.deps.createRenderPersistence(visualizationId));
       const renders =
         renderInputs.length > 0
           ? await this.awaitStep(
-              steps.render({ repairHarness: toRepairHarnessFn(harnessService) }).renderAll(ctx, renderInputs),
+              steps
+                .render({ repairHarness: recordRepairs(toRepairHarnessFn(harnessService), repairs), persistence })
+                .renderAll(ctx, renderInputs),
               signal,
               state
             )
@@ -473,6 +702,17 @@ export class VisualizationWorkerService {
           `${ok} of ${renders.length} component(s) rendered on every side they exist.`
         );
       }
+      // 9b. Library save-back (16 §8.7 step 6): never fails the run.
+      await this.saveRunResultsToLibrary({
+        ctx,
+        resolution,
+        batch,
+        renders,
+        repairs,
+        payloads: persistence.payloads,
+        consoleSvc
+      });
+      const downstream = withRecheckedCandidates(analysis, resolution);
 
       // 10. diffing
       await this.checkpoint(ctx);
@@ -486,13 +726,17 @@ export class VisualizationWorkerService {
       if (renders.length > 0) {
         const diffs = await this.awaitStep(steps.imageDiff().diff(ctx, renders), signal, state);
         await this.checkpoint(ctx);
-        await this.awaitStep(steps.structuralDiff().compare(ctx, { renders, diffs, analysis }), signal, state);
+        await this.awaitStep(
+          steps.structuralDiff().compare(ctx, { renders, diffs, analysis: downstream }),
+          signal,
+          state
+        );
       }
 
       // 11. summarizing — always; worktrees and `analysis` are still alive (structural/related diffs read them).
       await this.checkpoint(ctx);
       await this.advance(state, VisualizationStatus.SUMMARIZING, consoleSvc, {}, "Writing the summary.");
-      const outcome = await this.awaitStep(steps.summary().summarize(ctx, analysis), signal, state);
+      const outcome = await this.awaitStep(steps.summary().summarize(ctx, downstream), signal, state);
       if (outcome.status === "cancelled") {
         throw new RunCancelledSignal();
       }
@@ -512,7 +756,8 @@ export class VisualizationWorkerService {
           outcome: "completed",
           durationMs: Date.now() - startedAtMs,
           componentCount: counts?.componentCount ?? 0,
-          changedCount: counts?.changedCount ?? 0
+          changedCount: counts?.changedCount ?? 0,
+          checkedCount: counts?.checkedCount ?? 0
         },
         "Visualization completed"
       );
@@ -729,8 +974,8 @@ export class VisualizationWorkerService {
     consoleSvc: VisualizationConsoleService,
     to: TerminalVisualizationStatus,
     fields: VisualizationTransitionFields
-  ): Promise<{ componentCount: number; changedCount: number } | null> {
-    let counts: { componentCount: number; changedCount: number } | null = null;
+  ): Promise<{ componentCount: number; changedCount: number; checkedCount: number } | null> {
+    let counts: { componentCount: number; changedCount: number; checkedCount: number } | null = null;
     if (state.status !== VisualizationStatus.QUEUED) {
       const swept = await this.deps.queryHandler.update(
         { renderStatus: ComponentRenderStatus.SKIPPED, skipReason: PENDING_SKIP_REASON[to] },
@@ -740,7 +985,18 @@ export class VisualizationWorkerService {
       if (swept.status !== 200 && swept.status !== 404) {
         throw new Error("Pending sweep failed"); // 404 = nothing pending
       }
-      counts = await this.componentCounts(state.visualizationId);
+      counts = {
+        ...(await this.componentCounts(state.visualizationId)),
+        checkedCount: await this.checkedCount(state.visualizationId)
+      };
+      const checked = await this.deps.queryHandler.update(
+        { checkedCount: counts.checkedCount },
+        { id: state.visualizationId },
+        Table.VISUALIZATIONS
+      );
+      if (checked.status !== 200) {
+        throw new Error("checked_count update failed");
+      }
     }
     const ok = await transitionVisualization(this.deps.queryHandler, {
       visualizationId: state.visualizationId,
@@ -756,7 +1012,7 @@ export class VisualizationWorkerService {
     if (to === VisualizationStatus.COMPLETED) {
       await consoleSvc.info(
         to,
-        `Completed: ${counts?.changedCount ?? 0} of ${counts?.componentCount ?? 0} component(s) changed visually.`
+        `Completed: ${String(counts?.checkedCount ?? 0)} checked, ${String(counts?.changedCount ?? 0)} changed visually.`
       );
     } else if (to === VisualizationStatus.CANCELLED) {
       await consoleSvc.warn(to, "Cancelled by user.");
@@ -764,6 +1020,360 @@ export class VisualizationWorkerService {
       await consoleSvc.error(to, fields.errorMessage ?? "Failed.");
     }
     return counts;
+  }
+
+  /**
+   * 16 §8.7 step 8: rows that reached rendering (`render_status` rendered, partial or failed) with a harness
+   * (`harness_origin` set).
+   */
+  private async checkedCount(visualizationId: number): Promise<number> {
+    const response = await this.deps.queryHandler.count(
+      {
+        visualizationId,
+        renderStatus: Where.in([
+          ComponentRenderStatus.RENDERED,
+          ComponentRenderStatus.PARTIAL,
+          ComponentRenderStatus.FAILED
+        ]),
+        harnessOrigin: Where.isNotNull()
+      },
+      Table.VISUALIZATION_COMPONENTS
+    );
+    if (response.status !== 200) {
+      throw new Error("Checked count failed");
+    }
+    return response.data?.count ?? 0;
+  }
+
+  /** 16 §11.2: the run kept its working-tree snapshot (live mode and repair can recreate the head side). */
+  private async recordWorkingTreeSnapshot(visualizationId: number): Promise<void> {
+    const response = await this.deps.queryHandler.update(
+      { workingTreeSnapshot: true },
+      { id: visualizationId },
+      Table.VISUALIZATIONS
+    );
+    if (response.status !== 200) {
+      throw new Error("working_tree_snapshot update failed");
+    }
+  }
+
+  /**
+   * 16 §8.7 step 4 (`persistReusedHarness`): the run's snapshot of every reused harness (E2), `rechecked` rows
+   * included — `harness_source`, `harness_notes`, `mocked_modules` and the `base_*` columns of a reused base side —
+   * in one update per row.
+   */
+  private async persistReusedHarnesses(ctx: PipelineContext, resolution: LibraryResolutionResult): Promise<void> {
+    for (const candidate of resolution.renderCandidates) {
+      const values: Record<string, unknown> = {};
+      for (const plan of resolution.plans.get(candidate.componentId) ?? []) {
+        if (plan.entry === null) {
+          continue;
+        }
+        const harness = sideHarnessFromEntry(plan.entry);
+        if (isReplacedCandidate(candidate) && plan.side === "base") {
+          values.baseHarnessSource = harness.harnessSource;
+          values.baseHarnessNotes = harness.notes;
+          values.baseMockedModules = harness.mockedModules;
+        } else {
+          values.harnessSource = harness.harnessSource;
+          values.harnessNotes = harness.notes;
+          values.mockedModules = harness.mockedModules;
+        }
+      }
+      if (Object.keys(values).length === 0) {
+        continue;
+      }
+      const response = await this.deps.queryHandler.update(
+        values,
+        { id: candidate.componentId, visualizationId: ctx.visualizationId },
+        Table.VISUALIZATION_COMPONENTS
+      );
+      if (response.status !== 200) {
+        throw new PipelineStepError("generating_harnesses", "Could not save the reused harnesses.", {
+          code: "LIBRARY_REUSE_PERSIST_FAILED"
+        });
+      }
+    }
+  }
+
+  /**
+   * 16 §8.7 step 6: saves the harnesses this run wrote (E25 optimistic revisions), refreshes the status of reused
+   * entries from their status side (E4, E5, E26), moves renamed components' entries, and flags rows whose harness
+   * needs updating. Failures are logged and reported as one console warning; they never fail the run.
+   */
+  private async saveRunResultsToLibrary(input: SaveBackInput): Promise<void> {
+    const { ctx, resolution, batch, renders, repairs, payloads, consoleSvc } = input;
+    const log = this.log.child({ visualizationId: ctx.visualizationId });
+    const problems: string[] = [];
+    const guard = async (what: string, fn: () => Promise<void>): Promise<void> => {
+      try {
+        await fn();
+      } catch (error: unknown) {
+        problems.push(shortErrorMessage(error));
+        log.warn({ event: "library.save_back.failed", step: what, err: error }, "Library save-back step failed");
+      }
+    };
+    const renderById = new Map(renders.map((render) => [render.componentId, render]));
+    const failureById = new Map(batch.failures.map((failure) => [failure.componentId, failure]));
+    const generatedById = new Map(batch.results.map((result) => [result.componentId, result]));
+    const writes = new Map(resolution.toWrite.map((row) => [row.candidate.componentId, row.sides]));
+    const at = this.deps.now();
+    let saved = 0;
+    let savedNeedingUpdate = 0;
+
+    for (const candidate of resolution.renderCandidates) {
+      const plans = resolution.plans.get(candidate.componentId) ?? [];
+      const render = renderById.get(candidate.componentId);
+      const writeSides = writes.get(candidate.componentId) ?? [];
+      const rowValues: Record<string, unknown> = {};
+      const replaced = isReplacedCandidate(candidate);
+
+      // reused entries: status refresh from the status side (E4, E5), rename move
+      for (const plan of plans) {
+        const entry = plan.entry;
+        if (entry === null || render === undefined) {
+          continue;
+        }
+        const outcome = sideRenderOutcome(render, plan.side);
+        await guard("render_outcome", async () => {
+          if (outcome.allOk) {
+            await this.deps.libraryStore.markRenderOutcome(entry.id, { ok: true, at });
+          } else if (outcome.harnessError !== null) {
+            await this.deps.libraryStore.markRenderOutcome(entry.id, {
+              ok: false,
+              at,
+              error: outcome.harnessError,
+              visualizationId: ctx.visualizationId
+            });
+          } else {
+            return; // infrastructure failure or nothing rendered: the entry is unchanged (16 §17)
+          }
+          log.info(
+            { event: "library.entry.render_outcome", entryId: entry.id, ok: outcome.allOk },
+            "Library entry render outcome"
+          );
+        });
+        if (!replaced && outcome.allOk && plan.side === "head" && identityKey(entry) !== identityKey(plan.identity)) {
+          await guard("move_identity", () =>
+            this.deps.libraryStore.moveIdentity(entry.id, { ...plan.identity, displayName: candidate.displayName })
+          );
+        }
+      }
+
+      // written sides: save to the library (E25)
+      for (const side of writeSides) {
+        const plan = plans.find((candidatePlan) => candidatePlan.side === side);
+        if (plan === undefined) {
+          continue;
+        }
+        const failure = failureById.get(candidate.componentId);
+        const generated = generatedById.get(candidate.componentId);
+        if (failure !== undefined || generated === undefined) {
+          if (failure === undefined) {
+            continue; // not generated (cancelled): nothing to save
+          }
+          await guard("save_without_harness", async () => {
+            await this.saveWritten(ctx, candidate, plan, null, resolution, failure.message, null);
+          });
+          continue;
+        }
+        if (render === undefined) {
+          continue; // never reached a page: nothing verified to save
+        }
+        const written = replaced && side === "base" ? generated.baseHarness : topLevelHarness(generated);
+        if (written === null || written === undefined || written.harnessSource === "") {
+          continue;
+        }
+        const repairedKey = `${String(candidate.componentId)}:${replaced ? side : "head"}`;
+        const repaired = repairs.get(repairedKey);
+        const payload = payloads.get(candidate.componentId);
+        const kept = replaced && side === "base" ? payload?.baseHarness : payload?.harness;
+        const useRepaired = kept !== undefined && kept.harnessSource !== written.harnessSource;
+        const harness = useRepaired
+          ? {
+              harnessSource: kept.harnessSource,
+              mockedModules: kept.mockedModules,
+              notes: kept.harnessNotes,
+              states:
+                repaired?.harnessSource === kept.harnessSource
+                  ? repaired.states
+                  : this.statesOf(ctx, kept.harnessSource)
+            }
+          : {
+              harnessSource: written.harnessSource,
+              mockedModules: written.mockedModules,
+              notes: written.notes,
+              states: written.states
+            };
+        const generationUsage =
+          side === "base" && replaced && writeSides.includes("head") ? null : (generated.usage ?? null);
+        const usage = sumUsage(generationUsage, repaired?.usage ?? null);
+        const outcome = sideRenderOutcome(render, side);
+        const origin = useRepaired ? ComponentHarnessOrigin.REPAIRED : ComponentHarnessOrigin.WRITTEN;
+        if (replaced && side === "base") {
+          rowValues.baseHarnessOrigin = origin;
+        } else {
+          rowValues.harnessOrigin = origin;
+        }
+        await guard("save_written", async () => {
+          const entryId = await this.saveWritten(
+            ctx,
+            candidate,
+            plan,
+            harness,
+            resolution,
+            outcome.allOk ? null : (outcome.firstError ?? "The harness did not render."),
+            usage
+          );
+          if (entryId !== null) {
+            saved += 1;
+            if (!outcome.allOk) {
+              savedNeedingUpdate += 1;
+            }
+            if (replaced && side === "base") {
+              rowValues.baseLibraryEntryId = entryId;
+            } else {
+              rowValues.libraryEntryId = entryId;
+            }
+          }
+        });
+      }
+
+      // the row's card (E5): any present side of any state failed for a harness-attributable reason
+      if (render !== undefined) {
+        rowValues.harnessNeedsUpdate =
+          sideRenderOutcome(render, "base").harnessError !== null ||
+          sideRenderOutcome(render, "head").harnessError !== null;
+      }
+      if (Object.keys(rowValues).length > 0) {
+        await guard("row_update", async () => {
+          const response = await this.deps.queryHandler.update(
+            rowValues,
+            { id: candidate.componentId, visualizationId: ctx.visualizationId },
+            Table.VISUALIZATION_COMPONENTS
+          );
+          if (response.status !== 200) {
+            throw new Error(`component row update failed (${String(response.status)})`);
+          }
+        });
+      }
+    }
+
+    await guard("needs_update_count", async () => {
+      const counted = await this.deps.queryHandler.count(
+        { visualizationId: ctx.visualizationId, harnessNeedsUpdate: true },
+        Table.VISUALIZATION_COMPONENTS
+      );
+      if (counted.status !== 200) {
+        throw new Error("needs_update_count failed");
+      }
+      const response = await this.deps.queryHandler.update(
+        { needsUpdateCount: counted.data?.count ?? 0 },
+        { id: ctx.visualizationId },
+        Table.VISUALIZATIONS
+      );
+      if (response.status !== 200) {
+        throw new Error("needs_update_count update failed");
+      }
+    });
+    if (saved > 0) {
+      await consoleSvc.info(
+        VisualizationStatus.RENDERING,
+        `Saved ${String(saved)} new harness(es) to the library; ${String(savedNeedingUpdate)} need updating.`
+      );
+    }
+    if (problems.length > 0) {
+      await consoleSvc.warn(
+        VisualizationStatus.RENDERING,
+        `Could not update the harness library: ${problems[0] ?? ""}`
+      );
+    }
+  }
+
+  /**
+   * One `saveWritten` of a harness this run wrote (or failed to write, `harness` null). Returns the saved entry's
+   * id, or null when a newer revision was kept (E25: the row keeps its run snapshot).
+   */
+  private async saveWritten(
+    ctx: PipelineContext,
+    candidate: ComponentCandidate,
+    plan: SideHarnessPlan,
+    harness: { harnessSource: string; mockedModules: MockedModule[]; notes: string; states: HarnessStateSpec[] } | null,
+    resolution: LibraryResolutionResult,
+    lastError: string | null,
+    usage: AiUsage | null
+  ): Promise<number | null> {
+    const status =
+      harness !== null && lastError === null ? HarnessLibraryStatus.READY : HarnessLibraryStatus.NEEDS_UPDATE;
+    const sourceFingerprint = await this.fingerprintOf(ctx, plan);
+    const displayName =
+      isReplacedCandidate(candidate) && plan.side === "base"
+        ? candidate.predecessor.displayName
+        : candidate.displayName;
+    const outcome = await this.deps.libraryStore.saveWritten({
+      repositoryId: ctx.repository.id,
+      framework: ctx.repository.framework,
+      identity: plan.identity,
+      displayName,
+      selector: null,
+      sourceFingerprint,
+      harness,
+      stateAllowance: ctx.library.stateAllowance,
+      status,
+      origin: HarnessLibraryOrigin.RUN,
+      lastError,
+      lastFailedVisualizationId: status === HarnessLibraryStatus.READY ? null : ctx.visualizationId,
+      aiModel: ctx.aiSettings.model,
+      aiUsage: usage,
+      expectedRevision: resolution.writeRevisions.get(identityKey(plan.identity)) ?? 0
+    });
+    if (!outcome.saved) {
+      this.log.info(
+        {
+          event: "library.entry.kept_newer",
+          visualizationId: ctx.visualizationId,
+          entryId: outcome.current.id,
+          revision: outcome.current.revision
+        },
+        "A newer library revision was kept"
+      );
+      return null;
+    }
+    this.log.info(
+      {
+        event: "library.entry.saved",
+        repositoryId: ctx.repository.id,
+        entryId: outcome.entry.id,
+        revision: outcome.entry.revision,
+        status: outcome.entry.status,
+        origin: outcome.entry.origin
+      },
+      "Library entry saved"
+    );
+    return outcome.entry.id;
+  }
+
+  /** 16 §8.1: the fingerprint of the plan's identity on its status side; null when it cannot be computed. */
+  private async fingerprintOf(ctx: PipelineContext, plan: SideHarnessPlan): Promise<string | null> {
+    try {
+      const root = plan.side === "base" ? ctx.workspace.baseDir : ctx.workspace.headDir;
+      return await this.deps.fingerprinter.fingerprint({
+        framework: ctx.repository.framework,
+        identity: plan.identity,
+        readFile: (path) => readConfinedText(root, path)
+      });
+    } catch {
+      return null;
+    }
+  }
+
+  /** States of a kept repaired harness that was not recorded by the repair wrapper (best effort, 16 §7.7.1). */
+  private statesOf(ctx: PipelineContext, source: string): HarnessStateSpec[] {
+    const extraction = extractHarnessStates(source, ctx.repository.framework, {
+      stateAllowance: ctx.library.stateAllowance,
+      allowLegacy: true
+    });
+    return extraction.ok ? extraction.states : [];
   }
 
   /** Error mapping and terminal write (07 §5.9.6). Never throws. */
@@ -846,7 +1456,8 @@ class VisualizationRecovery {
       failedRunning: [],
       failedLostQueued: [],
       cleanedWorktrees: [],
-      skippedEntries: []
+      skippedEntries: [],
+      removedSnapshotTemps: []
     };
     const now = this.deps.now();
 
@@ -885,6 +1496,11 @@ class VisualizationRecovery {
           await this.step("prune_worktrees", () => this.deps.git.worktreePrune(repository.localPath));
         }
       }
+    });
+
+    // 5. Interrupted working-tree snapshot saves (16 §11.2).
+    await this.step("clean_snapshot_temps", async () => {
+      report.removedSnapshotTemps.push(...(await removeSnapshotTemps(this.deps.snapshotsRoot)));
     });
 
     return report;
@@ -1090,7 +1706,11 @@ function resolveWorkerDependencies(
     queue: overrides.queue ?? QueueService,
     consoleFactory: overrides.consoleFactory ?? ((id) => new VisualizationConsoleService(id, queryHandler)),
     now: overrides.now ?? (() => new Date()),
-    limits: overrides.limits ?? { maxRuntimeMs: VISUALIZATION_MAX_RUNTIME_MS, stepAbortGraceMs: STEP_ABORT_GRACE_MS }
+    limits: overrides.limits ?? { maxRuntimeMs: VISUALIZATION_MAX_RUNTIME_MS, stepAbortGraceMs: STEP_ABORT_GRACE_MS },
+    libraryStore: overrides.libraryStore ?? new HarnessLibraryStore(),
+    fingerprinter: overrides.fingerprinter ?? new LibraryFingerprinter(),
+    createRenderPersistence:
+      overrides.createRenderPersistence ?? ((visualizationId) => new QueryHandlerRenderPersistence(visualizationId))
   };
 }
 
@@ -1103,8 +1723,45 @@ function resolveRecoveryDependencies(overrides: Partial<RecoveryDependencies>): 
     git: overrides.git ?? new GitClient(),
     artifacts: overrides.artifacts ?? new ArtifactStore(),
     now: overrides.now ?? (() => new Date()),
-    intervalMs: overrides.intervalMs ?? RECOVERY_SWEEP_INTERVAL_MS
+    intervalMs: overrides.intervalMs ?? RECOVERY_SWEEP_INTERVAL_MS,
+    snapshotsRoot: overrides.snapshotsRoot ?? defaultSnapshotsRoot()
   };
+}
+
+/** Wraps the repair adapter: remembers every successful fix-up by `<componentId>:<side>` (16 §8.7 step 6). */
+function recordRepairs(fn: RepairHarnessFn, repairs: Map<string, HarnessGenerationResult>): RepairHarnessFn {
+  return async (componentId, previous, renderError) => {
+    const outcome = await fn(componentId, previous, renderError);
+    if (outcome.ok) {
+      repairs.set(`${String(componentId)}:${renderError.targetSide ?? "head"}`, outcome.result);
+    }
+    return outcome;
+  };
+}
+
+/** Sum of two optional usages (null when both are absent). */
+function sumUsage(a: AiUsage | null, b: AiUsage | null): AiUsage | null {
+  if (a === null) {
+    return b;
+  }
+  return b === null ? a : addUsage(a, b);
+}
+
+/**
+ * The analysis handed to structural diff and summary: unchanged, plus the `rechecked` rows as candidates when
+ * library resolution added any (so their reasons and paths are known downstream).
+ */
+function withRecheckedCandidates(
+  analysis: ChangeAnalysisResult,
+  resolution: Pick<LibraryResolutionResult, "recheckedCount" | "renderCandidates">
+): ChangeAnalysisResult {
+  if (resolution.recheckedCount === 0) {
+    return analysis;
+  }
+  const rechecked = resolution.renderCandidates.filter(
+    (candidate) => candidate.changeKind === ComponentChangeKind.RECHECKED
+  );
+  return { ...analysis, candidates: [...analysis.candidates, ...rechecked] };
 }
 
 async function isDirectory(target: string): Promise<boolean> {

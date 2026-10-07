@@ -2,12 +2,14 @@ import { constants as fsConstants, type Stats } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import {
+  DATA_DIR,
   DETECTION_MAX_FILE_BYTES,
   GIT_FETCH_TIMEOUT_MS,
   HARNESS_DIR_NAME,
   HARNESS_TEMPLATES_DIR,
   WORKING_TREE_MAX_UNTRACKED_BYTES,
-  WORKING_TREE_MAX_UNTRACKED_FILES
+  WORKING_TREE_MAX_UNTRACKED_FILES,
+  WORKING_TREE_SNAPSHOT_DIR_NAME
 } from "../../../config-consts";
 import { isValidGitBranchName } from "../../../dtos";
 import { RepositoryFramework, VisualizationSourceType } from "../../../enums";
@@ -98,6 +100,28 @@ export interface WorkspacePrepareDependencies {
   githubClientFactory: (token: string) => Pick<GitHubClient, "getPullRequest">;
   /** HARNESS_TEMPLATES_DIR. */
   harnessTemplatesDir: string;
+  /** `<dataDir>/snapshots` (16 §11.2): where working-tree runs keep their uncommitted changes. */
+  snapshotsRoot: string;
+  now: () => Date;
+}
+
+/** What prepare() returns: the 00 §8 workspace plus whether the working-tree snapshot was kept (16 §11.2). */
+export interface PreparedWorkspaceResult extends PreparedWorkspace {
+  /** True when `<dataDir>/snapshots/<id>/` was saved (working_tree runs only); absent or false otherwise. */
+  workingTreeSnapshot?: boolean;
+}
+
+/** Inputs of linkWorkspaceNodeModules (16 §5.4: 07's step 8, shared with scans, repair and live mode). */
+export interface LinkWorkspaceNodeModulesInput {
+  /** The user's clone (its node_modules are linked, never copied). */
+  localPath: string;
+  /** Worktree roots to link, in order (scans pass head only). */
+  sides: ReadonlyArray<{ side: WorktreeSide; dir: string }>;
+  framework: RepositoryFramework;
+  appRoot: string | null;
+  viteConfigPath: string | null;
+  console: PipelineContext["console"];
+  signal: AbortSignal;
 }
 
 /** Dependency differences between the two sides' package.json files (07 §5.13.6). */
@@ -148,7 +172,14 @@ export class WorkspacePrepareService {
       artifacts: deps.artifacts ?? new ArtifactStore(),
       readGithubToken: deps.readGithubToken ?? (() => new SettingsStore().readGithubToken()),
       githubClientFactory: deps.githubClientFactory ?? ((token) => GitHubClient.fromToken(token)),
-      harnessTemplatesDir: deps.harnessTemplatesDir ?? HARNESS_TEMPLATES_DIR
+      harnessTemplatesDir: deps.harnessTemplatesDir ?? HARNESS_TEMPLATES_DIR,
+      snapshotsRoot:
+        deps.snapshotsRoot ??
+        path.join(
+          deps.artifacts instanceof ArtifactStore ? deps.artifacts.dataDir : DATA_DIR,
+          WORKING_TREE_SNAPSHOT_DIR_NAME
+        ),
+      now: deps.now ?? ((): Date => new Date())
     };
   }
 
@@ -156,7 +187,7 @@ export class WorkspacePrepareService {
    * Creates both worktrees for the visualization. Throws PipelineStepError("preparing", …) for problems the user
    * can act on; an abort rethrows the signal's reason at the next call boundary.
    */
-  async prepare(input: WorkspacePrepareInput): Promise<PreparedWorkspace> {
+  async prepare(input: WorkspacePrepareInput): Promise<PreparedWorkspaceResult> {
     const { visualizationId: id, signal, repository } = input;
     const localPath = repository.localPath;
     const { git, artifacts } = this.deps;
@@ -248,50 +279,25 @@ export class WorkspacePrepareService {
       );
     }
 
-    // 7. Working-tree overlay
+    // 7. Working-tree overlay, then a copy of it in the data dir (16 §11.2), before any harness file is written
+    let workingTreeSnapshot = false;
     if (overlay) {
-      await this.applyOverlay(input, headDir, overlay);
+      const copied = await this.applyOverlay(input, headDir, overlay);
+      workingTreeSnapshot = await this.saveWorkingTreeSnapshot(input, headDir, overlay, copied);
     }
 
     // 8. node_modules symlinks for ".", the app root and the Vite root (15 §5.4.6)
     const framework = repository.framework ?? RepositoryFramework.REACT_VITE;
     const isReact = framework === RepositoryFramework.REACT_VITE;
-    const viteRootRel = viteRootOf(repository.viteConfigPath);
-    const linkDirs = nodeModulesLinkDirs(repository.appRoot ?? null, repository.viteConfigPath);
-    const viteRoots = new Map<WorktreeSide, string>();
-    for (const side of SIDES) {
-      signal.throwIfAborted();
-      const sideDir = side === "base" ? baseDir : headDir;
-      for (const linkRel of linkDirs) {
-        const linkDir = linkRel === "." ? sideDir : await ensureRealDir(sideDir, linkRel);
-        if (linkDir === null) {
-          throw new PipelineStepError(
-            STAGE,
-            linkRel === viteRootRel
-              ? `The Vite root ${linkRel} is a symbolic link in this checkout; PRVision only renders projects whose Vite root is a real folder.`
-              : `The app root ${linkRel} is a symbolic link in this checkout; PRVision only renders apps whose folder is a real directory.`
-          );
-        }
-        if (linkRel === viteRootRel) {
-          viteRoots.set(side, linkDir);
-        }
-        const source = await nodeModulesSource(localPath, linkRel, isReact);
-        if (source === null) {
-          continue; // nothing installed at this folder of the clone
-        }
-        const link = path.join(linkDir, "node_modules");
-        if (await lstatOrNull(link)) {
-          await input.console.warn(
-            STAGE,
-            linkRel === "."
-              ? `The repository contains a node_modules entry; using it as-is on ${side}.`
-              : `The repository contains a node_modules entry at ${linkRel}; using it as-is on ${side}.`
-          );
-          continue;
-        }
-        await fs.symlink(source, link, "dir");
-      }
-    }
+    const { viteRoots } = await linkWorkspaceNodeModules({
+      localPath,
+      sides: SIDES.map((side) => ({ side, dir: side === "base" ? baseDir : headDir })),
+      framework,
+      appRoot: repository.appRoot ?? null,
+      viteConfigPath: repository.viteConfigPath,
+      console: input.console,
+      signal
+    });
 
     // 9. Dependency drift
     const drift = compareDependencies(
@@ -320,7 +326,8 @@ export class WorkspacePrepareService {
       baseSha: commits.baseSha,
       headSha: commits.headSha,
       sourceType: input.sourceType,
-      dependencyDrift: drift.any
+      dependencyDrift: drift.any,
+      ...(overlay ? { workingTreeSnapshot } : {})
     };
   }
 
@@ -707,79 +714,95 @@ export class WorkspacePrepareService {
     return { baseSha, patch, untracked };
   }
 
+  /** Applies the clone's uncommitted changes to the head worktree; returns the untracked paths it copied. */
   private async applyOverlay(
     input: WorkspacePrepareInput,
     headDir: string,
     snapshot: WorkingTreeSnapshot
-  ): Promise<void> {
+  ): Promise<string[]> {
     const { signal, repository } = input;
     const localPath = repository.localPath;
 
-    if (snapshot.patch.trim() !== "") {
-      signal.throwIfAborted();
-      try {
-        await this.deps.git.applyPatch(headDir, snapshot.patch);
-      } catch (error: unknown) {
-        rethrowAbort(error, signal);
-        if (error instanceof GitCommandError && error.code === "patch_failed") {
-          throw new PipelineStepError(
-            STAGE,
-            `Could not apply your uncommitted changes to a clean checkout: ${gitErrorSummary(error)}`,
-            { cause: error, code: error.code }
-          );
-        }
-        throw error;
-      }
-    }
-
-    let copied = 0;
-    let totalBytes = 0;
-    for (const rel of snapshot.untracked) {
-      signal.throwIfAborted();
-      const src = path.join(localPath, rel);
-      const dest = resolveInside(headDir, rel);
-      const st = await lstatOrNull(src);
-      if (!st) {
-        continue; // vanished since the listing
-      }
-      totalBytes += st.size;
-      if (totalBytes > WORKING_TREE_MAX_UNTRACKED_BYTES) {
-        throw new PipelineStepError(STAGE, "Untracked files exceed 200 MB.");
-      }
-      const destDir = await ensureRealDir(headDir, path.posix.dirname(rel));
-      if (destDir === null) {
-        await input.console.warn(STAGE, `Skipped ${rel} (its folder is not a real folder in the checkout).`);
-        continue;
-      }
-      const target = path.join(destDir, path.posix.basename(rel));
-      if (target !== dest) {
-        continue; // defence in depth: ensureRealDir never returns another folder for a normalized path
-      }
-      if (await lstatOrNull(dest)) {
-        await input.console.warn(STAGE, `Skipped ${rel} (already exists in the checkout).`);
-        continue;
-      }
-      if (st.isFile()) {
-        await fs.copyFile(src, dest, fsConstants.COPYFILE_EXCL);
-        await fs.chmod(dest, st.mode & 0o777);
-        copied += 1;
-      } else if (st.isSymbolicLink()) {
-        const linkTarget = await fs.readlink(src);
-        if (!path.isAbsolute(linkTarget) && isPathInside(localPath, path.resolve(path.dirname(src), linkTarget))) {
-          await fs.symlink(linkTarget, dest);
-          copied += 1;
-        } else {
-          await input.console.warn(STAGE, `Skipped symlink ${rel} (points outside the repository).`);
-        }
-      }
-      // Anything else (directory entries, FIFO, socket) is skipped.
-    }
+    await applyPatchOrFail(this.deps.git, headDir, snapshot.patch, signal);
+    const copied = await copyUntrackedFiles({
+      sourceRoot: localPath,
+      headDir,
+      paths: snapshot.untracked,
+      signal,
+      warn: (message) => input.console.warn(STAGE, message),
+      // a relative link that stays inside the clone (the same rule as 07)
+      linkAllowed: (src, target) => isPathInside(localPath, path.resolve(path.dirname(src), target))
+    });
 
     const trackedChanges = snapshot.patch.split("\n").filter((line) => line.startsWith("diff --git ")).length;
     await input.console.info(
       STAGE,
-      `Applied uncommitted changes: ${trackedChanges} tracked file change(s), ${copied} untracked file(s).`
+      `Applied uncommitted changes: ${trackedChanges} tracked file change(s), ${copied.length} untracked file(s).`
     );
+    return copied;
+  }
+
+  /**
+   * 16 §11.2: keeps the working-tree snapshot in `<dataDir>/snapshots/<id>/` (manifest, the patch exactly as applied,
+   * the untracked files copied from the head worktree), written to `<id>.tmp` and renamed when complete. Nothing is
+   * written to the user's clone. Failure is a console warning; returns whether the snapshot was kept.
+   */
+  private async saveWorkingTreeSnapshot(
+    input: WorkspacePrepareInput,
+    headDir: string,
+    snapshot: WorkingTreeSnapshot,
+    copied: readonly string[]
+  ): Promise<boolean> {
+    const id = input.visualizationId;
+    const finalDir = workingTreeSnapshotDir(this.deps.snapshotsRoot, id);
+    const tmpDir = `${finalDir}.tmp`;
+    try {
+      input.signal.throwIfAborted();
+      await fs.rm(tmpDir, { recursive: true, force: true });
+      await fs.mkdir(tmpDir, { recursive: true, mode: 0o700 });
+      const manifest: WorkingTreeSnapshotManifest = {
+        version: 1,
+        baseSha: snapshot.baseSha,
+        untracked: [...copied],
+        createdAt: this.deps.now().toISOString()
+      };
+      await fs.writeFile(path.join(tmpDir, SNAPSHOT_MANIFEST), `${JSON.stringify(manifest, null, 2)}\n`, {
+        mode: 0o600
+      });
+      if (snapshot.patch.trim() !== "") {
+        await fs.writeFile(path.join(tmpDir, SNAPSHOT_PATCH), snapshot.patch, { mode: 0o600 });
+      }
+      const untrackedRoot = path.join(tmpDir, SNAPSHOT_UNTRACKED_DIR);
+      for (const rel of copied) {
+        input.signal.throwIfAborted();
+        const src = resolveInside(headDir, rel);
+        const dest = resolveInside(untrackedRoot, rel);
+        const st = await fs.lstat(src);
+        await fs.mkdir(path.dirname(dest), { recursive: true, mode: 0o700 });
+        if (st.isSymbolicLink()) {
+          await fs.symlink(await fs.readlink(src), dest);
+        } else if (st.isFile()) {
+          await fs.copyFile(src, dest, fsConstants.COPYFILE_EXCL);
+          await fs.chmod(dest, st.mode & 0o777);
+        }
+      }
+      await fs.rm(finalDir, { recursive: true, force: true });
+      await fs.rename(tmpDir, finalDir);
+      this.log.info(
+        { event: "workspace.snapshot.saved", visualizationId: id, untracked: copied.length },
+        "Working-tree snapshot saved"
+      );
+      return true;
+    } catch (error: unknown) {
+      rethrowAbort(error, input.signal);
+      this.log.warn({ event: "workspace.snapshot.failed", visualizationId: id, err: error }, "Snapshot failed");
+      await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => undefined);
+      await input.console.warn(
+        STAGE,
+        "Could not keep a snapshot of the uncommitted changes; live mode and repair will not be available for this run."
+      );
+      return false;
+    }
   }
 
   private async bestEffort(step: string, visualizationId: number, fn: () => Promise<void>): Promise<void> {
@@ -798,6 +821,261 @@ interface WorkingTreeSnapshot {
   baseSha: string;
   patch: string;
   untracked: string[];
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Working-tree snapshots in the data dir (16 E18, §11.2) and the shared node_modules link step (16 §5.4)
+// ---------------------------------------------------------------------------------------------------------------
+
+const SNAPSHOT_MANIFEST = "manifest.json";
+const SNAPSHOT_PATCH = "changes.patch";
+const SNAPSHOT_UNTRACKED_DIR = "untracked";
+
+/** `manifest.json` of a working-tree snapshot (16 §11.2). */
+export interface WorkingTreeSnapshotManifest {
+  version: 1;
+  baseSha: string;
+  untracked: string[];
+  createdAt: string;
+}
+
+/** `<snapshotsRoot>/<visualizationId>`; `snapshotsRoot` is `<dataDir>/snapshots`. */
+export function workingTreeSnapshotDir(snapshotsRoot: string, visualizationId: number): string {
+  if (!Number.isSafeInteger(visualizationId) || visualizationId < 1) {
+    throw new Error(`Invalid visualization id ${String(visualizationId)}`);
+  }
+  return resolveInside(snapshotsRoot, String(visualizationId));
+}
+
+/** `<DATA_DIR>/snapshots` (16 §16.4 WORKING_TREE_SNAPSHOT_DIR_NAME). */
+export function defaultSnapshotsRoot(): string {
+  return path.join(DATA_DIR, WORKING_TREE_SNAPSHOT_DIR_NAME);
+}
+
+/** rm -rf `<snapshotsRoot>/<id>` (and a leftover `<id>.tmp`); no error when missing (16 §11.2: deleted with the run). */
+export async function removeWorkingTreeSnapshot(
+  visualizationId: number,
+  snapshotsRoot = defaultSnapshotsRoot()
+): Promise<void> {
+  const dir = workingTreeSnapshotDir(snapshotsRoot, visualizationId);
+  await fs.rm(dir, { recursive: true, force: true });
+  await fs.rm(`${dir}.tmp`, { recursive: true, force: true });
+}
+
+/** Boot recovery (16 §11.2): removes `<snapshotsRoot>/*.tmp` folders of interrupted saves; returns their names. */
+export async function removeSnapshotTemps(snapshotsRoot = defaultSnapshotsRoot()): Promise<string[]> {
+  let entries: string[];
+  try {
+    entries = await fs.readdir(snapshotsRoot);
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return [];
+    }
+    throw error;
+  }
+  const removed: string[] = [];
+  for (const name of entries.sort()) {
+    if (/^[1-9]\d*\.tmp$/.test(name)) {
+      await fs.rm(resolveInside(snapshotsRoot, name), { recursive: true, force: true });
+      removed.push(name);
+    }
+  }
+  return removed;
+}
+
+function isSnapshotManifest(value: unknown): value is WorkingTreeSnapshotManifest {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  return (
+    record.version === 1 &&
+    typeof record.baseSha === "string" &&
+    Array.isArray(record.untracked) &&
+    record.untracked.every((entry) => typeof entry === "string" && isSafeRelativePath(entry))
+  );
+}
+
+/**
+ * 16 §11.2 (used by 16g's RunWorkspaceRecreator): replays a saved working-tree snapshot onto `headDir` (a fresh
+ * worktree at the snapshot's base commit): `git apply` of the patch, then the untracked files with the same rules
+ * as 07's overlay. Returns the manifest.
+ *
+ * @throws PipelineStepError (preparing) when the snapshot is missing or unreadable, or the patch does not apply.
+ */
+export async function applyWorkingTreeSnapshot(
+  headDir: string,
+  snapshotDir: string,
+  signal: AbortSignal,
+  deps: { git?: Pick<GitClient, "applyPatch">; console?: PipelineContext["console"] } = {}
+): Promise<WorkingTreeSnapshotManifest> {
+  const unavailable = "The uncommitted changes of this run are no longer available. Start a new visualization.";
+  let manifest: unknown;
+  try {
+    manifest = JSON.parse(await fs.readFile(path.join(snapshotDir, SNAPSHOT_MANIFEST), "utf8")) as unknown;
+  } catch (error: unknown) {
+    throw new PipelineStepError(STAGE, unavailable, { cause: error, code: "SNAPSHOT_MISSING" });
+  }
+  if (!isSnapshotManifest(manifest)) {
+    throw new PipelineStepError(STAGE, unavailable, { code: "SNAPSHOT_INVALID" });
+  }
+  let patch = "";
+  const patchPath = path.join(snapshotDir, SNAPSHOT_PATCH);
+  const patchStat = await lstatOrNull(patchPath);
+  if (patchStat?.isFile() === true) {
+    patch = await fs.readFile(patchPath, "utf8");
+  }
+  await applyPatchOrFail(deps.git ?? new GitClient(), headDir, patch, signal);
+  const untrackedRoot = path.join(snapshotDir, SNAPSHOT_UNTRACKED_DIR);
+  await copyUntrackedFiles({
+    sourceRoot: untrackedRoot,
+    headDir,
+    paths: manifest.untracked,
+    signal,
+    warn: (message) => deps.console?.warn(STAGE, message) ?? Promise.resolve(),
+    // the snapshot only holds links the overlay accepted; replayed links must stay inside the head worktree
+    linkAllowed: (src, target) =>
+      isPathInside(
+        headDir,
+        path.resolve(path.dirname(resolveInside(headDir, path.relative(untrackedRoot, src))), target)
+      )
+  });
+  return manifest;
+}
+
+/** `git apply` of a working-tree patch (no-op when empty); a patch that does not apply is a PipelineStepError. */
+async function applyPatchOrFail(
+  git: Pick<GitClient, "applyPatch">,
+  headDir: string,
+  patch: string,
+  signal: AbortSignal
+): Promise<void> {
+  if (patch.trim() === "") {
+    return;
+  }
+  signal.throwIfAborted();
+  try {
+    await git.applyPatch(headDir, patch);
+  } catch (error: unknown) {
+    rethrowAbort(error, signal);
+    if (error instanceof GitCommandError && error.code === "patch_failed") {
+      throw new PipelineStepError(
+        STAGE,
+        `Could not apply your uncommitted changes to a clean checkout: ${gitErrorSummary(error)}`,
+        { cause: error, code: error.code }
+      );
+    }
+    throw error;
+  }
+}
+
+/**
+ * Copies untracked files from `sourceRoot` into `headDir` with 07's overlay rules: vanished files skipped, the
+ * 200 MB total enforced, destination folders must be real folders, existing entries kept, regular files copied
+ * with their mode, symlinks re-created only when relative and `linkAllowed`, anything else skipped. Shared by the
+ * overlay and the snapshot replay (16 §11.2). Returns the paths copied.
+ */
+async function copyUntrackedFiles(input: {
+  sourceRoot: string;
+  headDir: string;
+  paths: readonly string[];
+  signal: AbortSignal;
+  warn: (message: string) => Promise<void>;
+  linkAllowed: (src: string, target: string) => boolean;
+}): Promise<string[]> {
+  const { sourceRoot, headDir, signal } = input;
+  const copied: string[] = [];
+  let totalBytes = 0;
+  for (const rel of input.paths) {
+    signal.throwIfAborted();
+    const src = path.join(sourceRoot, rel);
+    const dest = resolveInside(headDir, rel);
+    const st = await lstatOrNull(src);
+    if (!st) {
+      continue; // vanished since the listing
+    }
+    totalBytes += st.size;
+    if (totalBytes > WORKING_TREE_MAX_UNTRACKED_BYTES) {
+      throw new PipelineStepError(STAGE, "Untracked files exceed 200 MB.");
+    }
+    const destDir = await ensureRealDir(headDir, path.posix.dirname(rel));
+    if (destDir === null) {
+      await input.warn(`Skipped ${rel} (its folder is not a real folder in the checkout).`);
+      continue;
+    }
+    const target = path.join(destDir, path.posix.basename(rel));
+    if (target !== dest) {
+      continue; // defence in depth: ensureRealDir never returns another folder for a normalized path
+    }
+    if (await lstatOrNull(dest)) {
+      await input.warn(`Skipped ${rel} (already exists in the checkout).`);
+      continue;
+    }
+    if (st.isFile()) {
+      await fs.copyFile(src, dest, fsConstants.COPYFILE_EXCL);
+      await fs.chmod(dest, st.mode & 0o777);
+      copied.push(rel);
+    } else if (st.isSymbolicLink()) {
+      const linkTarget = await fs.readlink(src);
+      if (!path.isAbsolute(linkTarget) && input.linkAllowed(src, linkTarget)) {
+        await fs.symlink(linkTarget, dest);
+        copied.push(rel);
+      } else {
+        await input.warn(`Skipped symlink ${rel} (points outside the repository).`);
+      }
+    }
+    // Anything else (directory entries, FIFO, socket) is skipped.
+  }
+  return copied;
+}
+
+/**
+ * 07's step 8 as a shared step (16 §5.4, behaviour-preserving): node_modules symlinks for ".", the app root and the
+ * Vite root of every given worktree (15 §5.4.6). A symlinked app or Vite root fails with a PipelineStepError
+ * (preparing); a committed node_modules entry is used as-is with a console warning.
+ *
+ * @returns the Vite root folder of each side (React harness templates are copied there).
+ */
+export async function linkWorkspaceNodeModules(
+  input: LinkWorkspaceNodeModulesInput
+): Promise<{ viteRoots: Map<WorktreeSide, string> }> {
+  const isReact = input.framework === RepositoryFramework.REACT_VITE;
+  const viteRootRel = viteRootOf(input.viteConfigPath);
+  const linkDirs = nodeModulesLinkDirs(input.appRoot, input.viteConfigPath);
+  const viteRoots = new Map<WorktreeSide, string>();
+  for (const { side, dir: sideDir } of input.sides) {
+    input.signal.throwIfAborted();
+    for (const linkRel of linkDirs) {
+      const linkDir = linkRel === "." ? sideDir : await ensureRealDir(sideDir, linkRel);
+      if (linkDir === null) {
+        throw new PipelineStepError(
+          STAGE,
+          linkRel === viteRootRel
+            ? `The Vite root ${linkRel} is a symbolic link in this checkout; PRVision only renders projects whose Vite root is a real folder.`
+            : `The app root ${linkRel} is a symbolic link in this checkout; PRVision only renders apps whose folder is a real directory.`
+        );
+      }
+      if (linkRel === viteRootRel) {
+        viteRoots.set(side, linkDir);
+      }
+      const source = await nodeModulesSource(input.localPath, linkRel, isReact);
+      if (source === null) {
+        continue; // nothing installed at this folder of the clone
+      }
+      const link = path.join(linkDir, "node_modules");
+      if (await lstatOrNull(link)) {
+        await input.console.warn(
+          STAGE,
+          linkRel === "."
+            ? `The repository contains a node_modules entry; using it as-is on ${side}.`
+            : `The repository contains a node_modules entry at ${linkRel}; using it as-is on ${side}.`
+        );
+        continue;
+      }
+      await fs.symlink(source, link, "dir");
+    }
+  }
+  return { viteRoots };
 }
 
 /**

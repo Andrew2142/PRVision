@@ -115,7 +115,8 @@ test("HarnessGenerationService.generateAll builds a head harness for A and a bas
       },
       states: [{ name: "Default", steps: [] }],
       origin: "written",
-      libraryEntryId: null
+      libraryEntryId: null,
+      usage: { inputTokens: 200, outputTokens: 100, calls: 2 } // 16 §8.6.1: both sides' calls
     }
   ]);
   // two AI calls: head first (A from head sources), then base (R from base sources)
@@ -233,7 +234,8 @@ test("HarnessGenerationService.repairHarness repairs the side named by targetSid
       notes: `Shows ${OLD}.\n\nRepaired after base render failure (render_error): Wrapped in a form provider.`,
       states: [{ name: "Default", steps: [] }],
       origin: "written",
-      libraryEntryId: null
+      libraryEntryId: null,
+      usage: { inputTokens: 100, outputTokens: 50, calls: 1 } // 16 §8.6.1: the repair call
     }
   });
   const request = s.handle.ai.callsFor("harness_repair")[0];
@@ -261,4 +263,79 @@ test("HarnessGenerationService.repairHarness on a fresh instance rebuilds the ba
   assert.match(request?.prompt ?? "", new RegExp(`^component: ${OLD}$`, "m"));
   assert.ok(request?.prompt.includes(`import { ${OLD} } from "../../src/components/${OLD}/${OLD}";`));
   assert.equal(request?.workingDirectory, s.trees.baseDir);
+});
+
+// ---- 16 §8.6.1: sides per replaced row (one side reused from the library, the other written) ----
+
+const PLACEHOLDER = {
+  harnessSource: "",
+  mockedModules: [],
+  notes: "",
+  states: [],
+  origin: "written",
+  libraryEntryId: null
+};
+
+test("HarnessGenerationService.generateAll with sides [head] writes only A's harness, baseHarness null, and only the head columns", async (t) => {
+  const s = setup(t, { harness: [byComponent({ [NEW]: okResponse(NEW) })] });
+  const before = { ...s.db.row(Table.VISUALIZATION_COMPONENTS, 1) };
+  const batch = await s.service.generateAll([replaced], { sides: new Map([[1, ["head"] as const]]) });
+  assert.deepEqual(batch.failures, []);
+  assert.equal(batch.results.length, 1);
+  const result = batch.results[0];
+  assert.ok(result);
+  assert.equal(result.harnessSource, validHarness(NEW));
+  assert.equal(result.baseHarness, null);
+  assert.deepEqual(result.states, [{ name: "Default", steps: [] }]);
+  assert.equal(result.origin, "written");
+  assert.equal(result.libraryEntryId, null);
+  assert.deepEqual(result.usage, { inputTokens: 100, outputTokens: 50, calls: 1 });
+  assert.equal(s.handle.ai.callsFor("harness").length, 1, "one AI call, for A only");
+  const update = s.db.callsFor("update", Table.VISUALIZATION_COMPONENTS)[0]?.args[0] as Record<string, unknown>;
+  assert.deepEqual(Object.keys(update).sort(), ["harnessNotes", "harnessSource", "mockedModules"]);
+  const row = s.db.row(Table.VISUALIZATION_COMPONENTS, 1);
+  assert.equal(row?.baseHarnessSource, before.baseHarnessSource, "base columns untouched");
+});
+
+test("HarnessGenerationService.generateAll with sides [base] writes only R's harness and returns empty top-level placeholders", async (t) => {
+  const s = setup(t, { harness: [byComponent({ [OLD]: okResponse(OLD) })] });
+  const batch = await s.service.generateAll([replaced], { sides: new Map([[1, ["base"] as const]]) });
+  const result = batch.results[0];
+  assert.ok(result);
+  assert.deepEqual(
+    {
+      harnessSource: result.harnessSource,
+      mockedModules: result.mockedModules,
+      notes: result.notes,
+      states: result.states,
+      origin: result.origin,
+      libraryEntryId: result.libraryEntryId
+    },
+    PLACEHOLDER
+  );
+  assert.equal(result.baseHarness?.harnessSource, validHarness(OLD));
+  assert.deepEqual(result.baseHarness.states, [{ name: "Default", steps: [] }]);
+  assert.equal(result.baseHarness.origin, "written");
+  const calls = s.handle.ai.callsFor("harness");
+  assert.equal(calls.length, 1);
+  assert.match(calls[0]?.prompt ?? "", new RegExp(`^component: ${OLD}$`, "m"));
+  const update = s.db.callsFor("update", Table.VISUALIZATION_COMPONENTS)[0]?.args[0] as Record<string, unknown>;
+  assert.deepEqual(Object.keys(update).sort(), ["baseHarnessNotes", "baseHarnessSource", "baseMockedModules"]);
+});
+
+test("HarnessGenerationService.generateAll with one side that cannot render persists only that side's columns and the row status", async (t) => {
+  const s = setup(t, {
+    harness: [
+      byComponent({
+        [NEW]: { status: "cannot_render", harnessSource: "", mockedModules: [], notes: "Needs a router." }
+      })
+    ]
+  });
+  const batch = await s.service.generateAll([replaced], { sides: new Map([[1, ["head"] as const]]) });
+  assert.deepEqual(batch.results, []);
+  assert.equal(batch.failures[0]?.kind, "cannot_render");
+  const update = s.db.callsFor("update", Table.VISUALIZATION_COMPONENTS)[0]?.args[0] as Record<string, unknown>;
+  assert.equal(update.renderStatus, "skipped");
+  assert.equal("baseHarnessSource" in update, false, "the reused base side is not touched");
+  assert.equal(update.harnessSource, null);
 });

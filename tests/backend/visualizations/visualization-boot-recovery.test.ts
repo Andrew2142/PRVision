@@ -75,7 +75,8 @@ function setup(t: TestContext): RecoveryHarness {
     },
     artifacts: { worktreesRoot: () => worktreesRoot },
     now: () => NOW,
-    intervalMs: 20
+    intervalMs: 20,
+    snapshotsRoot: path.join(dataDir, "snapshots")
   };
   return h;
 }
@@ -236,7 +237,13 @@ test("VisualizationWorkerService.recoverOnBoot never throws when a step fails", 
   const logs = recordLogger();
   t.after(logs.restore);
   const report = await VisualizationWorkerService.recoverOnBoot(h.deps);
-  assert.deepEqual(report, { failedRunning: [], failedLostQueued: [], cleanedWorktrees: [], skippedEntries: [] });
+  assert.deepEqual(report, {
+    failedRunning: [],
+    failedLostQueued: [],
+    cleanedWorktrees: [],
+    skippedEntries: [],
+    removedSnapshotTemps: []
+  });
   assert.ok(logs.lines.filter((l) => l.event === "visualization.recovery.step_failed").length >= 3);
 
   const transactionFails = setup(t);
@@ -302,4 +309,15 @@ test("VisualizationWorkerService.startRecoverySweep skips a tick while the previ
   const afterStop = lookups;
   await delay(100);
   assert.equal(count(), afterStop, "no ticks after stop()");
+});
+
+test("VisualizationWorkerService.recoverOnBoot removes interrupted working-tree snapshot saves (<id>.tmp) and keeps complete snapshots (16 §11.2)", async (t) => {
+  const h = setup(t);
+  const root = h.deps.snapshotsRoot ?? "";
+  for (const name of ["4", "5.tmp", "notes"]) {
+    fs.mkdirSync(path.join(root, name), { recursive: true });
+  }
+  const report = await VisualizationWorkerService.recoverOnBoot(h.deps);
+  assert.deepEqual(report.removedSnapshotTemps, ["5.tmp"]);
+  assert.deepEqual(fs.readdirSync(root).sort(), ["4", "notes"]);
 });

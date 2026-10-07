@@ -7,6 +7,7 @@ import {
   HARNESS_SYSTEM_PROMPT
 } from "../../../backend/src/services/visualizations/pipeline/harness-prompts";
 import { createAngularHarnessGeneration } from "../../../backend/src/services/visualizations/pipeline/angular/angular-harness-generation";
+import { NoopHarnessPersistence } from "../../../backend/src/services/visualizations/pipeline/harness-generation-service";
 import {
   ANGULAR_HARNESS_RESPONSE_SCHEMA,
   ANGULAR_HARNESS_SYSTEM_PROMPT
@@ -678,4 +679,193 @@ test("the default prompt set is React's", async (t) => {
   assert.ok(request !== undefined);
   assert.equal(request.system, HARNESS_SYSTEM_PROMPT);
   assert.equal(request.jsonSchema, HARNESS_RESPONSE_SCHEMA);
+});
+
+// ---- 16 §8.6.1 options, persistence port, spending-cap guard and per-result usage (16d) ----
+
+test("results carry the validated states, origin written, libraryEntryId null and the usage of their own calls", async (t) => {
+  const { service } = setupService(t, {
+    candidates: [button, card],
+    script: {
+      harness: [
+        respond(okResponse("Button")),
+        respond({ ...okResponse("Card"), harnessSource: invalidHarness("Card") })
+      ],
+      harness_repair: [respond(okResponse("Card"))] // the correction call
+    }
+  });
+  const batch = await service.generateAll([button, card]);
+  assert.deepEqual(batch.failures, []);
+  assert.deepEqual(
+    batch.results.map((result) => [
+      result.componentId,
+      result.states,
+      result.origin,
+      result.libraryEntryId,
+      result.usage
+    ]),
+    [
+      [1, [{ name: "Default", steps: [] }], "written", null, { inputTokens: 100, outputTokens: 50, calls: 1 }],
+      [2, [{ name: "Default", steps: [] }], "written", null, { inputTokens: 200, outputTokens: 100, calls: 2 }]
+    ],
+    "Card's usage includes its correction call"
+  );
+});
+
+test("shouldStartCall false stops starting AI calls: stopReason spend_cap, no further calls, nothing persisted for unstarted rows", async (t) => {
+  let allowed = 1;
+  const guardCalls: number[] = [];
+  const { service, ai, db, console } = setupService(t, {
+    candidates: [button, card, badge],
+    script: { harness: [respond(okResponse("Button"))] },
+    deps: {
+      shouldStartCall: () => {
+        guardCalls.push(allowed);
+        allowed -= 1;
+        return Promise.resolve(allowed >= 0);
+      }
+    }
+  });
+  const batch = await service.generateAll([button, card, badge]);
+  assert.equal(batch.stopReason, "spend_cap");
+  assert.equal(batch.cancelled, false, "a spending stop is not a cancellation");
+  assert.deepEqual(
+    batch.results.map((result) => result.componentId),
+    [1]
+  );
+  assert.deepEqual(batch.failures, []);
+  assert.equal(ai.requests.length, 1, "no AI call after the guard refused");
+  assert.equal(guardCalls.length, 3, "Button alone, then Card and Badge start together and are both refused");
+  assert.equal(db.row(Table.VISUALIZATION_COMPONENTS, 2)?.harnessSource, null);
+  assert.equal(db.row(Table.VISUALIZATION_COMPONENTS, 2)?.renderStatus, "pending");
+  assert.equal(db.row(Table.VISUALIZATION_COMPONENTS, 3)?.renderStatus, "pending");
+  assert.ok(console.has("warn", "Stopped starting new AI calls: the spending cap was reached.", STAGE));
+});
+
+test("shouldStartCall is checked before a correction call and before a repair call", async (t) => {
+  let remaining = 1;
+  const { service, ai } = setupService(t, {
+    candidates: [button],
+    script: { harness: [respond({ ...okResponse("Button"), harnessSource: invalidHarness("Button") })] },
+    deps: {
+      shouldStartCall: () => {
+        remaining -= 1;
+        return Promise.resolve(remaining >= 0);
+      }
+    }
+  });
+  const batch = await service.generateAll([button]);
+  assert.equal(batch.stopReason, "spend_cap");
+  assert.deepEqual(batch.results, []);
+  assert.deepEqual(batch.failures, [], "the refused correction leaves the candidate unsaved, like a cancellation");
+  assert.equal(ai.requests.length, 1);
+  const repair = await service.repairHarness(
+    1,
+    {
+      componentId: 1,
+      harnessSource: validHarness("Button"),
+      mockedModules: [],
+      notes: "",
+      states: [],
+      origin: "written",
+      libraryEntryId: null
+    },
+    { sides: ["base", "head"], kind: "render_error", message: "boom", otherSideMessage: null }
+  );
+  assert.deepEqual(repair, { ok: false, reason: "cancelled", message: "Stopped: the spending cap was reached." });
+  assert.equal(ai.requests.length, 1);
+});
+
+test("NoopHarnessPersistence writes nothing; results are still returned with a job usage recorder", async (t) => {
+  const recorded: Array<{ inputTokens: number; outputTokens: number; calls: number }> = [];
+  const { service, db } = setupService(t, {
+    candidates: [button, card],
+    script: {
+      harness: [
+        respond(okResponse("Button")),
+        respond({ status: "cannot_render", harnessSource: "", mockedModules: [], notes: "Needs a router." })
+      ]
+    },
+    deps: {
+      persistence: new NoopHarnessPersistence(),
+      usageRecorder: {
+        add: (usage) => {
+          recorded.push(usage);
+          return Promise.resolve({ inputTokens: 0, outputTokens: 0, calls: recorded.length });
+        }
+      }
+    }
+  });
+  const batch = await service.generateAll([button, card]);
+  assert.equal(batch.results.length, 1);
+  assert.equal(batch.failures[0]?.kind, "cannot_render");
+  assert.equal(db.callsFor("update").length, 0, "no visualization_components or visualizations write");
+  assert.equal(db.callsFor("insert").length, 0);
+  assert.equal(recorded.length, 2, "usage goes to the injected recorder");
+});
+
+test("QueryHandlerHarnessPersistence is the default and a custom persistence receives the row values", async (t) => {
+  const saved: Array<[number, Record<string, unknown>]> = [];
+  const { service } = setupService(t, {
+    candidates: [button],
+    script: { harness: [respond(okResponse("Button"))] },
+    deps: {
+      persistence: {
+        saveGenerated: (componentId, values) => {
+          saved.push([componentId, values]);
+          return Promise.resolve();
+        }
+      }
+    }
+  });
+  await service.generateAll([button]);
+  assert.equal(saved.length, 1);
+  assert.equal(saved[0]?.[0], 1);
+  assert.equal(saved[0][1].harnessSource, validHarness("Button"));
+  const failing = setupService(t, {
+    candidates: [button],
+    script: { harness: [respond(okResponse("Button"))] },
+    deps: { persistence: { saveGenerated: () => Promise.reject(new Error("disk full")) } }
+  });
+  await assert.rejects(
+    () => failing.service.generateAll([button]),
+    (error: unknown) => error instanceof PipelineStepError && error.code === "HARNESS_PERSIST_FAILED"
+  );
+});
+
+test("purpose library: the <target> block says library and the state allowance comes from the options", async (t) => {
+  const added = componentCandidate("Button", {
+    componentId: 1,
+    changeKind: "added",
+    codeDiff: null,
+    reason: "whole-app scan"
+  });
+  const { service, ai } = setupService(t, {
+    candidates: [added],
+    script: { harness: [respond(okResponse("Button"))] }
+  });
+  await service.generateAll([added], { purpose: "library", stateAllowance: 4 });
+  const prompt = ai.requests[0]?.prompt ?? "";
+  assert.match(prompt, /^change: none \(library harness for an existing component\)$/m);
+  assert.match(prompt, /^selected because: whole-app scan$/m);
+  assert.match(prompt, /^purpose: library \(no change; write the component's main looks\)$/m);
+  assert.match(prompt, /^state allowance: 4 \(maximum number of states, Default included\)$/m);
+  assert.ok(
+    prompt.includes(
+      "- Default first. Add another state only when it looks clearly different, up to the state allowance.\n"
+    )
+  );
+  assert.equal(prompt.includes("<code_diff"), false, "no code_diff section for a library harness");
+});
+
+test("purpose defaults: change review with ctx.library.stateAllowance; library when ctx.libraryJob is set", async (t) => {
+  const run = setupService(t, { candidates: [button], script: { harness: [respond(okResponse("Button"))] } });
+  run.handle.context.library = { stateAllowance: 3, buildMode: "grow" };
+  await run.service.generateAll([button]);
+  assert.match(run.ai.requests[0]?.prompt ?? "", /^purpose: change review$/m);
+  assert.match(run.ai.requests[0]?.prompt ?? "", /^state allowance: 3 /m);
+  const scan = setupService(t, { candidates: [button], script: { harness: [respond(okResponse("Button"))] } });
+  scan.handle.context.libraryJob = { kind: "scan", libraryJobId: 7 };
+  await scan.service.generateAll([button]);
+  assert.match(scan.ai.requests[0]?.prompt ?? "", /^purpose: library /m);
 });

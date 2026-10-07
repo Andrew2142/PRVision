@@ -73,6 +73,7 @@ import {
 import { SettingsStore, type SecretRead } from "../settings/settings-store";
 import { VisualizationConsoleService } from "./visualization-console-service";
 import { describeStep } from "./pipeline/harness-step-text";
+import { removeWorkingTreeSnapshot } from "./pipeline/workspace-prepare-service";
 import { transitionVisualization } from "./visualization-state-machine";
 
 /** Longest stored title (07 §5.4.1 step 4); longer titles are cut to TITLE_MAX_LENGTH - 1 and get "…". */
@@ -117,6 +118,8 @@ export interface VisualizationsServiceDependencies {
   artifacts: Pick<ArtifactStore, "toPublicUrl" | "removeVisualization">;
   consoleFactory: (visualizationId: number) => Pick<VisualizationConsoleService, "info" | "warn" | "error">;
   now: () => Date;
+  /** 16d block (16 §11.2): rm -rf `<dataDir>/snapshots/<id>/` of a removed run. */
+  removeWorkingTreeSnapshot: (visualizationId: number) => Promise<void>;
 }
 
 type ResolvedSource = {
@@ -522,7 +525,7 @@ export class VisualizationsService {
       }
       await this.deps
         .consoleFactory(id)
-        .info(VisualizationStatus.QUEUED, `Continuing: rendering up to ${String(componentLimit)} components.`);
+        .info(VisualizationStatus.QUEUED, `Continuing: writing up to ${String(componentLimit)} new harnesses.`); // 16d block (E12)
       const { jobId } = await this.deps.queue.requeueVisualization(id);
       this.log.info(
         { event: "visualization.continued", visualizationId: id, componentLimit },
@@ -565,6 +568,15 @@ export class VisualizationsService {
         this.log.warn(
           { event: "visualization.artifacts.remove_failed", visualizationId: id, err: error },
           "Artifact removal failed; the visualization is deleted anyway"
+        );
+      }
+      // 16d block (16 §11.2): the working-tree snapshot is deleted with the run (best effort, like artifacts)
+      try {
+        await this.deps.removeWorkingTreeSnapshot(id);
+      } catch (error: unknown) {
+        this.log.warn(
+          { event: "visualization.snapshot.remove_failed", visualizationId: id, err: error },
+          "Working-tree snapshot removal failed; the visualization is deleted anyway"
         );
       }
       const data: DeleteVisualizationResponse = { id };
@@ -860,7 +872,8 @@ function resolveVisualizationsDependencies(
     queue: overrides.queue ?? QueueService,
     artifacts: overrides.artifacts ?? new ArtifactStore(),
     consoleFactory: overrides.consoleFactory ?? ((id) => new VisualizationConsoleService(id, queryHandler)),
-    now: overrides.now ?? (() => new Date())
+    now: overrides.now ?? (() => new Date()),
+    removeWorkingTreeSnapshot: overrides.removeWorkingTreeSnapshot ?? ((id) => removeWorkingTreeSnapshot(id))
   };
 }
 

@@ -2,11 +2,16 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { test, type TestContext } from "node:test";
-import { GIT_FETCH_TIMEOUT_MS } from "../../../backend/src/config-consts";
+import { DATA_DIR, GIT_FETCH_TIMEOUT_MS } from "../../../backend/src/config-consts";
 import {
+  applyWorkingTreeSnapshot,
   compareDependencies,
+  linkWorkspaceNodeModules,
   prBaseRef,
   prRef,
+  removeSnapshotTemps,
+  removeWorkingTreeSnapshot,
+  workingTreeSnapshotDir,
   WorkspacePrepareService,
   type WorkspacePrepareDependencies,
   type WorkspacePrepareInput
@@ -14,6 +19,7 @@ import {
 import { PipelineStepError, type PreparedWorkspace } from "../../../backend/src/types/visualization-pipeline";
 import {
   ArtifactStore,
+  GitClient,
   GitHubClient,
   GitHubClientError,
   type GitHubPullRequestDetail
@@ -21,6 +27,7 @@ import {
 import { ConsoleRecorder } from "../helpers/console-recorder";
 import { makeTempDir, useTempDataDir } from "../helpers/temp-dir";
 import { FakeGit, gitError, type CheckoutFiles } from "./helpers/fakes";
+import { gitAvailable, withTempGitRepo, type TempGitRepo } from "./helpers/temp-git-repo";
 
 const TOKEN = "ghp_workspaceTestToken0123456789abcdef";
 const BASE_TIP = "1".repeat(40);
@@ -771,4 +778,230 @@ test("WorkspacePrepareService.cleanup never throws when git fails", async (t) =>
   };
   await h.service().cleanup({ visualizationId: 5, repositoryPath: h.clone, prNumber: 12 });
   assert.equal(h.git.callsOf("deleteRef").length, 2, "every step still ran");
+});
+
+// ---------------------------------------------------------------------------------------------------------------
+// 16 §11.2: working-tree snapshot in the data dir, replay, and the shared node_modules link step (16d)
+// ---------------------------------------------------------------------------------------------------------------
+
+const noGit = gitAvailable() ? false : "git is not installed";
+
+function dirtyRepo(t: TestContext): TempGitRepo {
+  const repo = withTempGitRepo(t, {
+    files: {
+      "src/App.tsx": "app v1\n",
+      "src/Staged.tsx": "staged v1\n",
+      "src/Gone.tsx": "gone\n",
+      "package.json": "{}\n"
+    }
+  });
+  repo.dirty({ modify: { "src/Staged.tsx": "staged v2\n" }, stage: true });
+  repo.dirty({
+    modify: { "src/App.tsx": "app v2\n" },
+    untracked: { "src/New.tsx": "new file\n", "tools/run.sh": "#!/bin/sh\necho hi\n" },
+    remove: ["src/Gone.tsx"]
+  });
+  fs.chmodSync(path.join(repo.path, "tools/run.sh"), 0o755);
+  fs.mkdirSync(path.join(repo.path, "node_modules"), { recursive: true });
+  return repo;
+}
+
+let nextSnapshotRunId = 4100;
+
+/** Real git needs worktrees under the process data dir (GitClient.worktreeAdd), so these runs use DATA_DIR. */
+function realGitService(
+  t: TestContext,
+  repo: TempGitRepo,
+  overrides: Partial<WorkspacePrepareDependencies> = {}
+): {
+  service: WorkspacePrepareService;
+  dataDir: string;
+  id: number;
+  console: ConsoleRecorder;
+  input: WorkspacePrepareInput;
+} {
+  const dataDir = DATA_DIR;
+  const id = (nextSnapshotRunId += 1);
+  t.after(() => removeWorkingTreeSnapshot(id));
+  const templates = tempDir(t, "templates");
+  fs.writeFileSync(path.join(templates, "index.html"), "<div id=root></div>");
+  const service = new WorkspacePrepareService({
+    git: new GitClient(),
+    artifacts: new ArtifactStore(),
+    harnessTemplatesDir: templates,
+    now: () => new Date("2026-10-07T10:00:00.000Z"),
+    ...overrides
+  });
+  const recorder = new ConsoleRecorder();
+  return {
+    service,
+    dataDir,
+    id,
+    console: recorder,
+    input: {
+      visualizationId: id,
+      sourceType: "working_tree",
+      prNumber: null,
+      baseRef: "main",
+      headRef: "working-tree",
+      repository: { id: 1, localPath: repo.path, githubOwner: null, githubRepo: null, viteConfigPath: null },
+      console: recorder,
+      signal: new AbortController().signal
+    }
+  };
+}
+
+test(
+  "WorkspacePrepareService.prepare working_tree keeps a snapshot in <dataDir>/snapshots/<id>/ written through .tmp; the clone is untouched",
+  { skip: noGit },
+  async (t) => {
+    const repo = dirtyRepo(t);
+    const before = repo.snapshot();
+    const expectedPatch = repo.git("diff", "--binary", "HEAD");
+    const h = realGitService(t, repo);
+    const workspace = await h.service.prepare(h.input);
+    t.after(() => h.service.cleanup({ visualizationId: h.id, repositoryPath: repo.path, prNumber: null }));
+
+    assert.equal(workspace.workingTreeSnapshot, true);
+    const dir = path.join(h.dataDir, "snapshots", String(h.id));
+    assert.equal(workingTreeSnapshotDir(path.join(h.dataDir, "snapshots"), h.id), dir);
+    assert.equal(fs.existsSync(`${dir}.tmp`), false, "the .tmp folder was renamed");
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir, "manifest.json"), "utf8")), {
+      version: 1,
+      baseSha: workspace.baseSha,
+      untracked: ["src/New.tsx", "tools/run.sh"],
+      createdAt: "2026-10-07T10:00:00.000Z"
+    });
+    assert.equal(fs.readFileSync(path.join(dir, "changes.patch"), "utf8").trim(), expectedPatch.trim());
+    for (const rel of ["src/New.tsx", "tools/run.sh"]) {
+      assert.equal(
+        fs.readFileSync(path.join(dir, "untracked", rel), "utf8"),
+        fs.readFileSync(path.join(workspace.headDir, rel), "utf8"),
+        `${rel} copied from the head worktree`
+      );
+    }
+    assert.equal(fs.statSync(path.join(dir, "untracked", "tools/run.sh")).mode & 0o777, 0o755, "mode kept");
+    const during = repo.snapshot();
+    assert.deepEqual(
+      { ...during, worktrees: "" },
+      { ...before, worktrees: "" },
+      "no ref, commit, index or status change"
+    );
+    assert.equal(repo.git("for-each-ref", "refs/prvision/").trim(), "", "no ref is written for the snapshot");
+
+    // cleanup keeps the snapshot (it is deleted with the visualization)
+    await h.service.cleanup({ visualizationId: h.id, repositoryPath: repo.path, prNumber: null });
+    assert.ok(fs.existsSync(path.join(dir, "manifest.json")), "cleanup keeps the snapshot");
+    assert.deepEqual(repo.snapshot(), before, "after cleanup the clone equals its state before the run");
+  }
+);
+
+test(
+  "applyWorkingTreeSnapshot on a fresh worktree at base_sha reproduces the head worktree's files",
+  { skip: noGit },
+  async (t) => {
+    const repo = dirtyRepo(t);
+    const h = realGitService(t, repo);
+    const workspace = await h.service.prepare(h.input);
+    t.after(() => h.service.cleanup({ visualizationId: h.id, repositoryPath: repo.path, prNumber: null }));
+    const snapshotDir = path.join(h.dataDir, "snapshots", String(h.id));
+
+    const fresh = path.join(DATA_DIR, "worktrees", `repair-test-${String(h.id)}`, "head");
+    const git = new GitClient();
+    await git.worktreeAdd(repo.path, fresh, workspace.baseSha);
+    t.after(async () => {
+      await git.worktreeRemove(repo.path, fresh).catch(() => undefined);
+      await git.worktreePrune(repo.path).catch(() => undefined);
+      fs.rmSync(path.dirname(fresh), { recursive: true, force: true });
+    });
+    const manifest = await applyWorkingTreeSnapshot(fresh, snapshotDir, new AbortController().signal, { git });
+    assert.equal(manifest.baseSha, workspace.baseSha);
+    for (const rel of ["src/App.tsx", "src/Staged.tsx", "src/New.tsx", "tools/run.sh", "package.json"]) {
+      assert.equal(
+        fs.readFileSync(path.join(fresh, rel), "utf8"),
+        fs.readFileSync(path.join(workspace.headDir, rel), "utf8"),
+        rel
+      );
+    }
+    assert.equal(fs.existsSync(path.join(fresh, "src/Gone.tsx")), false);
+    assert.equal(fs.statSync(path.join(fresh, "tools/run.sh")).mode & 0o777, 0o755);
+
+    await assert.rejects(
+      applyWorkingTreeSnapshot(fresh, path.join(h.dataDir, "snapshots", "999"), new AbortController().signal, { git }),
+      (error: unknown) =>
+        error instanceof PipelineStepError &&
+        error.userMessage === "The uncommitted changes of this run are no longer available. Start a new visualization."
+    );
+  }
+);
+
+test(
+  "WorkspacePrepareService.prepare working_tree: a snapshot failure is a warning, the run continues and workingTreeSnapshot is false",
+  { skip: noGit },
+  async (t) => {
+    const repo = dirtyRepo(t);
+    const blocker = path.join(tempDir(t, "blocked"), "snapshots");
+    fs.writeFileSync(blocker, "not a folder");
+    const h = realGitService(t, repo, { snapshotsRoot: blocker });
+    const workspace = await h.service.prepare(h.input);
+    t.after(() => h.service.cleanup({ visualizationId: h.id, repositoryPath: repo.path, prNumber: null }));
+    assert.equal(workspace.workingTreeSnapshot, false);
+    assert.ok(
+      h.console.has(
+        "warn",
+        "Could not keep a snapshot of the uncommitted changes; live mode and repair will not be available for this run.",
+        "preparing"
+      )
+    );
+    assert.equal(
+      fs.readFileSync(path.join(workspace.headDir, "src/App.tsx"), "utf8"),
+      "app v2\n",
+      "the overlay applied"
+    );
+  }
+);
+
+test("WorkspacePrepareService.prepare keeps no snapshot for non-working-tree runs", async (t) => {
+  const h = setup(t);
+  const workspace = await h.service().prepare(h.input());
+  assert.equal(workspace.workingTreeSnapshot, undefined);
+  assert.equal(fs.existsSync(path.join(h.dataDir, "snapshots")), false);
+});
+
+test("removeWorkingTreeSnapshot deletes the run's folder (and a leftover .tmp); removeSnapshotTemps removes only <id>.tmp folders", async (t) => {
+  const root = path.join(tempDir(t, "snapshots-root"), "snapshots");
+  for (const name of ["7", "7.tmp", "8.tmp", "9", "notes.tmp"]) {
+    fs.mkdirSync(path.join(root, name), { recursive: true });
+  }
+  await removeWorkingTreeSnapshot(7, root);
+  assert.deepEqual(fs.readdirSync(root).sort(), ["8.tmp", "9", "notes.tmp"]);
+  await removeWorkingTreeSnapshot(123, root); // missing: no error
+  assert.deepEqual(await removeSnapshotTemps(root), ["8.tmp"]);
+  assert.deepEqual(fs.readdirSync(root).sort(), ["9", "notes.tmp"]);
+  assert.deepEqual(await removeSnapshotTemps(path.join(root, "missing")), []);
+  assert.throws(() => workingTreeSnapshotDir(root, 0));
+});
+
+test("linkWorkspaceNodeModules links the root and app root of the given sides only (scan: head only) and returns the Vite roots", async (t) => {
+  const clone = tempDir(t, "clone-link");
+  fs.mkdirSync(path.join(clone, "node_modules"), { recursive: true });
+  fs.mkdirSync(path.join(clone, "apps/web/node_modules"), { recursive: true });
+  const worktree = tempDir(t, "scan-head");
+  const recorder = new ConsoleRecorder();
+  const { viteRoots } = await linkWorkspaceNodeModules({
+    localPath: clone,
+    sides: [{ side: "head", dir: worktree }],
+    framework: "angular",
+    appRoot: "apps/web",
+    viteConfigPath: null,
+    console: recorder,
+    signal: new AbortController().signal
+  });
+  assert.equal(fs.readlinkSync(path.join(worktree, "node_modules")), path.join(clone, "node_modules"));
+  assert.equal(
+    fs.readlinkSync(path.join(worktree, "apps/web/node_modules")),
+    path.join(clone, "apps/web/node_modules")
+  );
+  assert.deepEqual([...viteRoots.keys()], ["head"]);
+  assert.equal(viteRoots.get("head"), worktree);
 });

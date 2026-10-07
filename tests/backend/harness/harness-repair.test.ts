@@ -61,7 +61,8 @@ test("repair with ok status returns the new harness with appended notes and writ
         "Shows Button.\n\nRepaired after base and head render failure (render_error): Wrapped in the auth provider.",
       states: [{ name: "Default", steps: [] }],
       origin: "written",
-      libraryEntryId: null
+      libraryEntryId: null,
+      usage: { inputTokens: 100, outputTokens: 50, calls: 1 } // 16 §8.6.1: the repair call's usage
     }
   });
   assert.equal(setup.componentUpdates(), before);

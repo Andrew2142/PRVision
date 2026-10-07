@@ -13,13 +13,13 @@ import ts from "typescript";
 import {
   AFFECTED_PARENT_MAX_DEPTH,
   ANALYSIS_GRAPH_BUDGET_MS,
+  ANALYSIS_MAX_CANDIDATES,
   ANALYSIS_MAX_CHANGED_FILES,
   ANALYSIS_MAX_FILE_BYTES,
   ANALYSIS_MAX_PARSED_FILES,
   ANALYSIS_TIMEOUT_MS,
   CHANGED_FILES_MAX_ENTRIES,
   CODE_DIFF_MAX_LINES,
-  MAX_COMPONENTS,
   MAX_PARENTS_PER_MODULE
 } from "../../../../config-consts";
 import type { DraftCandidate, FileChange, Side } from "../../../../types/change-analysis";
@@ -98,8 +98,6 @@ const DIRECT_KIND_ORDER: Record<AngularPathKind, number> = {
   global_config: 5,
   ignored: 6
 };
-/** Representatives rank after every real parent (rankAndCap orders affected parents by depth, then diff size). */
-const REPRESENTATIVE_DEPTH = AFFECTED_PARENT_MAX_DEPTH + 1;
 const RENDERABLE_KINDS = new Set(["Component"]);
 const SEEDING_KINDS = new Set(["Component", "Directive", "Pipe"]);
 
@@ -315,7 +313,11 @@ export class AngularChangeAnalysisService {
 
     // 1. changed files (working tree: compare the app root, or the source root for a root app)
     const changeRoot = layout.appRoot === "." ? layout.sourceRoot : layout.appRoot;
-    const source = new ChangeSource(this.deps.gitClient, workspace, signal, changeRoot);
+    const source = new ChangeSource(this.deps.gitClient, workspace, signal, changeRoot, {
+      appRoot: repository.appRoot,
+      viteConfigPath: null,
+      globalStylePaths: repository.globalStylePaths
+    });
     const rawChanges = await source.listChanges();
     let changedFiles: ChangeAnalysisResult["changedFiles"] = rawChanges.map((change) =>
       change.previousPath === undefined
@@ -488,12 +490,10 @@ export class AngularChangeAnalysisService {
     }
     await this.checkpoint(run);
 
-    // 8. propagation (§5.5.4) and global changes (§5.5.5)
+    // 8. propagation (§5.5.4). Global changes add no representative rows any more (16 §8.5.4): their paths go to
+    // globalStyleChanges and library resolution re-checks the saved harnesses.
     if (headIndex !== null) {
       await this.propagate(run, headIndex, headGraph, seeds, drafts);
-      if (globalChanges.length > 0) {
-        await this.addRepresentatives(run, headIndex, globalChanges, drafts);
-      }
     }
 
     // 8b. successor matching (00 §17): removed + added pairs become one `replaced` draft
@@ -502,8 +502,8 @@ export class AngularChangeAnalysisService {
     }
     await this.checkpoint(run);
 
-    // 9. rank and cap
-    const limit = ctx.componentLimit ?? MAX_COMPONENTS;
+    // 9. rank and cap at the analysis ceiling (16 E10)
+    const limit = ANALYSIS_MAX_CANDIDATES;
     const { ordered, rendered, skipReasons } = rankAndCap([...drafts.values()], limit);
     const skippedCount = ordered.length - rendered.size;
     if (skippedCount > 0) {
@@ -569,13 +569,16 @@ export class AngularChangeAnalysisService {
       log,
       now: () => this.deps.now()
     });
-    // 16a compile shim (16 §6.12): 16d fills globalStyleChanges (§8.5.2).
     return {
       candidates,
       skipped,
       changedFiles,
       sourceQueries: new AngularSourceQueries(state),
-      globalStyleChanges: []
+      // 16 §8.5.2: the changed files classified global_style (head style closure of the build target's styles)
+      globalStyleChanges: globalChanges
+        .filter((change) => change.kind === "global_style")
+        .map((change) => change.path)
+        .sort(byString)
     };
   }
 
@@ -1419,50 +1422,6 @@ export class AngularChangeAnalysisService {
             ? `${seed.label} changed; the components using it are already listed (${[...new Set(alreadyListed)].join(", ")}).`
             : `${seed.label} changed; no other component uses it.`
       );
-    }
-  }
-
-  /** §5.5.5: fill the remaining slots with widely used components. */
-  private async addRepresentatives(
-    run: RunState,
-    index: AngularComponentIndex,
-    globalChanges: readonly AngularFileChange[],
-    drafts: Map<string, DraftCandidate>
-  ): Promise<void> {
-    const slots = (run.ctx.componentLimit ?? MAX_COMPONENTS) - drafts.size;
-    if (slots <= 0) {
-      return;
-    }
-    const first = [...globalChanges].sort((a, b) => byString(a.path, b.path))[0];
-    if (first === undefined) {
-      return;
-    }
-    const reason =
-      first.kind === "global_style"
-        ? `Global stylesheet changed: ${first.path}`
-        : `Build configuration changed: ${first.path}`;
-    const representatives = index
-      .components()
-      .filter((entry) => entry.cls.exportName !== null)
-      .sort(
-        (a, b) =>
-          index.usageCount(b.key) - index.usageCount(a.key) ||
-          Number(b.cls.selector !== null) - Number(a.cls.selector !== null) ||
-          byString(a.filePath, b.filePath) ||
-          byString(a.cls.className, b.cls.className)
-      );
-    let added = 0;
-    for (const entry of representatives) {
-      if (added >= slots) {
-        break;
-      }
-      // diffSize encodes the usage order so rankAndCap keeps it (most used first)
-      if (this.addParent(drafts, entry, reason, REPRESENTATIVE_DEPTH, slots - added, first.codeDiff)) {
-        added++;
-      }
-    }
-    if (added > 0) {
-      await this.info(run, `Global change: showing ${String(added)} widely used components.`);
     }
   }
 }

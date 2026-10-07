@@ -14,6 +14,7 @@ import type { ComponentSourceQueries, PipelineContext } from "../../../types/vis
 import { ChangeAnalysisService } from "./change-analysis-service";
 import { HarnessGenerationService } from "./harness-generation-service";
 import { ImageDiffService } from "./image-diff-service";
+import { LibraryResolutionService } from "./library-resolution-service";
 import {
   RenderService,
   type ComponentRenderPersistence,
@@ -52,6 +53,13 @@ export type StructuralDiffStage = Pick<StructuralDiffService, "compare">;
 /** Sheet 11 `SummaryService` (11 §5.4). */
 export type SummaryStage = Pick<SummaryService, "summarize">;
 
+// --- 16d block (16 §8.7 step 1): library resolution at the end of analyzing ---
+
+/** Sheet 16 `LibraryResolutionService` (16 §8.4). */
+export type LibraryResolutionStage = Pick<LibraryResolutionService, "resolve">;
+export type { LibraryResolutionResult } from "./library-resolution-service";
+// --- end 16d block ---
+
 // --- 16e block (16 §5.5, §10.4 step 7.4): render overrides for scans (in-memory persistence, scratch artifacts) ---
 
 /** What `render(deps)` receives: 09's repair closure plus optional persistence and artifact store overrides. */
@@ -80,6 +88,8 @@ export function renderServiceOverrides(deps: RenderStageDeps): {
 export interface PipelineStepFactories {
   /** 08 — default `new ChangeAnalysisService()`; one instance per job. */
   changeAnalysis(): ChangeAnalysisStage;
+  /** 16d — default `new LibraryResolutionService()` for both frameworks (16 §8.7 step 1). */
+  libraryResolution(): LibraryResolutionStage;
   /** 09 — default `new HarnessGenerationService(ctx, sourceQueries)`; the same instance serves repairs for 10. */
   harnessGeneration(ctx: PipelineContext, sourceQueries: ComponentSourceQueries): HarnessGenerationStage;
   /** 10 — default `new RenderService({ repairHarness })` (10 §5.13.1; other deps use 10's defaults). */
@@ -96,6 +106,7 @@ export interface PipelineStepFactories {
 export function defaultPipelineStepFactories(): PipelineStepFactories {
   return {
     changeAnalysis: () => new ChangeAnalysisService(),
+    libraryResolution: () => new LibraryResolutionService(), // 16d block
     harnessGeneration: (ctx, sourceQueries) => new HarnessGenerationService(ctx, sourceQueries),
     render: (deps) => new RenderService(renderServiceOverrides(deps)), // 16e block
     imageDiff: () => new ImageDiffService(),

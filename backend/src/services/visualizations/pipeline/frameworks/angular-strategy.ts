@@ -8,6 +8,7 @@ import { AngularChangeAnalysisService } from "../angular/angular-change-analysis
 import { createAngularHarnessGeneration } from "../angular/angular-harness-generation";
 import { AngularStructuralDiffService } from "../angular/angular-structural-diff-service";
 import { ImageDiffService } from "../image-diff-service";
+import { LibraryResolutionService } from "../library-resolution-service";
 import { AngularRenderService } from "../render/angular/angular-render-service";
 import { renderServiceOverrides, type PipelineStepFactories } from "../stage-registry";
 import { SummaryService } from "../summary-service";
@@ -17,6 +18,7 @@ import type { FrameworkStrategy } from "./framework-strategy";
 export function angularStepFactories(): PipelineStepFactories {
   return {
     changeAnalysis: () => new AngularChangeAnalysisService(),
+    libraryResolution: () => new LibraryResolutionService(), // 16d block
     harnessGeneration: (ctx, sourceQueries) => createAngularHarnessGeneration(ctx, sourceQueries),
     render: (deps) => new AngularRenderService(renderServiceOverrides(deps)), // 16e block
     imageDiff: () => new ImageDiffService(),

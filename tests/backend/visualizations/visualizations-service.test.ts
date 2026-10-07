@@ -1,6 +1,9 @@
 import "reflect-metadata";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
 import { afterEach, test, type TestContext } from "node:test";
+import { DATA_DIR } from "../../../backend/src/config-consts";
 import type { VisualizationCreateDTO } from "../../../backend/src/dtos";
 import { Table } from "../../../backend/src/enums";
 import { VisualizationModel } from "../../../backend/src/models";
@@ -1045,4 +1048,54 @@ test("VisualizationsService.list carries checkedCount", async (t) => {
   const response = await run(() => h.service().list({}));
   const items = (response.data as { items: Array<Record<string, unknown>> }).items;
   assert.equal(items[0]?.checkedCount, 5);
+});
+
+// ---- 16d blocks: continue wording (E12) and the working-tree snapshot deleted with the run (16 §11.2) ----
+
+test("VisualizationsService.continueRun words the limit as new harnesses (16 E12)", async (t) => {
+  const h = setup(t);
+  h.store.seed(Table.VISUALIZATIONS, [makeVisualizationRow({ id: 1, status: "awaiting_confirmation" })]);
+  const response = await run(() => h.service(1).continueRun(20));
+  assert.equal(response.status, 202);
+  const messages = h.store.rows(Table.VISUALIZATION_CONSOLE_EVENTS).map((row) => row.message);
+  assert.ok(messages.includes("Continuing: writing up to 20 new harnesses."), messages.join("\n"));
+  assert.equal(h.store.row(Table.VISUALIZATIONS, 1)?.componentLimit, 20);
+});
+
+test("VisualizationsService.remove deletes the run's working-tree snapshot folder, best effort", async (t) => {
+  const removed: number[] = [];
+  const h = setup(t, {
+    removeWorkingTreeSnapshot: (id) => {
+      removed.push(id);
+      return Promise.resolve();
+    }
+  });
+  h.store.seed(Table.VISUALIZATIONS, [
+    makeVisualizationRow({ id: 1, status: "rendering" }),
+    makeVisualizationRow({ id: 2, status: "completed", completedAt: NOW })
+  ]);
+  assert.equal((await run(() => h.service(1).remove())).status, 409);
+  assert.deepEqual(removed, [], "nothing is removed while the run is active");
+  assert.deepEqual(await run(() => h.service(2).remove()), { status: 200, data: { id: 2 } });
+  assert.deepEqual(removed, [2]);
+
+  const failing = setup(t, { removeWorkingTreeSnapshot: () => Promise.reject(new Error("EACCES")) });
+  failing.store.seed(Table.VISUALIZATIONS, [
+    makeVisualizationRow({ id: 3, status: "failed", completedAt: NOW, failedStage: "queued" })
+  ]);
+  const logs = recordLogger();
+  t.after(logs.restore);
+  assert.deepEqual(await run(() => failing.service(3).remove()), { status: 200, data: { id: 3 } });
+  assert.ok(logs.lines.some((line) => line.event === "visualization.snapshot.remove_failed"));
+});
+
+test("VisualizationsService.remove's default snapshot removal deletes <dataDir>/snapshots/<id>/", async (t) => {
+  const h = setup(t);
+  const dir = path.join(DATA_DIR, "snapshots", "424242");
+  fs.mkdirSync(path.join(dir, "untracked"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "manifest.json"), "{}");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  h.store.seed(Table.VISUALIZATIONS, [makeVisualizationRow({ id: 424242, status: "completed", completedAt: NOW })]);
+  assert.equal((await run(() => h.service(424242).remove())).status, 200);
+  assert.equal(fs.existsSync(dir), false);
 });

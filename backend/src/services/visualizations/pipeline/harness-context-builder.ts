@@ -80,9 +80,9 @@ export interface HarnessContextPackage {
   directImports: { base: DirectImport[]; head: DirectImport[] }; // of the component file on each present side
   sections: PromptSection[]; // in prompt order
   estimatedTokens: number;
-  /** 16 §6.12: "change" for run candidates; "library" for scans (16d). Unused by prompts until 16b/16d. */
+  /** 16 §8.6.2: "change" for run candidates; "library" for scans and other library writes. */
   purpose: "change" | "library";
-  /** 16 §6.12: the repository's state allowance (ctx.library.stateAllowance); unused until 16b's user prompt. */
+  /** 16 §8.6.2: maximum number of states, from the generation options (default ctx.library.stateAllowance). */
   stateAllowance: number;
 }
 
@@ -860,6 +860,12 @@ export function mergeDirectImports(imports: { base: DirectImport[]; head: Direct
   return [...merged.values()];
 }
 
+/** Purpose and state allowance of a package (16 §8.6.2), from HarnessGenerationService's options. */
+export interface HarnessContextOptions {
+  purpose: "change" | "library";
+  stateAllowance: number;
+}
+
 /** Builds the context package of one candidate (09 §5.3). Shared sections are memoised per side. */
 export class HarnessContextBuilder {
   private readonly shared = new Map<WorktreeSide, Promise<SectionDraft[]>>();
@@ -876,9 +882,11 @@ export class HarnessContextBuilder {
   /**
    * Assembles and budgets the context package.
    *
+   * @param options - 16 §8.6.2: purpose and state allowance; default change review with the repository's allowance.
+   *   With `purpose: "library"` the caller passes a head-only (`added`) candidate, so no diff sections exist.
    * @throws Error when the component file exists on neither side (the caller records a context_error).
    */
-  async build(candidate: ComponentCandidate): Promise<HarnessContextPackage> {
+  async build(candidate: ComponentCandidate, options?: HarnessContextOptions): Promise<HarnessContextPackage> {
     const paths = await this.queries.componentPaths(candidate.filePath);
     const sidesPresent = { base: paths.base !== null, head: paths.head !== null };
     if (!sidesPresent.base && !sidesPresent.head) {
@@ -944,8 +952,8 @@ export class HarnessContextBuilder {
       directImports,
       sections: [],
       estimatedTokens: 0,
-      purpose: "change", // 16a shim: 16d adds the library purpose
-      stateAllowance: this.ctx.library.stateAllowance
+      purpose: options?.purpose ?? "change",
+      stateAllowance: options?.stateAllowance ?? this.ctx.library.stateAllowance
     };
     const budgeted = applyBudget(
       drafts,

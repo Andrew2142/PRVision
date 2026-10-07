@@ -14,6 +14,7 @@ import {
 import { HarnessGenerationService } from "../../../backend/src/services/visualizations/pipeline/harness-generation-service";
 import { ImageDiffService } from "../../../backend/src/services/visualizations/pipeline/image-diff-service";
 import { AngularRenderService } from "../../../backend/src/services/visualizations/pipeline/render/angular/angular-render-service";
+import { LibraryResolutionService } from "../../../backend/src/services/visualizations/pipeline/library-resolution-service";
 import { RenderService } from "../../../backend/src/services/visualizations/pipeline/render-service";
 import {
   defaultPipelineStepFactories,
@@ -30,6 +31,7 @@ import {
   type PreparedWorkspace
 } from "../../../backend/src/types/visualization-pipeline";
 import type { QueryHandler, ResolvedAiSettings } from "../../../backend/src/utilities";
+import { FakeLibraryStore } from "../helpers/fake-library-store";
 import { makeRepositoryRow, makeVisualizationRow } from "../helpers/factories";
 import { makeJob } from "../helpers/fake-queue";
 import { createPipelineContext } from "../helpers/pipeline-context";
@@ -81,6 +83,16 @@ test("stepFactoriesFor returns the Angular factories for angular", () => {
   assert.ok(steps.summary() instanceof SummaryService);
   assert.deepEqual(constructors(steps), constructors(angularStepFactories()));
   assert.equal(angularStrategy.framework, "angular");
+});
+
+test("both frameworks end analyzing with 16d's LibraryResolutionService (16 §8.7 step 1)", () => {
+  for (const steps of [
+    stepFactoriesFor(RepositoryFramework.REACT_VITE),
+    stepFactoriesFor(RepositoryFramework.ANGULAR),
+    defaultPipelineStepFactories()
+  ]) {
+    assert.ok(steps.libraryResolution() instanceof LibraryResolutionService);
+  }
 });
 
 test("angular harnessGeneration is 09's HarnessGenerationService and rejects non-Angular source queries", () => {
@@ -144,7 +156,9 @@ function workerFor(framework: "react_vite" | "angular", options: { overrideSteps
     queue: new FakeQueueStatics(),
     consoleFactory: (id) => new VisualizationConsoleService(id, store),
     now: () => NOW,
-    limits: { maxRuntimeMs: 60_000, stepAbortGraceMs: 200 }
+    limits: { maxRuntimeMs: 60_000, stepAbortGraceMs: 200 },
+    libraryStore: new FakeLibraryStore(),
+    fingerprinter: { fingerprint: () => Promise.resolve(null) }
   });
   return { worker, calls, requested };
 }
