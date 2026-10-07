@@ -1,8 +1,9 @@
 /**
- * RenderService (10 §5.13): the `rendering` stage. Writes the harness workspace of both worktrees, starts the
- * repository's own Vite per side and render group, renders every present side of every component in headless
- * Chromium, asks sheet 09 to repair a harness once when every present side failed, keeps the better attempt and
- * persists render results (and, when kept, the repaired harness) per component.
+ * RenderService (10 §5.13, 16 §9): the `rendering` stage. Writes the harness workspace of both worktrees, starts the
+ * repository's own Vite per side and render group, renders every state of every component on every present side in
+ * headless Chromium (one page per component, state and side), asks sheet 09 to repair a harness written in this run
+ * once when a state failed on every present side, keeps the better attempt and persists render results (component
+ * row, per-state rows and, when kept, the repaired harness) per component.
  *
  * Throws only PipelineStepError (stage "rendering"); per-component and per-side problems are captured in the
  * results and persisted.
@@ -12,7 +13,9 @@ import path from "node:path";
 import {
   HARNESS_MAX_REPAIRS_PER_COMPONENT,
   RENDER_COLD_START_ALLOWANCE_MS,
+  RENDER_GROUP_MAX_ITEMS,
   RENDER_INFRA_RETRIES,
+  RENDER_ITEM_CONCURRENCY,
   RENDER_MAX_CAPTURE_HEIGHT_PX,
   RENDER_STAGE_TIMEOUT_MS,
   RENDER_TIMEOUT_MS,
@@ -29,10 +32,20 @@ import {
   type HarnessRepairOutcome,
   type MockedModule,
   type PipelineContext,
-  type RenderSideResult
+  type RenderSideResult,
+  type StateRenderResult
 } from "../../../types/visualization-pipeline";
-import { DEFAULT_STATE_NAME } from "../../../types/harness-library";
-import { ArtifactStore, createLogger, getErrorMessage, QueryHandler, redactSecrets } from "../../../utilities";
+import { DEFAULT_STATE_NAME, type HarnessStep } from "../../../types/harness-library";
+import {
+  ArtifactStore,
+  createLogger,
+  DrizzleDb,
+  getErrorMessage,
+  QueryHandler,
+  redactSecrets,
+  type Transaction
+} from "../../../utilities";
+import { persistComponentStates } from "./component-state-persistence";
 import { targetImportPath, viteRootRelOf } from "./harness-prompts";
 import {
   assertInside,
@@ -52,12 +65,14 @@ import {
   isTwoSidedItem,
   mockFingerprint,
   normalizeErrorText,
+  planItemStates,
+  renderStageBudgetMs,
   repairedHarnessPayload,
   sideHarnessOf,
   sideHarnessResult,
   sideMocksOf,
   sideRenderError,
-  sidesToRepair,
+  splitLargeGroups,
   twoSidedFingerprint,
   withRepairedSide,
   resolveSideLayout,
@@ -73,6 +88,7 @@ import {
   type RenderGroup,
   type RenderSide,
   type RenderWorkItem,
+  type StatePlan,
   type ViteHostHandle,
   type ViteHostStartOptions
 } from "./render";
@@ -135,10 +151,37 @@ export interface RenderArtifactStore {
     kind: RenderSide
   ): { absolutePath: string; relativePath: string };
   ensureComponentDir(visualizationId: number, componentId: number): Promise<void>;
+  /** 16 §6.14: `artifacts/<v>/<c>/<kind>.png` for ordinal 0, `artifacts/<v>/<c>/s<ordinal>/<kind>.png` for 1–9. */
+  stateImagePaths(
+    visualizationId: number,
+    componentId: number,
+    ordinal: number,
+    kind: RenderSide
+  ): { absolutePath: string; relativePath: string };
+  /** mkdir -p of the component dir and, for ordinal > 0, its s<ordinal> subfolder. */
+  ensureComponentStateDir(visualizationId: number, componentId: number, ordinal: number): Promise<void>;
 }
 
 export interface ComponentRenderPersistence {
   saveRenderResult(componentId: number, payload: ComponentRenderPayload): Promise<void>; // throws on failure
+}
+
+/** One state's render on both sides, persisted as a `visualization_component_states` row (16 §9.2, §9.4). */
+export interface StateRenderPayload {
+  ordinal: number;
+  stateName: string;
+  onBase: boolean;
+  onHead: boolean;
+  steps: HarnessStep[];
+  renderStatus: "rendered" | "partial" | "failed";
+  baseImagePath: string | null;
+  headImagePath: string | null;
+  imageWidth: number | null;
+  imageHeight: number | null;
+  baseError: string | null;
+  headError: string | null;
+  baseFailureKind: RenderFailureKind | null;
+  headFailureKind: RenderFailureKind | null;
 }
 
 export interface ComponentRenderPayload {
@@ -157,6 +200,8 @@ export interface ComponentRenderPayload {
   baseHarness?: { harnessSource: string; harnessNotes: string; mockedModules: MockedModule[] };
   /** 00 §17, replaced rows: base-side notes after a repair verdict on the base harness. */
   baseHarnessNotes?: string;
+  /** 16 §9.2: one entry per rendered state (Default included); [] for rows that never reached a page. */
+  states: StateRenderPayload[];
 }
 
 /** Narrow interface over BrowserSession so tests can stub it. */
@@ -182,17 +227,35 @@ export interface RenderServiceDependencies {
 
 /** Persists render results through QueryHandler (the default persistence facade; it sets updated_at). */
 export class QueryHandlerRenderPersistence implements ComponentRenderPersistence {
+  /**
+   * @param visualizationId - The run.
+   * @param queryHandler - When given (tests), every statement runs on it without a transaction.
+   * @param runInTransaction - Default DrizzleDb.transaction (used only without an explicit queryHandler).
+   */
   constructor(
     private readonly visualizationId: number,
-    private readonly queryHandler: QueryHandler = new QueryHandler()
+    private readonly queryHandler: QueryHandler | null = null,
+    private readonly runInTransaction: <T>(fn: (tx: Transaction) => Promise<T>) => Promise<T> = (fn) =>
+      DrizzleDb.transaction(fn)
   ) {}
 
   /**
-   * Writes the render columns (and the repaired harness or verdict notes) of one component row.
+   * Writes the render columns (and the repaired harness or verdict notes) of one component row and replaces its
+   * state rows (16 §9.4), in one transaction.
    *
-   * @throws Error when the update does not return 200.
+   * @throws Error when a statement fails.
    */
   async saveRenderResult(componentId: number, payload: ComponentRenderPayload): Promise<void> {
+    if (this.queryHandler !== null) {
+      await this.write(this.queryHandler, componentId, payload);
+      return;
+    }
+    await this.runInTransaction(async (tx) => {
+      await this.write(new QueryHandler(tx), componentId, payload);
+    });
+  }
+
+  private async write(queryHandler: QueryHandler, componentId: number, payload: ComponentRenderPayload): Promise<void> {
     const row: Record<string, unknown> = {
       renderStatus: payload.renderStatus,
       baseImagePath: payload.baseImagePath,
@@ -216,7 +279,7 @@ export class QueryHandlerRenderPersistence implements ComponentRenderPersistence
     } else if (payload.baseHarnessNotes !== undefined) {
       row.baseHarnessNotes = payload.baseHarnessNotes;
     }
-    const response = await this.queryHandler.update(
+    const response = await queryHandler.update(
       row,
       { id: componentId, visualizationId: this.visualizationId },
       Table.VISUALIZATION_COMPONENTS
@@ -226,6 +289,7 @@ export class QueryHandlerRenderPersistence implements ComponentRenderPersistence
         `visualization_components update failed for id ${String(componentId)}: ${String(response.error ?? response.status)}`
       );
     }
+    await persistComponentStates(queryHandler, this.visualizationId, componentId, payload.states);
   }
 }
 
@@ -247,6 +311,22 @@ export class ArtifactStoreRenderAdapter implements RenderArtifactStore {
   async ensureComponentDir(visualizationId: number, componentId: number): Promise<void> {
     await this.store.ensureComponentDir(visualizationId, componentId);
   }
+
+  /** Paths of one state's image (16 §6.14). */
+  stateImagePaths(
+    visualizationId: number,
+    componentId: number,
+    ordinal: number,
+    kind: RenderSide
+  ): { absolutePath: string; relativePath: string } {
+    const relativePath = this.store.componentStateImagePath(visualizationId, componentId, ordinal, kind);
+    return { relativePath, absolutePath: this.store.resolveSafe(relativePath) };
+  }
+
+  /** mkdir -p of one state's artifact dir. */
+  async ensureComponentStateDir(visualizationId: number, componentId: number, ordinal: number): Promise<void> {
+    await this.store.ensureComponentStateDir(visualizationId, componentId, ordinal);
+  }
 }
 
 /** Production wiring of every dependency except `repairHarness`. */
@@ -262,14 +342,32 @@ export function defaultRenderDependencies(): Omit<RenderServiceDependencies, "re
   };
 }
 
-/** Maps side outcomes to the row status: all present sides ok → rendered, some → partial, none → failed. */
-export function deriveRenderStatus(result: ComponentRenderResult): "rendered" | "partial" | "failed" {
-  const sides = [result.base, result.head].filter((side): side is RenderSideResult => side !== null);
+/** One state's status (16 §9.3): every present side ok → rendered, some → partial, none → failed. */
+export function deriveStateStatus(
+  base: Pick<RenderSideResult, "ok"> | null,
+  head: Pick<RenderSideResult, "ok"> | null
+): "rendered" | "partial" | "failed" {
+  const sides = [base, head].filter((side): side is Pick<RenderSideResult, "ok"> => side !== null);
   const okCount = sides.filter((side) => side.ok).length;
   if (sides.length === 0 || okCount === 0) {
     return "failed";
   }
   return okCount === sides.length ? "rendered" : "partial";
+}
+
+/**
+ * Row status (16 §9.3): with states, rendered when every state rendered, failed when every state failed, else
+ * partial; without states (rows that never reached a page), from the Default sides as before.
+ */
+export function deriveRenderStatus(result: ComponentRenderResult): "rendered" | "partial" | "failed" {
+  if (result.states.length === 0) {
+    return deriveStateStatus(result.base, result.head);
+  }
+  const statuses = result.states.map((state) => deriveStateStatus(state.base, state.head));
+  if (statuses.every((status) => status === "rendered")) {
+    return "rendered";
+  }
+  return statuses.every((status) => status === "failed") ? "failed" : "partial";
 }
 
 export interface SideAttempt {
@@ -278,22 +376,260 @@ export interface SideAttempt {
   tempImagePath: string | null;
 }
 
-export interface ItemAttempt {
-  attemptNo: number;
-  harness: HarnessGenerationResult;
+/** One state's render of an attempt (16 §9.2). A side is null when the state does not exist there. */
+export interface StateAttempt {
+  plan: StatePlan;
   base: SideAttempt | null;
   head: SideAttempt | null;
 }
 
-/** Prefers a primary-side success; ties go to the repaired attempt. */
+export interface ItemAttempt {
+  attemptNo: number;
+  harness: HarnessGenerationResult;
+  /** Mirror state 0 (Default). */
+  base: SideAttempt | null;
+  head: SideAttempt | null;
+  /** 16 §9.2: every state in ordinal order. */
+  states: StateAttempt[];
+}
+
+/** An attempt from its states; `base`/`head` mirror state 0. */
+export function attemptOf(attemptNo: number, harness: HarnessGenerationResult, states: StateAttempt[]): ItemAttempt {
+  const first = states[0];
+  return { attemptNo, harness, base: first?.base ?? null, head: first?.head ?? null, states };
+}
+
+/** Prefers primary-side successes, summed over states (16 §9.6); ties go to the repaired attempt. */
 export function chooseAttempt(
   primarySide: RenderSide,
   original: ItemAttempt,
   repaired: ItemAttempt
 ): "original" | "repaired" {
+  const stateScore = (state: Pick<StateAttempt, "base" | "head">): number =>
+    (state[primarySide]?.result.ok === true ? 2 : 0) +
+    (state.base?.result.ok === true ? 1 : 0) +
+    (state.head?.result.ok === true ? 1 : 0);
   const score = (attempt: ItemAttempt): number =>
-    (attempt[primarySide]?.result.ok ? 2 : 0) + (attempt.base?.result.ok ? 1 : 0) + (attempt.head?.result.ok ? 1 : 0);
+    attempt.states.length === 0
+      ? stateScore(attempt)
+      : attempt.states.reduce((sum, state) => sum + stateScore(state), 0);
   return score(repaired) >= score(original) ? "repaired" : "original";
+}
+
+const STATE_PREFIX = (name: string): string => (name === DEFAULT_STATE_NAME ? "" : `State "${name}": `);
+
+/**
+ * The result and the render columns of a finalized attempt (16 §9.2, §9.3): `base`/`head` and the row images
+ * mirror state 0; the row errors are each side's first failing state, prefixed with the state name when it is not
+ * Default; one StateRenderPayload per state.
+ */
+export function composeRenderOutcome(
+  componentId: number,
+  attempt: ItemAttempt
+): { result: ComponentRenderResult; payload: ComponentRenderPayload } {
+  const states: StateRenderResult[] = attempt.states.map((state) => ({
+    ordinal: state.plan.ordinal,
+    stateName: state.plan.name,
+    base: state.base?.result ?? null,
+    head: state.head?.result ?? null
+  }));
+  const result: ComponentRenderResult = {
+    componentId,
+    base: attempt.base?.result ?? null,
+    head: attempt.head?.result ?? null,
+    states
+  };
+  const firstError = (side: RenderSide): string | null => {
+    for (const state of attempt.states) {
+      const sideResult = state[side]?.result;
+      if (sideResult?.ok === false) {
+        return `${STATE_PREFIX(state.plan.name)}${sideResult.error ?? ""}`;
+      }
+    }
+    const mirror = result[side];
+    return mirror?.ok === false ? mirror.error : null;
+  };
+  const sizeSource = result.head?.ok === true ? result.head : result.base?.ok === true ? result.base : null;
+  const payloadStates: StateRenderPayload[] = attempt.states.map((state) => {
+    const base = state.base?.result ?? null;
+    const head = state.head?.result ?? null;
+    const size = head?.ok === true ? head : base?.ok === true ? base : null;
+    return {
+      ordinal: state.plan.ordinal,
+      stateName: state.plan.name,
+      onBase: state.plan.onBase,
+      onHead: state.plan.onHead,
+      steps: state.plan.steps,
+      renderStatus: deriveStateStatus(base, head),
+      baseImagePath: base?.ok === true ? base.imagePath : null,
+      headImagePath: head?.ok === true ? head.imagePath : null,
+      imageWidth: size?.width ?? null,
+      imageHeight: size?.height ?? null,
+      baseError: base?.ok === false ? base.error : null,
+      headError: head?.ok === false ? head.error : null,
+      baseFailureKind: base?.ok === false ? (state.base?.kind ?? base.failureKind) : null,
+      headFailureKind: head?.ok === false ? (state.head?.kind ?? head.failureKind) : null
+    };
+  });
+  return {
+    result,
+    payload: {
+      renderStatus: deriveRenderStatus(result),
+      baseImagePath: result.base?.ok === true ? result.base.imagePath : null,
+      headImagePath: result.head?.ok === true ? result.head.imagePath : null,
+      imageWidth: sizeSource?.width ?? null,
+      imageHeight: sizeSource?.height ?? null,
+      baseError: firstError("base"),
+      headError: firstError("head"),
+      states: payloadStates
+    }
+  };
+}
+
+/** The state (and side) whose failure triggers the single fix-up of a written harness (16 §9.6), or null. */
+export function repairTarget(
+  item: Pick<RenderWorkItem, "primarySide" | "repairsUsed" | "origin">,
+  attempt: ItemAttempt
+): StateAttempt | null {
+  if (item.origin === "library" || item.repairsUsed >= HARNESS_MAX_REPAIRS_PER_COMPONENT) {
+    return null;
+  }
+  const other = otherSide(item.primarySide);
+  for (const state of attempt.states) {
+    const primary = state[item.primarySide];
+    if (primary === null || primary.result.ok || primary.kind === null || !isRepairableFailure(primary.kind)) {
+      continue;
+    }
+    const otherAttempt = state[other];
+    if (otherAttempt === null || !otherAttempt.result.ok) {
+      return state;
+    }
+  }
+  return null;
+}
+
+/**
+ * Replaced rows (00 §17, 16 §9.6): per side whose harness was written in this run, the first state that failed on
+ * that side with a repairable kind, while the side has repair budget left.
+ */
+export function sideRepairTargets(
+  item: Pick<RenderWorkItem, "origin" | "baseOrigin" | "sideRepairsUsed">,
+  attempt: ItemAttempt
+): Array<{ side: RenderSide; state: StateAttempt }> {
+  const targets: Array<{ side: RenderSide; state: StateAttempt }> = [];
+  for (const side of SIDES) {
+    const origin = side === "base" ? (item.baseOrigin ?? item.origin) : item.origin;
+    if (origin === "library" || (item.sideRepairsUsed?.[side] ?? 0) >= HARNESS_MAX_REPAIRS_PER_COMPONENT) {
+      continue;
+    }
+    const state = attempt.states.find((candidate) => {
+      const sideAttempt = candidate[side];
+      return (
+        sideAttempt !== null &&
+        !sideAttempt.result.ok &&
+        sideAttempt.kind !== null &&
+        isRepairableFailure(sideAttempt.kind)
+      );
+    });
+    if (state !== undefined) {
+      targets.push({ side, state });
+    }
+  }
+  return targets;
+}
+
+/** HarnessRenderError for 09 (09 §5.1, 16 §9.6) from the state that triggered repair. */
+export function stateRenderError(
+  item: Pick<RenderWorkItem, "primarySide" | "sides">,
+  state: StateAttempt
+): HarnessRenderError {
+  const primary = state[item.primarySide];
+  if (primary === null) {
+    throw new Error("Invariant: stateRenderError called without a primary-side attempt");
+  }
+  const kind = primary.kind;
+  if (kind !== "module_load" && kind !== "render_error" && kind !== "timeout" && kind !== "step_failed") {
+    throw new Error("Invariant: stateRenderError called for a non-repairable failure");
+  }
+  const other = state[otherSide(item.primarySide)];
+  const otherError = other?.result.error ?? null;
+  return {
+    sides: SIDES.filter((side) => item.sides[side]),
+    kind,
+    message: primary.result.error ?? "",
+    otherSideMessage: otherError !== null && otherError !== "" ? otherError.slice(0, 1_000) : null,
+    ...(state.plan.name !== DEFAULT_STATE_NAME ? { stateName: state.plan.name } : {})
+  };
+}
+
+/** Runs `fn` over `items` with at most `concurrency` in flight (16 §9.2 item pool). */
+export async function runPool<T>(
+  items: readonly T[],
+  concurrency: number,
+  fn: (item: T) => Promise<void>
+): Promise<void> {
+  let next = 0;
+  const workers = Array.from({ length: Math.max(1, Math.min(concurrency, items.length)) }, async () => {
+    for (;;) {
+      const index = next;
+      next += 1;
+      const item = items[index];
+      if (item === undefined) {
+        return;
+      }
+      await fn(item);
+    }
+  });
+  await Promise.all(workers);
+}
+
+/** " (Overdue)" for a non-Default state, "" for Default: appended to console lines about one state. */
+export function stateSuffix(name: string): string {
+  return name === DEFAULT_STATE_NAME ? "" : ` (${name})`;
+}
+
+/**
+ * Console lines of a finalized attempt (both render engines): one info line when every state rendered, else one
+ * warning per failed state and side. A saved (library) harness failing for a harness-attributable reason gets the
+ * 16 §18 "Repair it from the card" line instead.
+ */
+export async function reportStateAttempt(
+  item: Pick<RenderWorkItem, "candidate" | "origin" | "baseOrigin">,
+  attempt: ItemAttempt,
+  write: (level: "info" | "warn", message: string) => Promise<void>
+): Promise<void> {
+  const name = item.candidate.displayName;
+  const states = attempt.states.length > 0 ? attempt.states : [];
+  const allOk = states.every((state) => SIDES.every((side) => state[side] === null || state[side].result.ok));
+  if (allOk) {
+    const parts = [describeSide(attempt.base, "base"), describeSide(attempt.head, "head")].filter(
+      (part): part is string => part !== null
+    );
+    const count = states.length > 1 ? ` (${String(states.length)} states)` : "";
+    await write("info", `Rendered ${name}: ${parts.join(", ")}${count}.`);
+    return;
+  }
+  for (const state of states) {
+    for (const side of SIDES) {
+      const sideAttempt = state[side];
+      if (sideAttempt === null || sideAttempt.result.ok) {
+        continue;
+      }
+      const origin = side === "base" ? (item.baseOrigin ?? item.origin) : item.origin;
+      const summary = errorSummaryLine(sideAttempt.result.error ?? "");
+      if (origin === "library" && sideAttempt.kind !== null && isRepairableFailure(sideAttempt.kind)) {
+        await write(
+          "warn",
+          `${name}: the saved harness no longer renders on the ${side} side (${state.plan.name}: ${summary}). Repair it from the card.`
+        );
+        continue;
+      }
+      await write(
+        "warn",
+        `${name}${stateSuffix(state.plan.name)}: ${side} failed (${sideAttempt.kind ?? "error"}): ${summary}`
+      );
+    }
+  }
 }
 
 /** Renders the components of one visualization (one RenderRun per call). */
@@ -324,7 +660,17 @@ export class RenderService {
 // ---------------------------------------------------------------------------------------------------------------
 
 type HostSlot =
-  | { state: "ready"; handle: ViteHostHandle; rendered: number; labels: Map<string, string>; stylesChecked: boolean }
+  | {
+      state: "ready";
+      handle: ViteHostHandle;
+      rendered: number;
+      /** Pages started on this host (the cold-start allowance goes to the first page only, 16 §9.2). */
+      started: number;
+      labels: Map<string, string>;
+      stylesChecked: boolean;
+      /** A stylesheet check is running on an in-flight page (items render concurrently). */
+      stylesCheckPending: boolean;
+    }
   | { state: "failed"; message: string }
   | { state: "not_needed" };
 
@@ -375,6 +721,7 @@ class RenderRun {
   private readonly log: ReturnType<typeof createLogger>;
   private readonly persistence: ReturnType<RenderServiceDependencies["createPersistence"]>;
   private deadline = 0;
+  private budgetMs = RENDER_STAGE_TIMEOUT_MS;
   private cancelled = false;
   private budgetExceeded = false;
   private readonly results = new Map<number, ComponentRenderResult>();
@@ -424,8 +771,10 @@ class RenderRun {
         // 2. Workspaces.
         await this.prepareWorkspaces(layouts, items);
         const envKeys = await this.deps.scanEnvKeys([layouts.base.viteRoot, layouts.head.viteRoot]);
-        const groups = buildRenderGroups(items);
+        const groups = splitLargeGroups(buildRenderGroups(items), RENDER_GROUP_MAX_ITEMS);
         this.totalGroups = groups.length;
+        this.budgetMs = renderStageBudgetMs("react_vite", items, groups);
+        this.deadline = startedAt + this.budgetMs;
         this.log.info(
           { event: "render.run.started", components: items.length, groups: groups.length },
           "Render run started"
@@ -616,7 +965,8 @@ class RenderRun {
             imageWidth: null,
             imageHeight: null,
             baseError: "Component file not found on either side.",
-            headError: "Component file not found on either side."
+            headError: "Component file not found on either side.",
+            states: []
           },
           { componentId: candidate.componentId, base: null, head: null, states: [] }
         );
@@ -658,12 +1008,15 @@ class RenderRun {
       const presentSides = SIDES.filter((side) => sides[side]);
       if (presentSides.every((side) => plannedFailures[side] !== null)) {
         // No side on disk: final failed result immediately (no servers needed).
-        const attempt: ItemAttempt = {
-          attemptNo: 0,
+        const attempt = attemptOf(
+          0,
           harness,
-          base: this.plannedAttempt(item, "base"),
-          head: this.plannedAttempt(item, "head")
-        };
+          item.states.map((plan) => ({
+            plan,
+            base: plan.onBase ? this.plannedAttempt(item, "base") : null,
+            head: plan.onHead ? this.plannedAttempt(item, "head") : null
+          }))
+        );
         await this.finalizeAttempt(item, attempt, "original");
         continue;
       }
@@ -690,7 +1043,9 @@ class RenderRun {
       primarySide: sides.head ? "head" : "base",
       repairsUsed: 0,
       mockLabels: new Map(),
-      plannedFailures
+      plannedFailures,
+      states: [],
+      origin: harness.origin
     };
     this.applyHarness(item, harness, layouts);
     return item;
@@ -702,8 +1057,10 @@ class RenderRun {
    */
   private applyHarness(item: RenderWorkItem, harness: HarnessGenerationResult, layouts: SideLayouts): void {
     item.harness = harness;
+    item.origin = harness.origin;
     item.acceptedMocks = validateMockedModules(harness.mockedModules).accepted;
     if (isTwoSidedItem(item)) {
+      item.baseOrigin = sideHarnessOf(harness, "base").origin;
       item.baseAcceptedMocks = validateMockedModules(sideHarnessOf(harness, "base").mockedModules).accepted;
       item.fingerprint = twoSidedFingerprint(
         item.paths.base ?? item.candidate.filePath,
@@ -728,6 +1085,7 @@ class RenderRun {
         item.mockLabels.set(mockHash(componentFile, mock.specifier, mock.source), mock.specifier);
       }
     }
+    item.states = planItemStates(item); // a repaired harness may declare other states (16 §9.6)
   }
 
   private async reportRejectedMocks(candidate: ComponentCandidate, mocks: readonly MockedModule[]): Promise<void> {
@@ -903,19 +1261,23 @@ class RenderRun {
       this.openHost("head", group, layouts.head, envKeys, needs.head, groupNo)
     ]);
     try {
-      for (const item of group.items) {
-        if (await this.shouldStop()) {
+      // 16 §9.2: RENDER_ITEM_CONCURRENCY items at a time; each renders its states in order, base ∥ head.
+      let stopped = false;
+      await runPool(group.items, RENDER_ITEM_CONCURRENCY, async (item) => {
+        if (stopped || (await this.shouldStop())) {
+          stopped = true;
           return;
         }
         const attempt = await this.renderItem(item, { base, head }, item.repairsUsed);
         if (attempt === null) {
-          return; // cancelled mid-item
+          stopped = true; // cancelled mid-item
+          return;
         }
         await this.finalizeAttempt(item, attempt, "original");
         if (this.needsRepair(item, attempt)) {
           this.repairQueue.push({ item, attempt });
         }
-      }
+      });
     } finally {
       await Promise.all([this.closeHost(base), this.closeHost(head)]);
     }
@@ -996,7 +1358,15 @@ class RenderRun {
           await this.console(warning.startsWith("Removed dev-only") ? "info" : "warn", warning);
         }
       }
-      return { state: "ready", handle, rendered: 0, labels, stylesChecked: false };
+      return {
+        state: "ready",
+        handle,
+        rendered: 0,
+        started: 0,
+        labels,
+        stylesChecked: false,
+        stylesCheckPending: false
+      };
     } catch (error) {
       if (this.ctx.signal.aborted) {
         return { state: "failed", message: "Cancelled." };
@@ -1027,27 +1397,38 @@ class RenderRun {
 
   // ----- rendering one item -----
 
+  /** Renders every state in ordinal order, base ∥ head per state (a state absent on a side is not requested). */
   private async renderItem(
     item: RenderWorkItem,
     hosts: { base: HostSlot; head: HostSlot },
     attemptNo: number
   ): Promise<ItemAttempt | null> {
     const harness = item.harness;
-    const [base, head] = await Promise.all([
-      item.sides.base ? this.renderSide(item, "base", hosts.base, attemptNo) : Promise.resolve(null),
-      item.sides.head ? this.renderSide(item, "head", hosts.head, attemptNo) : Promise.resolve(null)
-    ]);
-    if (base?.kind === "cancelled" || head?.kind === "cancelled" || this.ctx.signal.aborted) {
-      this.cancelled = true;
-      for (const side of [base, head]) {
-        if (side?.tempImagePath) {
-          await removeQuietly(side.tempImagePath);
-          this.tempImages.delete(side.tempImagePath);
+    const states: StateAttempt[] = [];
+    for (const plan of item.states) {
+      const [base, head] = await Promise.all([
+        item.sides.base && plan.onBase
+          ? this.renderSide(item, "base", hosts.base, attemptNo, plan)
+          : Promise.resolve(null),
+        item.sides.head && plan.onHead
+          ? this.renderSide(item, "head", hosts.head, attemptNo, plan)
+          : Promise.resolve(null)
+      ]);
+      states.push({ plan, base, head });
+      if (base?.kind === "cancelled" || head?.kind === "cancelled" || this.ctx.signal.aborted) {
+        this.cancelled = true;
+        for (const state of states) {
+          for (const side of [state.base, state.head]) {
+            if (side?.tempImagePath) {
+              await removeQuietly(side.tempImagePath);
+              this.tempImages.delete(side.tempImagePath);
+            }
+          }
         }
+        return null;
       }
-      return null;
     }
-    return { attemptNo, harness, base, head };
+    return attemptOf(attemptNo, harness, states);
   }
 
   private sideFailure(side: RenderSide, kind: RenderFailureKind, headline: string, durationMs = 0): SideAttempt {
@@ -1062,9 +1443,10 @@ class RenderRun {
     item: RenderWorkItem,
     side: RenderSide,
     slot: HostSlot,
-    attemptNo: number
+    attemptNo: number,
+    state: StatePlan
   ): Promise<SideAttempt> {
-    const name = item.candidate.displayName;
+    const name = `${item.candidate.displayName}${stateSuffix(state.name)}`;
     const componentId = item.candidate.componentId;
     const planned = item.plannedFailures[side];
     if (planned !== null) {
@@ -1084,10 +1466,10 @@ class RenderRun {
       );
     }
 
-    const final = this.deps.artifactStore.imagePaths(this.ctx.visualizationId, componentId, side);
+    const final = this.deps.artifactStore.stateImagePaths(this.ctx.visualizationId, componentId, state.ordinal, side);
     const tempImagePath = `${final.absolutePath}.attempt${String(attemptNo)}.png`;
     try {
-      await this.deps.artifactStore.ensureComponentDir(this.ctx.visualizationId, componentId);
+      await this.deps.artifactStore.ensureComponentStateDir(this.ctx.visualizationId, componentId, state.ordinal);
     } catch (error) {
       return this.sideFailure(side, "screenshot", `Could not create the artifact folder: ${getErrorMessage(error)}`);
     }
@@ -1096,10 +1478,9 @@ class RenderRun {
     let retries = 0;
     for (;;) {
       const budget = this.deadline - this.deps.now();
-      const timeoutMs = Math.min(
-        RENDER_TIMEOUT_MS + (slot.rendered === 0 ? RENDER_COLD_START_ALLOWANCE_MS : 0),
-        budget
-      );
+      const coldStart = slot.started === 0;
+      slot.started += 1;
+      const timeoutMs = Math.min(RENDER_TIMEOUT_MS + (coldStart ? RENDER_COLD_START_ALLOWANCE_MS : 0), budget);
       if (timeoutMs <= 0) {
         return this.sideFailure(side, "budget_exceeded", BUDGET_EXCEEDED_HEADLINE);
       }
@@ -1107,24 +1488,29 @@ class RenderRun {
         return this.sideFailure(side, "browser", "Chromium disconnected and could not be restarted.");
       }
       this.tempImages.add(tempImagePath);
+      const checkStyles = !slot.stylesChecked && !slot.stylesCheckPending;
+      slot.stylesCheckPending ||= checkStyles;
       outcome = await this.session.renderComponent({
         host: slot.handle,
         componentId,
-        stateName: DEFAULT_STATE_NAME, // 16a compile shim (16 §6.12): 16e renders one page per state
+        stateName: state.name,
         timeoutMs,
         outputPath: tempImagePath,
         signal: this.ctx.signal,
-        checkStylesheets: slot.stylesChecked
-          ? null
-          : {
+        checkStylesheets: checkStyles
+          ? {
               globalStylesExpected: this.ctx.repository.globalStylePaths.length > 0,
               tailwindMajor: slot.handle.tailwindMajor
-            },
+            }
+          : null,
         viewport: RENDER_VIEWPORTS[this.ctx.repository.renderViewport ?? "desktop"],
         mockLabels: slot.labels,
         stripPaths: this.stripPaths
       });
       slot.rendered += 1;
+      if (checkStyles) {
+        slot.stylesCheckPending = false; // a failed page leaves the check to the next page (stylesChecked stays false)
+      }
       if (!outcome.ok && outcome.infraRetryable && retries < RENDER_INFRA_RETRIES && !this.ctx.signal.aborted) {
         retries += 1;
         this.log.debug(
@@ -1142,7 +1528,14 @@ class RenderRun {
       const error = this.sanitize(outcome.error);
       if (outcome.kind !== "cancelled") {
         this.log.warn(
-          { event: "render.page.failed", componentId, side, kind: outcome.kind, error: error.slice(0, 500) },
+          {
+            event: "render.page.failed",
+            componentId,
+            side,
+            state: state.ordinal,
+            kind: outcome.kind,
+            error: error.slice(0, 500)
+          },
           "Side render failed"
         );
       }
@@ -1195,50 +1588,45 @@ class RenderRun {
     which: "original" | "repaired"
   ): Promise<void> {
     const componentId = item.candidate.componentId;
-    for (const side of SIDES) {
-      const sideAttempt = attempt[side];
-      if (sideAttempt === null) {
-        continue;
-      }
-      const final = this.deps.artifactStore.imagePaths(this.ctx.visualizationId, componentId, side);
-      if (sideAttempt.result.ok && sideAttempt.tempImagePath !== null) {
-        try {
-          await fs.rename(sideAttempt.tempImagePath, final.absolutePath);
-        } catch (error) {
-          sideAttempt.result = failedSideResult(
-            side,
-            "screenshot",
-            this.formatPlanned("screenshot", `Could not store the image: ${getErrorMessage(error)}`),
-            sideAttempt.result.durationMs,
-            sideAttempt.result.consoleErrors
-          );
-          sideAttempt.kind = "screenshot";
+    for (const state of attempt.states) {
+      for (const side of SIDES) {
+        const sideAttempt = state[side];
+        if (sideAttempt === null) {
+          continue;
         }
-        this.tempImages.delete(sideAttempt.tempImagePath);
-      } else {
-        await removeQuietly(final.absolutePath);
+        const final = this.deps.artifactStore.stateImagePaths(
+          this.ctx.visualizationId,
+          componentId,
+          state.plan.ordinal,
+          side
+        );
+        if (sideAttempt.result.ok && sideAttempt.tempImagePath !== null) {
+          try {
+            await fs.rename(sideAttempt.tempImagePath, final.absolutePath);
+          } catch (error) {
+            sideAttempt.result = failedSideResult(
+              side,
+              "screenshot",
+              this.formatPlanned("screenshot", `Could not store the image: ${getErrorMessage(error)}`),
+              sideAttempt.result.durationMs,
+              sideAttempt.result.consoleErrors
+            );
+            sideAttempt.kind = "screenshot";
+          }
+          this.tempImages.delete(sideAttempt.tempImagePath);
+        } else {
+          await removeQuietly(final.absolutePath);
+        }
       }
     }
-    const result: ComponentRenderResult = {
-      componentId,
-      base: attempt.base?.result ?? null,
-      head: attempt.head?.result ?? null,
-      states: [] // 16a compile shim (16 §6.12): 16e renders and reports every state
-    };
-    const sizeSource = result.head?.ok === true ? result.head : result.base?.ok === true ? result.base : null;
-    const payload: ComponentRenderPayload = {
-      renderStatus: deriveRenderStatus(result),
-      baseImagePath: result.base?.ok === true ? result.base.imagePath : null,
-      headImagePath: result.head?.ok === true ? result.head.imagePath : null,
-      imageWidth: sizeSource?.width ?? null,
-      imageHeight: sizeSource?.height ?? null,
-      baseError: result.base?.ok === false ? result.base.error : null,
-      headError: result.head?.ok === false ? result.head.error : null,
+    const finalized = attemptOf(attempt.attemptNo, attempt.harness, attempt.states);
+    const { result, payload } = composeRenderOutcome(componentId, finalized);
+    await this.persist(componentId, {
+      ...payload,
       ...(which === "repaired" ? repairedHarnessPayload(attempt.harness) : {})
-    };
-    await this.persist(componentId, payload);
+    });
     this.results.set(componentId, result);
-    await this.reportAttempt(item, attempt);
+    await this.reportAttempt(item, finalized);
   }
 
   private async finalizeImmediate(
@@ -1262,45 +1650,26 @@ class RenderRun {
   }
 
   private async reportAttempt(item: RenderWorkItem, attempt: ItemAttempt): Promise<void> {
-    const name = item.candidate.displayName;
-    const parts = [describeSide(attempt.base, "base"), describeSide(attempt.head, "head")].filter(
-      (part): part is string => part !== null
-    );
-    const allOk = SIDES.every((side) => attempt[side] === null || attempt[side].result.ok);
-    if (allOk) {
-      await this.console("info", `Rendered ${name}: ${parts.join(", ")}.`);
-      return;
-    }
-    for (const side of SIDES) {
-      const sideAttempt = attempt[side];
-      if (sideAttempt === null || sideAttempt.result.ok) {
-        continue;
-      }
-      await this.console(
-        "warn",
-        `${name}: ${side} failed (${sideAttempt.kind ?? "error"}): ${errorSummaryLine(sideAttempt.result.error ?? "")}`
-      );
-    }
+    await reportStateAttempt(item, attempt, (level, message) => this.console(level, message));
   }
 
   // ----- repair (10 §5.13.6) -----
 
+  /** 16 §9.6: only harnesses written in this run, per state in ordinal order (per side for replaced rows). */
   private needsRepair(item: RenderWorkItem, attempt: ItemAttempt): boolean {
     if (isTwoSidedItem(item)) {
-      return sidesToRepair(attempt, item.sideRepairsUsed ?? {}).length > 0; // 00 §17: per side
+      return sideRepairTargets(item, attempt).length > 0; // 00 §17: per side
     }
-    const primary = attempt[item.primarySide];
-    if (primary === null || primary.result.ok || primary.kind === null || !isRepairableFailure(primary.kind)) {
-      return false;
-    }
-    const other = attempt[otherSide(item.primarySide)];
-    const othersFailed = other === null || !other.result.ok;
-    return othersFailed && item.repairsUsed < HARNESS_MAX_REPAIRS_PER_COMPONENT;
+    return repairTarget(item, attempt) !== null;
   }
 
   private async runRepairRounds(layouts: SideLayouts, envKeys: string[]): Promise<void> {
     while (this.repairQueue.length > 0) {
-      const queue = this.repairQueue;
+      // Items render concurrently (16 §9.2): repair in rank order, not completion order.
+      const queue = [...this.repairQueue].sort(
+        (a, b) =>
+          a.item.candidate.rank - b.item.candidate.rank || a.item.candidate.componentId - b.item.candidate.componentId
+      );
       this.repairQueue = [];
       const repaired: RepairEntry[] = [];
       for (const entry of queue) {
@@ -1335,8 +1704,8 @@ class RenderRun {
     const used = { ...item.sideRepairsUsed };
     let harness = item.harness;
     let repairedAny = false;
-    for (const side of sidesToRepair(attempt, used)) {
-      const sideAttempt = attempt[side];
+    for (const { side, state } of sideRepairTargets(item, attempt)) {
+      const sideAttempt = state[side];
       if (sideAttempt === null) {
         continue;
       }
@@ -1355,7 +1724,7 @@ class RenderRun {
         outcome = await this.deps.repairHarness(
           componentId,
           sideHarnessResult(harness, side),
-          sideRenderError(side, sideAttempt)
+          sideRenderError(side, sideAttempt, state.plan.name)
         );
       } catch (error) {
         const message = getErrorMessage(error);
@@ -1420,15 +1789,19 @@ class RenderRun {
     const { item, attempt } = entry;
     const componentId = item.candidate.componentId;
     const name = item.candidate.displayName;
-    const primary = attempt[item.primarySide];
+    const target = repairTarget(item, attempt);
+    if (target === null) {
+      return false;
+    }
+    const primary = target[item.primarySide];
     await this.console(
       "info",
-      `Repairing the harness for ${name} after a render failure (${item.primarySide}: ${primary?.kind ?? "error"}).`
+      `Repairing the harness for ${name}${stateSuffix(target.plan.name)} after a render failure (${item.primarySide}: ${primary?.kind ?? "error"}).`
     );
     this.log.info({ event: "render.repair.requested", componentId }, "Harness repair requested");
     let outcome: HarnessRepairOutcome;
     try {
-      outcome = await this.deps.repairHarness(componentId, item.harness, toRenderError(item, attempt));
+      outcome = await this.deps.repairHarness(componentId, item.harness, stateRenderError(item, target));
     } catch (error) {
       const message = getErrorMessage(error);
       this.log.warn(
@@ -1516,14 +1889,17 @@ class RenderRun {
             this.repairQueue.push({ item, attempt: repaired });
           }
         } else {
-          for (const side of SIDES) {
-            const temp = repaired[side]?.tempImagePath ?? null;
-            if (temp !== null) {
-              await removeQuietly(temp);
-              this.tempImages.delete(temp);
+          for (const state of repaired.states) {
+            for (const side of SIDES) {
+              const temp = state[side]?.tempImagePath ?? null;
+              if (temp !== null) {
+                await removeQuietly(temp);
+                this.tempImages.delete(temp);
+              }
             }
           }
           item.harness = original.attempt.harness;
+          item.states = original.attempt.states.map((state) => state.plan);
           await this.console(
             "info",
             `Repaired harness for ${name} did not improve the result; keeping the first result.`
@@ -1549,18 +1925,27 @@ class RenderRun {
     if (unfinished.length === 0) {
       return;
     }
-    const minutes = Math.round(RENDER_STAGE_TIMEOUT_MS / 60_000);
+    const minutes = Math.round(this.budgetMs / 60_000);
     await this.console(
       "warn",
       `The render stage exceeded its ${String(minutes)}-minute budget; ${String(unfinished.length)} component(s) were not rendered.`
     );
     for (const item of unfinished) {
-      const attempt: ItemAttempt = {
-        attemptNo: item.repairsUsed,
-        harness: item.harness,
-        base: item.sides.base ? this.sideFailure("base", "budget_exceeded", BUDGET_EXCEEDED_HEADLINE) : null,
-        head: item.sides.head ? this.sideFailure("head", "budget_exceeded", BUDGET_EXCEEDED_HEADLINE) : null
-      };
+      const attempt = attemptOf(
+        item.repairsUsed,
+        item.harness,
+        item.states.map((plan) => ({
+          plan,
+          base:
+            item.sides.base && plan.onBase
+              ? this.sideFailure("base", "budget_exceeded", BUDGET_EXCEEDED_HEADLINE)
+              : null,
+          head:
+            item.sides.head && plan.onHead
+              ? this.sideFailure("head", "budget_exceeded", BUDGET_EXCEEDED_HEADLINE)
+              : null
+        }))
+      );
       await this.finalizeAttempt(item, attempt, "original");
     }
   }
@@ -1628,26 +2013,6 @@ class RenderRun {
       }
     }
   }
-}
-
-/** HarnessRenderError for 09 (09 §5.1) from the attempt that triggered repair. */
-function toRenderError(item: RenderWorkItem, attempt: ItemAttempt): HarnessRenderError {
-  const primary = attempt[item.primarySide];
-  if (primary === null) {
-    throw new Error("Invariant: toRenderError called without a primary-side attempt");
-  }
-  const kind = primary.kind;
-  if (kind !== "module_load" && kind !== "render_error" && kind !== "timeout") {
-    throw new Error("Invariant: toRenderError called for a non-repairable failure");
-  }
-  const other = attempt[otherSide(item.primarySide)];
-  const otherError = other?.result.error ?? null;
-  return {
-    sides: SIDES.filter((side) => item.sides[side]),
-    kind,
-    message: primary.result.error ?? "",
-    otherSideMessage: otherError !== null && otherError !== "" ? otherError.slice(0, 1_000) : null
-  };
 }
 
 async function settle(promise: Promise<void> | undefined, log: ReturnType<typeof createLogger>): Promise<void> {

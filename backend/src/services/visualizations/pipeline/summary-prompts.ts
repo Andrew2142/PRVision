@@ -138,6 +138,8 @@ export interface SummaryComponentInput {
    * "after" shows) and the plain evidence for the pairing. Kept in the user content so the system prompt stays static.
    */
   replaces?: { displayName: string; filePath: string; exportName: string; evidence: string[] } | null;
+  /** 16 §9.7: the row's states in ordinal order (absent for rows without state rows). */
+  states?: Array<{ name: string; visualChange: string | null; diffPixelRatio: number | null }>;
 }
 
 /** Limits the prompt budget (11 §5.4.5) shrinks step by step. */
@@ -178,6 +180,8 @@ export interface SummaryPromptInput {
   limits?: SummaryPromptLimits;
   /** Changes only the structural diff label (15 §5.8.3). Default "react_vite". */
   framework?: SummaryFramework;
+  /** 16 §9.7: global-style re-check counts, when the run has a trigger. */
+  recheck?: { checked: number; changed: number; trigger: string };
 }
 
 const CHANGED_FILES_MAX_LINES = 60;
@@ -328,6 +332,23 @@ export function structuralLine(change: StructuralChange): string {
   }
 }
 
+/** `- states: Default (unchanged), Overdue (changed, 2.10%), Menu open (unchanged)` (16 §9.7). */
+function statesLine(component: SummaryComponentInput): string[] {
+  const states = component.states ?? [];
+  if (states.length === 0) {
+    return [];
+  }
+  const entries = states.map((state) => {
+    const change = state.visualChange ?? "not compared";
+    const ratio =
+      state.visualChange === "changed" && state.diffPixelRatio !== null
+        ? `, ${(state.diffPixelRatio * 100).toFixed(2)}%`
+        : "";
+    return `${oneLine(state.name)} (${change}${ratio})`;
+  });
+  return [`- states: ${entries.join(", ")}`];
+}
+
 function componentSection(
   component: SummaryComponentInput,
   limits: SummaryPromptLimits,
@@ -343,6 +364,7 @@ function componentSection(
       component.headError,
       component.changeKind !== "removed"
     )}`,
+    ...statesLine(component),
     `- Screenshots: ${component.imageNote}`
   ];
   if (component.structuralDiff !== null) {
@@ -396,6 +418,12 @@ export function buildSummaryPrompt(input: SummaryPromptInput): string {
     `Rendered components: ${String(o.rendered)}. Visual changes: ${String(o.changed)}. New: ${String(o.new)}. ` +
       `Removed: ${String(o.deleted)}. Not compared (render failed): ${String(o.notCompared)}. Unchanged: ${String(o.unchanged)}.`
   );
+  if (input.recheck !== undefined) {
+    const r = input.recheck;
+    out.push(
+      `${String(r.checked)} components were re-checked with saved harnesses after a global style change in ${oneLine(r.trigger)}; ${String(r.changed)} changed.`
+    );
+  }
   if (input.skipped.count > 0) {
     const names = input.skipped.displayNames.slice(0, SKIPPED_NAMES_MAX).map((name) => oneLine(name));
     out.push(

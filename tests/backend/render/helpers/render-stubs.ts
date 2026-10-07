@@ -143,6 +143,8 @@ export type ScriptedOutcome =
 export interface RecordedRender {
   componentId: number;
   side: RenderSide;
+  /** 16 §7.6.3: the state the page was asked for. */
+  stateName: string;
   attempt: number;
   timeoutMs: number;
   origin: string;
@@ -150,10 +152,18 @@ export interface RecordedRender {
   checkStylesheets: PageRenderInput["checkStylesheets"];
 }
 
-/** Outcome key: `${componentId}:${side}:${attempt}`; a key without the attempt (`${componentId}:${side}`) matches any. */
+/**
+ * Outcome key: `${componentId}:${side}:${attempt}`; a key without the attempt (`${componentId}:${side}`) matches any.
+ * 16e: `${componentId}:${side}@${stateName}` (optionally `:${attempt}`) scripts one state only and wins.
+ */
 export class FakeBrowserSession implements RenderBrowserSession {
   readonly renders: RecordedRender[] = [];
   connected = true;
+  /** Pages currently rendering and the most seen at once (16 §9.2 concurrency). */
+  inFlight = 0;
+  maxInFlight = 0;
+  /** Milliseconds every render waits (lets concurrency show). */
+  delayMs = 0;
   closeCalls = 0;
   closeAllContextsCalls = 0;
   /** Called before an outcome is returned (e.g. to abort mid-render). Awaited. */
@@ -172,6 +182,7 @@ export class FakeBrowserSession implements RenderBrowserSession {
     const record: RecordedRender = {
       componentId: input.componentId,
       side: input.host.side,
+      stateName: input.stateName,
       attempt,
       timeoutMs: input.timeoutMs,
       origin: input.host.origin,
@@ -179,9 +190,22 @@ export class FakeBrowserSession implements RenderBrowserSession {
       checkStylesheets: input.checkStylesheets
     };
     this.renders.push(record);
-    if (this.beforeOutcome) {
-      await this.beforeOutcome(input, record);
+    this.inFlight += 1;
+    this.maxInFlight = Math.max(this.maxInFlight, this.inFlight);
+    try {
+      if (this.delayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, this.delayMs));
+      }
+      if (this.beforeOutcome) {
+        await this.beforeOutcome(input, record);
+      }
+      return this.outcomeFor(input, attempt);
+    } finally {
+      this.inFlight -= 1;
     }
+  }
+
+  private outcomeFor(input: PageRenderInput, attempt: number): PageRenderOutcome {
     if (input.signal.aborted) {
       return {
         ok: false,
@@ -192,8 +216,12 @@ export class FakeBrowserSession implements RenderBrowserSession {
         infraRetryable: false
       };
     }
-    const scripted = this.pick(`${String(input.componentId)}:${input.host.side}:${String(attempt)}`) ??
-      this.pick(`${String(input.componentId)}:${input.host.side}`) ?? { ok: true };
+    const sideKey = `${String(input.componentId)}:${input.host.side}`;
+    const stateKey = `${sideKey}@${input.stateName}`;
+    const scripted = this.pick(`${stateKey}:${String(attempt)}`) ??
+      this.pick(stateKey) ??
+      this.pick(`${sideKey}:${String(attempt)}`) ??
+      this.pick(sideKey) ?? { ok: true };
     if (scripted.ok) {
       fs.writeFileSync(input.outputPath, TINY_PNG);
       return {
@@ -287,6 +315,23 @@ export class FakeArtifactStore implements RenderArtifactStore {
     fs.mkdirSync(path.join(this.dataDir, "artifacts", String(visualizationId), String(componentId)), {
       recursive: true
     });
+    return Promise.resolve();
+  }
+
+  stateImagePaths(
+    visualizationId: number,
+    componentId: number,
+    ordinal: number,
+    kind: RenderSide
+  ): { absolutePath: string; relativePath: string } {
+    const folder = ordinal === 0 ? "" : `s${String(ordinal)}/`;
+    const relativePath = `artifacts/${String(visualizationId)}/${String(componentId)}/${folder}${kind}.png`;
+    return { relativePath, absolutePath: path.join(this.dataDir, relativePath) };
+  }
+
+  ensureComponentStateDir(visualizationId: number, componentId: number, ordinal: number): Promise<void> {
+    const dir = path.join(this.dataDir, "artifacts", String(visualizationId), String(componentId));
+    fs.mkdirSync(ordinal === 0 ? dir : path.join(dir, `s${String(ordinal)}`), { recursive: true });
     return Promise.resolve();
   }
 }
@@ -400,12 +445,20 @@ export function renderInput(
     basePath?: string | null;
     mocks?: MockedModule[];
     rank?: number;
+    /** 16e: the harness's states (default: Default only) and where it came from. */
+    states?: HarnessGenerationResult["states"];
+    origin?: HarnessGenerationResult["origin"];
   } = {}
 ): RenderComponentInput {
   const changeKind = options.changeKind ?? "modified";
+  const harness = harnessFor(componentId, filePath, options.mocks ?? []);
   return {
     candidate: candidate(componentId, filePath, changeKind, options.rank ?? componentId),
-    harness: harnessFor(componentId, filePath, options.mocks ?? []),
+    harness: {
+      ...harness,
+      ...(options.states !== undefined ? { states: options.states } : {}),
+      ...(options.origin !== undefined ? { origin: options.origin } : {})
+    },
     basePath: options.basePath !== undefined ? options.basePath : changeKind === "added" ? null : filePath
   };
 }

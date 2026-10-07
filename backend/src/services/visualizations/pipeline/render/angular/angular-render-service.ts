@@ -13,8 +13,9 @@ import path from "node:path";
 import {
   ANGULAR_CACHE_DIR_NAME,
   ANGULAR_MAX_BUILDS_PER_GROUP_SIDE,
-  HARNESS_MAX_REPAIRS_PER_COMPONENT,
+  RENDER_GROUP_MAX_ITEMS,
   RENDER_INFRA_RETRIES,
+  RENDER_ITEM_CONCURRENCY,
   RENDER_MAX_CAPTURE_HEIGHT_PX,
   RENDER_SETTLE_MAX_MS,
   RENDER_STAGE_TIMEOUT_MS,
@@ -23,25 +24,30 @@ import {
 } from "../../../../../config-consts";
 import {
   PipelineStepError,
-  type ComponentCandidate,
   type ComponentRenderResult,
   type HarnessGenerationResult,
-  type HarnessRenderError,
   type HarnessRepairOutcome,
   type MockedModule,
   type PipelineContext,
   type RenderSideResult
 } from "../../../../../types/visualization-pipeline";
-import { DEFAULT_STATE_NAME } from "../../../../../types/harness-library";
 import { ArtifactStore, createLogger, getErrorMessage, isPathInside, redactSecrets } from "../../../../../utilities";
 import { angularAppRootRel, angularTargetImportPath } from "../../angular/angular-harness-prompts";
 import { validateMockedModules } from "../../mock-rules";
 import { ModuleResolver } from "../../module-resolver";
 import {
   ArtifactStoreRenderAdapter,
+  attemptOf,
   chooseAttempt,
+  composeRenderOutcome,
   deriveRenderStatus,
   QueryHandlerRenderPersistence,
+  repairTarget,
+  reportStateAttempt,
+  runPool,
+  sideRepairTargets,
+  stateRenderError,
+  stateSuffix,
   type ComponentRenderPayload,
   type ComponentRenderPersistence,
   type ItemAttempt,
@@ -49,28 +55,34 @@ import {
   type RenderBrowserSession,
   type RenderComponentInput,
   type RepairHarnessFn,
-  type SideAttempt
+  type SideAttempt,
+  type StateAttempt
 } from "../../render-service";
 import { BrowserLaunchError, BrowserSession } from "../browser-session";
 import {
   BUDGET_EXCEEDED_HEADLINE,
-  errorSummaryLine,
   fileMissingHeadline,
   formatRenderError,
   headlineFor,
-  isRepairableFailure,
   normalizeErrorText,
   truncateRenderError
 } from "../render-errors";
-import { buildRenderGroups, mockFingerprint } from "../render-groups";
-import type { PageRenderOutcome, RenderFailureKind, RenderGroup, RenderSide, RenderWorkItem } from "../render-types";
+import { planItemStates } from "../live-planning";
+import { buildRenderGroups, mockFingerprint, renderStageBudgetMs, splitLargeGroups } from "../render-groups";
+import type {
+  PageRenderOutcome,
+  RenderFailureKind,
+  RenderGroup,
+  RenderSide,
+  RenderWorkItem,
+  StatePlan
+} from "../render-types";
 import {
   isTwoSidedItem,
   repairedHarnessPayload,
   sideHarnessOf,
   sideHarnessResult,
   sideRenderError,
-  sidesToRepair,
   twoSidedFingerprint,
   withRepairedSide
 } from "../replaced-harness";
@@ -239,7 +251,11 @@ interface SideState {
 }
 
 type ItemSlot =
-  | { state: "ready"; host: AngularStaticHostHandle; counter: { rendered: number; stylesChecked: boolean } }
+  | {
+      state: "ready";
+      host: AngularStaticHostHandle;
+      counter: { rendered: number; stylesChecked: boolean; stylesCheckPending: boolean };
+    }
   | { state: "failed"; attempt: SideAttempt }
   | { state: "not_needed" };
 
@@ -262,10 +278,6 @@ function capNotes(text: string): string {
   return text.length > HARNESS_NOTES_MAX_CHARS
     ? `${text.slice(0, HARNESS_NOTES_MAX_CHARS - NOTES_TRUNCATION_SUFFIX.length)}${NOTES_TRUNCATION_SUFFIX}`
     : text;
-}
-
-function otherSide(side: RenderSide): RenderSide {
-  return side === "head" ? "base" : "head";
 }
 
 function failedSideResult(
@@ -295,6 +307,7 @@ class AngularRenderRun {
   private readonly log: ReturnType<typeof createLogger>;
   private readonly persistence: ComponentRenderPersistence;
   private deadline = 0;
+  private budgetMs = RENDER_STAGE_TIMEOUT_MS;
   private cancelled = false;
   private budgetExceeded = false;
   private readonly results = new Map<number, ComponentRenderResult>();
@@ -336,7 +349,13 @@ class AngularRenderRun {
       if (items.length > 0) {
         // 3. Workspaces.
         await this.prepareWorkspaces(sides, items);
-        const groups = buildRenderGroups(items.map((item) => item.work));
+        const groups = splitLargeGroups(buildRenderGroups(items.map((item) => item.work)), RENDER_GROUP_MAX_ITEMS);
+        this.budgetMs = renderStageBudgetMs(
+          "angular",
+          items.map((item) => item.work),
+          groups
+        );
+        this.deadline = startedAt + this.budgetMs;
         this.log.info(
           { event: "render.run.started", components: items.length, groups: groups.length, framework: "angular" },
           "Render run started"
@@ -566,7 +585,8 @@ class AngularRenderRun {
             imageWidth: null,
             imageHeight: null,
             baseError: "Component file not found on either side.",
-            headError: "Component file not found on either side."
+            headError: "Component file not found on either side.",
+            states: []
           },
           { componentId: candidate.componentId, base: null, head: null, states: [] }
         );
@@ -604,19 +624,24 @@ class AngularRenderRun {
           primarySide: present.head ? "head" : "base",
           repairsUsed: 0,
           mockLabels: new Map(),
-          plannedFailures
+          plannedFailures,
+          states: [],
+          origin: harness.origin
         },
         sideMocks: { base: [], head: [] }
       };
       await this.applyHarness(item, harness, sides);
       const presentSides = SIDES.filter((side) => present[side]);
       if (presentSides.every((side) => plannedFailures[side] !== null)) {
-        const attempt: ItemAttempt = {
-          attemptNo: 0,
+        const attempt = attemptOf(
+          0,
           harness,
-          base: this.plannedAttempt(item.work, "base"),
-          head: this.plannedAttempt(item.work, "head")
-        };
+          item.work.states.map((plan) => ({
+            plan,
+            base: plan.onBase ? this.plannedAttempt(item.work, "base") : null,
+            head: plan.onHead ? this.plannedAttempt(item.work, "head") : null
+          }))
+        );
         await this.finalizeAttempt(item, attempt, "original");
         continue;
       }
@@ -636,6 +661,7 @@ class AngularRenderRun {
   ): Promise<void> {
     const work = item.work;
     work.harness = harness;
+    work.origin = harness.origin;
     const twoSided = isTwoSidedItem(work);
     const accepted: Record<RenderSide, MockedModule[]> = { base: [], head: [] };
     for (const side of twoSided ? SIDES : (["head"] as const)) {
@@ -650,6 +676,7 @@ class AngularRenderRun {
     }
     work.acceptedMocks = accepted.head;
     if (twoSided) {
+      work.baseOrigin = sideHarnessOf(harness, "base").origin;
       work.baseAcceptedMocks = accepted.base;
       work.fingerprint = twoSidedFingerprint(
         work.paths.base ?? work.candidate.filePath,
@@ -665,6 +692,7 @@ class AngularRenderRun {
       );
     }
     work.mockLabels = new Map();
+    work.states = planItemStates(work); // a repaired harness may declare other states (16 §9.6)
     item.sideMocks = { base: [], head: [] };
     for (const side of SIDES) {
       const sidePath = work.paths[side];
@@ -879,8 +907,11 @@ class AngularRenderRun {
         this.cancelled = true;
         return;
       }
-      for (const item of items) {
-        if (await this.shouldStop()) {
+      // 16 §9.2: RENDER_ITEM_CONCURRENCY items at a time; each renders its states in order, base ∥ head.
+      let stopped = false;
+      await runPool(items, RENDER_ITEM_CONCURRENCY, async (item) => {
+        if (stopped || (await this.shouldStop())) {
+          stopped = true;
           return;
         }
         const componentId = item.work.candidate.componentId;
@@ -893,6 +924,7 @@ class AngularRenderRun {
           item.work.repairsUsed
         );
         if (attempt === null) {
+          stopped = true;
           return;
         }
         if (originals === null) {
@@ -900,10 +932,10 @@ class AngularRenderRun {
           if (this.needsRepair(item.work, attempt)) {
             this.repairQueue.push({ item, attempt });
           }
-          continue;
+          return;
         }
         await this.keepBetterAttempt(item, attempt, originals);
-      }
+      });
     } finally {
       await Promise.all([...base.hosts, ...head.hosts].map((host) => this.stopStaticHost(host)));
     }
@@ -1066,7 +1098,7 @@ class AngularRenderRun {
           await this.console("info", `Angular build warning (${side}): ${warning}`);
         }
       }
-      const counter = { rendered: 0, stylesChecked: false };
+      const counter = { rendered: 0, stylesChecked: false, stylesCheckPending: false };
       for (const id of build.componentIds) {
         result.slots.set(
           id,
@@ -1202,21 +1234,31 @@ class AngularRenderRun {
     attemptNo: number
   ): Promise<ItemAttempt | null> {
     const work = item.work;
-    const [base, head] = await Promise.all([
-      work.sides.base ? this.renderSide(work, "base", slots.base, attemptNo) : Promise.resolve(null),
-      work.sides.head ? this.renderSide(work, "head", slots.head, attemptNo) : Promise.resolve(null)
-    ]);
-    if (base?.kind === "cancelled" || head?.kind === "cancelled" || this.ctx.signal.aborted) {
-      this.cancelled = true;
-      for (const side of [base, head]) {
-        if (side?.tempImagePath) {
-          await removeQuietly(side.tempImagePath);
-          this.tempImages.delete(side.tempImagePath);
+    const states: StateAttempt[] = [];
+    for (const plan of work.states) {
+      const [base, head] = await Promise.all([
+        work.sides.base && plan.onBase
+          ? this.renderSide(work, "base", slots.base, attemptNo, plan)
+          : Promise.resolve(null),
+        work.sides.head && plan.onHead
+          ? this.renderSide(work, "head", slots.head, attemptNo, plan)
+          : Promise.resolve(null)
+      ]);
+      states.push({ plan, base, head });
+      if (base?.kind === "cancelled" || head?.kind === "cancelled" || this.ctx.signal.aborted) {
+        this.cancelled = true;
+        for (const state of states) {
+          for (const side of [state.base, state.head]) {
+            if (side?.tempImagePath) {
+              await removeQuietly(side.tempImagePath);
+              this.tempImages.delete(side.tempImagePath);
+            }
+          }
         }
+        return null;
       }
-      return null;
     }
-    return { attemptNo, harness: work.harness, base, head };
+    return attemptOf(attemptNo, work.harness, states);
   }
 
   private sideFailure(side: RenderSide, kind: RenderFailureKind, headline: string, durationMs = 0): SideAttempt {
@@ -1231,9 +1273,10 @@ class AngularRenderRun {
     work: RenderWorkItem,
     side: RenderSide,
     slot: ItemSlot,
-    attemptNo: number
+    attemptNo: number,
+    state: StatePlan
   ): Promise<SideAttempt> {
-    const name = work.candidate.displayName;
+    const name = `${work.candidate.displayName}${stateSuffix(state.name)}`;
     const componentId = work.candidate.componentId;
     if (slot.state === "failed") {
       return slot.attempt;
@@ -1248,10 +1291,10 @@ class AngularRenderRun {
         `The static host stopped (${slot.host.exitReason() ?? "unknown"}).`
       );
     }
-    const final = this.deps.artifactStore.imagePaths(this.ctx.visualizationId, componentId, side);
+    const final = this.deps.artifactStore.stateImagePaths(this.ctx.visualizationId, componentId, state.ordinal, side);
     const tempImagePath = `${final.absolutePath}.attempt${String(attemptNo)}.png`;
     try {
-      await this.deps.artifactStore.ensureComponentDir(this.ctx.visualizationId, componentId);
+      await this.deps.artifactStore.ensureComponentStateDir(this.ctx.visualizationId, componentId, state.ordinal);
     } catch (error) {
       return this.sideFailure(side, "screenshot", `Could not create the artifact folder: ${getErrorMessage(error)}`);
     }
@@ -1268,24 +1311,29 @@ class AngularRenderRun {
       }
       this.tempImages.add(tempImagePath);
       const counter = slot.counter;
+      const checkStyles = !counter.stylesChecked && !counter.stylesCheckPending;
+      counter.stylesCheckPending ||= checkStyles;
       outcome = await this.session.renderComponent({
         host: slot.host,
         componentId,
-        stateName: DEFAULT_STATE_NAME, // 16a compile shim (16 §6.12): 16e renders one page per state
+        stateName: state.name,
         timeoutMs,
         outputPath: tempImagePath,
         signal: this.ctx.signal,
-        checkStylesheets: counter.stylesChecked
-          ? null
-          : {
+        checkStylesheets: checkStyles
+          ? {
               globalStylesExpected: this.requireSides()[side].globalStylesExpected,
               tailwindMajor: slot.host.tailwindMajor
-            },
+            }
+          : null,
         viewport: RENDER_VIEWPORTS[this.ctx.repository.renderViewport ?? "desktop"],
         mockLabels: work.mockLabels,
         stripPaths: this.stripPaths
       });
       counter.rendered += 1;
+      if (checkStyles) {
+        counter.stylesCheckPending = false;
+      }
       if (!outcome.ok && outcome.infraRetryable && retries < RENDER_INFRA_RETRIES && !this.ctx.signal.aborted) {
         retries += 1;
         this.log.debug(
@@ -1383,50 +1431,45 @@ class AngularRenderRun {
     which: "original" | "repaired"
   ): Promise<void> {
     const componentId = item.work.candidate.componentId;
-    for (const side of SIDES) {
-      const sideAttempt = attempt[side];
-      if (sideAttempt === null) {
-        continue;
-      }
-      const final = this.deps.artifactStore.imagePaths(this.ctx.visualizationId, componentId, side);
-      if (sideAttempt.result.ok && sideAttempt.tempImagePath !== null) {
-        try {
-          await fs.rename(sideAttempt.tempImagePath, final.absolutePath);
-        } catch (error) {
-          sideAttempt.result = failedSideResult(
-            side,
-            "screenshot",
-            this.formatPlanned("screenshot", `Could not store the image: ${getErrorMessage(error)}`),
-            sideAttempt.result.durationMs,
-            sideAttempt.result.consoleErrors
-          );
-          sideAttempt.kind = "screenshot";
+    for (const state of attempt.states) {
+      for (const side of SIDES) {
+        const sideAttempt = state[side];
+        if (sideAttempt === null) {
+          continue;
         }
-        this.tempImages.delete(sideAttempt.tempImagePath);
-      } else {
-        await removeQuietly(final.absolutePath);
+        const final = this.deps.artifactStore.stateImagePaths(
+          this.ctx.visualizationId,
+          componentId,
+          state.plan.ordinal,
+          side
+        );
+        if (sideAttempt.result.ok && sideAttempt.tempImagePath !== null) {
+          try {
+            await fs.rename(sideAttempt.tempImagePath, final.absolutePath);
+          } catch (error) {
+            sideAttempt.result = failedSideResult(
+              side,
+              "screenshot",
+              this.formatPlanned("screenshot", `Could not store the image: ${getErrorMessage(error)}`),
+              sideAttempt.result.durationMs,
+              sideAttempt.result.consoleErrors
+            );
+            sideAttempt.kind = "screenshot";
+          }
+          this.tempImages.delete(sideAttempt.tempImagePath);
+        } else {
+          await removeQuietly(final.absolutePath);
+        }
       }
     }
-    const result: ComponentRenderResult = {
-      componentId,
-      base: attempt.base?.result ?? null,
-      head: attempt.head?.result ?? null,
-      states: [] // 16a compile shim (16 §6.12): 16e renders and reports every state
-    };
-    const sizeSource = result.head?.ok === true ? result.head : result.base?.ok === true ? result.base : null;
-    const payload: ComponentRenderPayload = {
-      renderStatus: deriveRenderStatus(result),
-      baseImagePath: result.base?.ok === true ? result.base.imagePath : null,
-      headImagePath: result.head?.ok === true ? result.head.imagePath : null,
-      imageWidth: sizeSource?.width ?? null,
-      imageHeight: sizeSource?.height ?? null,
-      baseError: result.base?.ok === false ? result.base.error : null,
-      headError: result.head?.ok === false ? result.head.error : null,
+    const finalized = attemptOf(attempt.attemptNo, attempt.harness, attempt.states);
+    const { result, payload } = composeRenderOutcome(componentId, finalized);
+    await this.persist(componentId, {
+      ...payload,
       ...(which === "repaired" ? repairedHarnessPayload(attempt.harness) : {})
-    };
-    await this.persist(componentId, payload);
+    });
     this.results.set(componentId, result);
-    await this.reportAttempt(item.work.candidate, attempt);
+    await reportStateAttempt(item.work, finalized, (level, message) => this.console(level, message));
   }
 
   private async finalizeImmediate(
@@ -1449,46 +1492,24 @@ class AngularRenderRun {
     this.payloads.set(componentId, payload);
   }
 
-  private async reportAttempt(candidate: ComponentCandidate, attempt: ItemAttempt): Promise<void> {
-    const name = candidate.displayName;
-    const parts = [describeSide(attempt.base, "base"), describeSide(attempt.head, "head")].filter(
-      (part): part is string => part !== null
-    );
-    const allOk = SIDES.every((side) => attempt[side] === null || attempt[side].result.ok);
-    if (allOk) {
-      await this.console("info", `Rendered ${name}: ${parts.join(", ")}.`);
-      return;
-    }
-    for (const side of SIDES) {
-      const sideAttempt = attempt[side];
-      if (sideAttempt === null || sideAttempt.result.ok) {
-        continue;
-      }
-      await this.console(
-        "warn",
-        `${name}: ${side} failed (${sideAttempt.kind ?? "error"}): ${errorSummaryLine(sideAttempt.result.error ?? "")}`
-      );
-    }
-  }
-
   // ----- repair (10 §5.13.6, 15 §5.7.10 step 6) -----
 
+  /** 16 §9.6: only harnesses written in this run, per state in ordinal order (per side for replaced rows). */
   private needsRepair(work: RenderWorkItem, attempt: ItemAttempt): boolean {
     if (isTwoSidedItem(work)) {
-      return sidesToRepair(attempt, work.sideRepairsUsed ?? {}).length > 0; // 00 §17: per side
+      return sideRepairTargets(work, attempt).length > 0; // 00 §17: per side
     }
-    const primary = attempt[work.primarySide];
-    if (primary === null || primary.result.ok || primary.kind === null || !isRepairableFailure(primary.kind)) {
-      return false;
-    }
-    const other = attempt[otherSide(work.primarySide)];
-    const othersFailed = other === null || !other.result.ok;
-    return othersFailed && work.repairsUsed < HARNESS_MAX_REPAIRS_PER_COMPONENT;
+    return repairTarget(work, attempt) !== null;
   }
 
   private async runRepairRounds(byId: ReadonlyMap<number, AngularItem>): Promise<void> {
     while (this.repairQueue.length > 0) {
-      const queue = this.repairQueue;
+      // Items render concurrently (16 §9.2): repair in rank order, not completion order.
+      const queue = [...this.repairQueue].sort(
+        (a, b) =>
+          a.item.work.candidate.rank - b.item.work.candidate.rank ||
+          a.item.work.candidate.componentId - b.item.work.candidate.componentId
+      );
       this.repairQueue = [];
       const repaired: RepairEntry[] = [];
       for (const entry of queue) {
@@ -1524,8 +1545,8 @@ class AngularRenderRun {
     const used = { ...work.sideRepairsUsed };
     let harness = work.harness;
     let repairedAny = false;
-    for (const side of sidesToRepair(attempt, used)) {
-      const sideAttempt = attempt[side];
+    for (const { side, state } of sideRepairTargets(work, attempt)) {
+      const sideAttempt = state[side];
       if (sideAttempt === null) {
         continue;
       }
@@ -1544,7 +1565,7 @@ class AngularRenderRun {
         outcome = await this.deps.repairHarness(
           componentId,
           sideHarnessResult(harness, side),
-          sideRenderError(side, sideAttempt)
+          sideRenderError(side, sideAttempt, state.plan.name)
         );
       } catch (error) {
         const message = getErrorMessage(error);
@@ -1610,15 +1631,19 @@ class AngularRenderRun {
     const work = item.work;
     const componentId = work.candidate.componentId;
     const name = work.candidate.displayName;
-    const primary = attempt[work.primarySide];
+    const target = repairTarget(work, attempt);
+    if (target === null) {
+      return false;
+    }
+    const primary = target[work.primarySide];
     await this.console(
       "info",
-      `Repairing the harness for ${name} after a render failure (${work.primarySide}: ${primary?.kind ?? "error"}).`
+      `Repairing the harness for ${name}${stateSuffix(target.plan.name)} after a render failure (${work.primarySide}: ${primary?.kind ?? "error"}).`
     );
     this.log.info({ event: "render.repair.requested", componentId }, "Harness repair requested");
     let outcome: HarnessRepairOutcome;
     try {
-      outcome = await this.deps.repairHarness(componentId, work.harness, toRenderError(work, attempt));
+      outcome = await this.deps.repairHarness(componentId, work.harness, stateRenderError(work, target));
     } catch (error) {
       const message = getErrorMessage(error);
       this.log.warn(
@@ -1686,14 +1711,17 @@ class AngularRenderRun {
       }
       return;
     }
-    for (const side of SIDES) {
-      const temp = repaired[side]?.tempImagePath ?? null;
-      if (temp !== null) {
-        await removeQuietly(temp);
-        this.tempImages.delete(temp);
+    for (const state of repaired.states) {
+      for (const side of SIDES) {
+        const temp = state[side]?.tempImagePath ?? null;
+        if (temp !== null) {
+          await removeQuietly(temp);
+          this.tempImages.delete(temp);
+        }
       }
     }
     work.harness = original.attempt.harness;
+    work.states = original.attempt.states.map((state) => state.plan);
     await this.console("info", `Repaired harness for ${name} did not improve the result; keeping the first result.`);
     this.log.info({ event: "render.repair.result", componentId, outcome: "kept_original" }, "Original attempt kept");
   }
@@ -1708,19 +1736,28 @@ class AngularRenderRun {
     if (unfinished.length === 0) {
       return;
     }
-    const minutes = Math.round(RENDER_STAGE_TIMEOUT_MS / 60_000);
+    const minutes = Math.round(this.budgetMs / 60_000);
     await this.console(
       "warn",
       `The render stage exceeded its ${String(minutes)}-minute budget; ${String(unfinished.length)} component(s) were not rendered.`
     );
     for (const item of unfinished) {
       const work = item.work;
-      const attempt: ItemAttempt = {
-        attemptNo: work.repairsUsed,
-        harness: work.harness,
-        base: work.sides.base ? this.sideFailure("base", "budget_exceeded", BUDGET_EXCEEDED_HEADLINE) : null,
-        head: work.sides.head ? this.sideFailure("head", "budget_exceeded", BUDGET_EXCEEDED_HEADLINE) : null
-      };
+      const attempt = attemptOf(
+        work.repairsUsed,
+        work.harness,
+        work.states.map((plan) => ({
+          plan,
+          base:
+            work.sides.base && plan.onBase
+              ? this.sideFailure("base", "budget_exceeded", BUDGET_EXCEEDED_HEADLINE)
+              : null,
+          head:
+            work.sides.head && plan.onHead
+              ? this.sideFailure("head", "budget_exceeded", BUDGET_EXCEEDED_HEADLINE)
+              : null
+        }))
+      );
       await this.finalizeAttempt(item, attempt, "original");
     }
   }
@@ -1780,26 +1817,6 @@ class AngularRenderRun {
     }
     this.tempImages.clear();
   }
-}
-
-/** HarnessRenderError for 09 (09 §5.1) from the attempt that triggered repair. */
-function toRenderError(work: RenderWorkItem, attempt: ItemAttempt): HarnessRenderError {
-  const primary = attempt[work.primarySide];
-  if (primary === null) {
-    throw new Error("Invariant: toRenderError called without a primary-side attempt");
-  }
-  const kind = primary.kind;
-  if (kind !== "module_load" && kind !== "render_error" && kind !== "timeout") {
-    throw new Error("Invariant: toRenderError called for a non-repairable failure");
-  }
-  const other = attempt[otherSide(work.primarySide)];
-  const otherError = other?.result.error ?? null;
-  return {
-    sides: SIDES.filter((side) => work.sides[side]),
-    kind,
-    message: primary.result.error ?? "",
-    otherSideMessage: otherError !== null && otherError !== "" ? otherError.slice(0, 1_000) : null
-  };
 }
 
 async function settle(promise: Promise<void> | undefined, log: ReturnType<typeof createLogger>): Promise<void> {

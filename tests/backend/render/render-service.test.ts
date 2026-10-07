@@ -152,7 +152,26 @@ test("renders both sides of a modified component and persists rendered status wi
     imageWidth: 120,
     imageHeight: 44,
     baseError: null,
-    headError: null
+    headError: null,
+    // 16 §9.2: one state row per state; a one-state harness has only Default.
+    states: [
+      {
+        ordinal: 0,
+        stateName: "Default",
+        onBase: true,
+        onHead: true,
+        steps: [],
+        renderStatus: "rendered",
+        baseImagePath: "artifacts/1/1/base.png",
+        headImagePath: "artifacts/1/1/head.png",
+        imageWidth: 120,
+        imageHeight: 44,
+        baseError: null,
+        headError: null,
+        baseFailureKind: null,
+        headFailureKind: null
+      }
+    ]
   });
   for (const side of ["base", "head"] as const) {
     assert.ok(fs.existsSync(path.join(h.env.dataDir, `artifacts/1/1/${side}.png`)));
@@ -374,13 +393,15 @@ test("repaired attempt that is worse keeps the original result, deletes temp ima
     attemptNo: 0,
     harness: harnessFor(1, "src/A.tsx"),
     base: { result: okSide("base"), kind: null, tempImagePath: null },
-    head: { result: failedSide("head"), kind: "module_load", tempImagePath: null }
+    head: { result: failedSide("head"), kind: "module_load", tempImagePath: null },
+    states: []
   };
   const worse: ItemAttempt = {
     attemptNo: 1,
     harness: harnessFor(1, "src/A.tsx"),
     base: { result: failedSide("base"), kind: "module_load", tempImagePath: null },
-    head: { result: failedSide("head"), kind: "module_load", tempImagePath: null }
+    head: { result: failedSide("head"), kind: "module_load", tempImagePath: null },
+    states: []
   };
   assert.equal(chooseAttempt("head", original, worse), "original");
 
@@ -653,6 +674,8 @@ test("abort during an in-flight render closes contexts and hosts and does not pe
 });
 
 test("stage budget exhaustion persists remaining components as failed", async (t) => {
+  // 16 §9.2: two items render at once, so 35 and 36 are both in flight when the first save crosses the budget;
+  // 37 never starts. The dynamic budget of three one-state items is the 15-minute floor.
   let saves = 0;
   const h = setup(t, { files: both("src/A.tsx", "src/B.tsx", "src/C.tsx") });
   const clock = (): number => (saves >= 1 ? RENDER_STAGE_TIMEOUT_MS + 1 : 0);
@@ -672,7 +695,8 @@ test("stage budget exhaustion persists remaining components as failed", async (t
     [35, 36, 37]
   );
   assert.equal(h.persistence.latest(35)?.renderStatus, "rendered");
-  for (const id of [36, 37]) {
+  assert.equal(h.persistence.latest(36)?.renderStatus, "rendered", "already in flight");
+  for (const id of [37]) {
     const payload = h.persistence.latest(id);
     assert.equal(payload?.renderStatus, "failed");
     assert.match(
@@ -683,7 +707,7 @@ test("stage budget exhaustion persists remaining components as failed", async (t
   assert.ok(
     h.env.handle.console.has(
       "warn",
-      "The render stage exceeded its 15-minute budget; 2 component(s) were not rendered."
+      "The render stage exceeded its 15-minute budget; 1 component(s) were not rendered."
     )
   );
 });
@@ -728,7 +752,8 @@ test("persistence updates use (values, { id, visualizationId }, Table.VISUALIZAT
     update: (values: Record<string, unknown>, conditions: unknown, table: unknown) => {
       calls.push({ values, conditions, table });
       return Promise.resolve({ status, data: { rowsAffected: 1 } });
-    }
+    },
+    delete: () => Promise.resolve({ status: 404 })
   } as unknown as QueryHandler;
   const persistence = new QueryHandlerRenderPersistence(42, queryHandler);
   const base = {
@@ -738,7 +763,8 @@ test("persistence updates use (values, { id, visualizationId }, Table.VISUALIZAT
     imageWidth: 10,
     imageHeight: 20,
     baseError: null,
-    headError: "[module_load] x"
+    headError: "[module_load] x",
+    states: []
   };
   await persistence.saveRenderResult(7, base);
   await persistence.saveRenderResult(7, {
@@ -796,7 +822,9 @@ test("browser disconnect triggers one relaunch", async (t) => {
   assert.equal(h.launches(), 2);
   assert.equal(first.closeCalls >= 1, true);
   assert.equal(sideOf(results, 41, "head")?.ok, true, "the infrastructure retry ran on the relaunched browser");
-  assert.equal(rendersOf(second, 42).length, 2);
+  // 16 §9.2: 42 renders alongside 41, so its pages run on whichever browser is current; both sides render once.
+  assert.equal(rendersOf(first, 42).length + rendersOf(second, 42).length, 2);
+  assert.equal(sideOf(results, 42, "head")?.ok, true);
   assert.equal(
     h.env.handle.console.events.filter((event) => event.message === "Chromium disconnected; restarting the browser.")
       .length,
@@ -868,7 +896,12 @@ test("chooseAttempt prefers a primary-side success and breaks ties toward the re
     head:
       head === null
         ? null
-        : { result: head ? okSide("head") : failedSide("head"), kind: head ? null : "module_load", tempImagePath: null }
+        : {
+            result: head ? okSide("head") : failedSide("head"),
+            kind: head ? null : "module_load",
+            tempImagePath: null
+          },
+    states: []
   });
   assert.equal(chooseAttempt("head", attempt(false, false), attempt(false, true)), "repaired");
   assert.equal(chooseAttempt("head", attempt(false, false), attempt(false, false)), "repaired", "tie");
@@ -905,3 +938,251 @@ function failedSide(side: RenderSide): RenderSideResult {
     failureKind: "module_load"
   };
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// 16e: per-state pages, item pool, budget, fix-up rules (16 §9)
+// ---------------------------------------------------------------------------------------------------------------
+
+const THREE_STATES = [
+  { name: "Default", steps: [] },
+  { name: "Overdue", steps: [] },
+  { name: "Menu open", steps: [{ action: "click" as const, target: { by: "text" as const, text: "More" } }] }
+];
+
+test("RenderService renders one page per state and side and writes state paths", async (t) => {
+  const h = setup(t, { files: both("src/Row.tsx") });
+  const results = await h.service.renderAll(h.env.handle.context, [
+    renderInput(60, "src/Row.tsx", { states: THREE_STATES })
+  ]);
+  const session = h.sessions[0] ?? new FakeBrowserSession();
+  assert.deepEqual(session.renders.map((render) => `${render.stateName}:${render.side}`).sort(), [
+    "Default:base",
+    "Default:head",
+    "Menu open:base",
+    "Menu open:head",
+    "Overdue:base",
+    "Overdue:head"
+  ]);
+  const result = results[0];
+  assert.ok(result);
+  assert.deepEqual(
+    result.states.map((state) => [state.ordinal, state.stateName, state.head?.imagePath]),
+    [
+      [0, "Default", "artifacts/1/60/head.png"],
+      [1, "Overdue", "artifacts/1/60/s1/head.png"],
+      [2, "Menu open", "artifacts/1/60/s2/head.png"]
+    ]
+  );
+  assert.deepEqual(result.head, result.states[0]?.head, "base/head mirror state 0");
+  for (const file of ["base.png", "head.png", "s1/base.png", "s1/head.png", "s2/base.png", "s2/head.png"]) {
+    assert.ok(fs.existsSync(path.join(h.env.dataDir, "artifacts/1/60", file)), file);
+  }
+  const payload = h.persistence.latest(60);
+  assert.ok(payload);
+  assert.deepEqual(payload.states[2]?.steps, THREE_STATES[2]?.steps);
+  assert.equal(payload.states[1]?.headImagePath, "artifacts/1/60/s1/head.png");
+  assert.equal(payload.states.length, 3);
+  assert.ok(h.env.handle.console.has("info", "Rendered Row: base ok (100×40), head ok (100×40) (3 states)."));
+});
+
+test("RenderService §9.3: state and row statuses; row errors name the first failing non-Default state", async (t) => {
+  const h = setup(t, {
+    files: both("src/Row.tsx", "src/Bad.tsx"),
+    outcomes: {
+      "61:head@Overdue": MODULE_LOAD,
+      "62:head": MODULE_LOAD,
+      "62:base": MODULE_LOAD
+    }
+  });
+  await h.service.renderAll(h.env.handle.context, [
+    renderInput(61, "src/Row.tsx", { states: THREE_STATES, origin: "library" }),
+    renderInput(62, "src/Bad.tsx", { states: THREE_STATES, origin: "library" })
+  ]);
+  const partial = h.persistence.latest(61);
+  assert.ok(partial);
+  assert.deepEqual(
+    partial.states.map((state) => state.renderStatus),
+    ["rendered", "partial", "rendered"]
+  );
+  assert.equal(partial.states[1]?.headFailureKind, "module_load");
+  assert.match(partial.headError ?? "", /^State "Overdue": \[module_load\]/);
+  assert.equal(partial.headImagePath, "artifacts/1/61/head.png", "row images mirror Default");
+  assert.equal(partial.baseError, null);
+  assert.equal(partial.renderStatus, "partial");
+  const failed = h.persistence.latest(62);
+  assert.ok(failed);
+  assert.match(failed.headError ?? "", /^\[module_load\]/, "Default failed first: no prefix");
+  assert.equal(failed.renderStatus, "failed");
+  assert.ok(
+    h.env.handle.console.has(
+      "warn",
+      "Row: the saved harness no longer renders on the head side (Overdue: Module load failed: x). Repair it from the card."
+    )
+  );
+});
+
+test("RenderService renders one-sided states of a replaced row only where they exist", async (t) => {
+  const h = setup(t, { files: { "src/Old.tsx": { base: COMPONENT }, "src/New.tsx": { head: COMPONENT } } });
+  const input = renderInput(63, "src/New.tsx", {
+    changeKind: "replaced",
+    basePath: "src/Old.tsx",
+    states: [
+      { name: "Default", steps: [] },
+      { name: "Empty", steps: [] }
+    ]
+  });
+  input.candidate.predecessor = { filePath: "src/Old.tsx", exportName: "default", displayName: "Old", evidence: [] };
+  input.harness.baseHarness = {
+    ...harnessFor(63, "src/Old.tsx"),
+    states: [
+      { name: "Default", steps: [] },
+      { name: "Legacy", steps: [] }
+    ]
+  };
+  const [result] = await h.service.renderAll(h.env.handle.context, [input]);
+  assert.ok(result);
+  assert.deepEqual(
+    result.states.map((state) => [state.stateName, state.base !== null, state.head !== null]),
+    [
+      ["Default", true, true],
+      ["Empty", false, true],
+      ["Legacy", true, false]
+    ]
+  );
+  const session = h.sessions[0] ?? new FakeBrowserSession();
+  assert.deepEqual(
+    session.renders.filter((render) => render.stateName === "Empty").map((render) => render.side),
+    ["head"]
+  );
+  assert.deepEqual(
+    h.persistence.latest(63)?.states.map((state) => [state.stateName, state.onBase, state.onHead]),
+    [
+      ["Default", true, true],
+      ["Empty", false, true],
+      ["Legacy", true, false]
+    ]
+  );
+});
+
+test("RenderService keeps at most 4 pages and 2 items in flight", async (t) => {
+  const files = both("src/A.tsx", "src/B.tsx", "src/C.tsx", "src/D.tsx");
+  const session = new FakeBrowserSession();
+  session.delayMs = 5;
+  const h = setup(t, { files, sessions: [session] });
+  await h.service.renderAll(
+    h.env.handle.context,
+    [64, 65, 66, 67].map((id, index) => renderInput(id, `src/${"ABCD"[index] ?? "A"}.tsx`, { states: THREE_STATES }))
+  );
+  assert.equal(session.renders.length, 4 * 3 * 2);
+  assert.equal(session.maxInFlight, 4, "two items × base ∥ head");
+});
+
+test("RenderService never repairs a library harness; a written harness is repaired on a non-Default state with stateName", async (t) => {
+  const h = setup(t, {
+    files: both("src/Lib.tsx", "src/New.tsx"),
+    outcomes: {
+      "68:head@Overdue": MODULE_LOAD,
+      "68:base@Overdue": MODULE_LOAD,
+      "69:head@Overdue": [MODULE_LOAD, { ok: true }],
+      "69:base@Overdue": [MODULE_LOAD, { ok: true }]
+    },
+    repair: (componentId) => ({ ok: true, result: { ...repaired(componentId, "src/New.tsx"), states: THREE_STATES } })
+  });
+  await h.service.renderAll(h.env.handle.context, [
+    renderInput(68, "src/Lib.tsx", { states: THREE_STATES, origin: "library" }),
+    renderInput(69, "src/New.tsx", { states: THREE_STATES, origin: "written" })
+  ]);
+  assert.deepEqual(
+    h.repairCalls.map((call) => call.componentId),
+    [69],
+    "library harnesses are never repaired automatically (D8)"
+  );
+  const call = h.repairCalls[0];
+  assert.ok(call);
+  assert.equal(call.renderError.kind, "module_load");
+  assert.equal(call.renderError.stateName, "Overdue");
+  assert.equal(h.persistence.latest(69)?.renderStatus, "rendered", "every state re-rendered with the repaired harness");
+  assert.equal(h.persistence.latest(68)?.renderStatus, "partial");
+});
+
+test("chooseAttempt sums the per-state scores", () => {
+  const side = (
+    s: RenderSide,
+    ok: boolean
+  ): { result: RenderSideResult; kind: "module_load" | null; tempImagePath: null } => ({
+    result: ok ? okSide(s) : failedSide(s),
+    kind: ok ? null : "module_load",
+    tempImagePath: null
+  });
+  const plan = (ordinal: number): { ordinal: number; name: string; onBase: boolean; onHead: boolean; steps: [] } => ({
+    ordinal,
+    name: ordinal === 0 ? "Default" : `S${String(ordinal)}`,
+    onBase: true,
+    onHead: true,
+    steps: []
+  });
+  const attempt = (states: Array<[boolean, boolean]>): ItemAttempt => ({
+    attemptNo: 0,
+    harness: harnessFor(1, "src/A.tsx"),
+    base: side("base", states[0]?.[0] ?? false),
+    head: side("head", states[0]?.[1] ?? false),
+    states: states.map(([base, head], ordinal) => ({
+      plan: plan(ordinal),
+      base: side("base", base),
+      head: side("head", head)
+    }))
+  });
+  // Original: Default fully ok, two failing states (score 4); repaired: Default failing, two ok states (score 8).
+  const original = attempt([
+    [true, true],
+    [false, false],
+    [false, false]
+  ]);
+  const better = attempt([
+    [false, false],
+    [true, true],
+    [true, true]
+  ]);
+  assert.equal(chooseAttempt("head", original, better), "repaired");
+  assert.equal(chooseAttempt("head", better, original), "original");
+});
+
+test("deriveRenderStatus evaluates states when present", () => {
+  const states = (pairs: Array<[boolean | null, boolean | null]>): ComponentRenderResult["states"] =>
+    pairs.map(([base, head], ordinal) => ({
+      ordinal,
+      stateName: `S${String(ordinal)}`,
+      base: base === null ? null : base ? okSide("base") : failedSide("base"),
+      head: head === null ? null : head ? okSide("head") : failedSide("head")
+    }));
+  const status = (pairs: Array<[boolean | null, boolean | null]>): string =>
+    deriveRenderStatus({ componentId: 1, base: okSide("base"), head: okSide("head"), states: states(pairs) });
+  assert.equal(
+    status([
+      [true, true],
+      [true, null]
+    ]),
+    "rendered"
+  );
+  assert.equal(
+    status([
+      [false, false],
+      [false, null]
+    ]),
+    "failed"
+  );
+  assert.equal(
+    status([
+      [true, true],
+      [false, true]
+    ]),
+    "partial"
+  );
+  assert.equal(
+    status([
+      [true, true],
+      [false, false]
+    ]),
+    "partial"
+  );
+});

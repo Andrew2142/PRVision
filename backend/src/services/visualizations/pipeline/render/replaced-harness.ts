@@ -11,6 +11,7 @@ import type {
   MockedModule,
   SideHarness
 } from "../../../../types/visualization-pipeline";
+import { DEFAULT_STATE_NAME } from "../../../../types/harness-library";
 import { isRepairableFailure } from "./render-errors";
 import { mockFingerprint, NO_MOCKS_GROUP_KEY } from "./render-groups";
 import type { RenderFailureKind, RenderSide, RenderWorkItem } from "./render-types";
@@ -108,13 +109,23 @@ export function sidesToRepair(
   });
 }
 
-/** HarnessRenderError for repairing one side's harness of a replaced row (`sides` = `[side]`, `targetSide` = side). */
-export function sideRenderError(side: RenderSide, attempt: SideAttemptView): HarnessRenderError {
+/**
+ * HarnessRenderError for repairing one side's harness of a replaced row (`sides` = `[side]`, `targetSide` = side).
+ * `stateName` names the failing state (16 §9.6); omitted for Default.
+ */
+export function sideRenderError(side: RenderSide, attempt: SideAttemptView, stateName?: string): HarnessRenderError {
   const kind = attempt.kind;
-  if (kind !== "module_load" && kind !== "render_error" && kind !== "timeout") {
+  if (kind !== "module_load" && kind !== "render_error" && kind !== "timeout" && kind !== "step_failed") {
     throw new Error("Invariant: sideRenderError called for a non-repairable failure");
   }
-  return { sides: [side], kind, message: attempt.result.error ?? "", otherSideMessage: null, targetSide: side };
+  return {
+    sides: [side],
+    kind,
+    message: attempt.result.error ?? "",
+    otherSideMessage: null,
+    targetSide: side,
+    ...(stateName !== undefined && stateName !== DEFAULT_STATE_NAME ? { stateName } : {})
+  };
 }
 
 /** The `harness` and `baseHarness` fields of a render payload that keeps a repaired attempt. */

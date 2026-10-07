@@ -201,7 +201,8 @@ test("QueryHandlerRenderPersistence writes the base harness of a kept repair and
     update: (values: Record<string, unknown>) => {
       calls.push(values);
       return Promise.resolve({ status: 200, data: { rowsAffected: 1 } });
-    }
+    },
+    delete: () => Promise.resolve({ status: 404 })
   } as unknown as QueryHandler;
   const persistence = new QueryHandlerRenderPersistence(1, queryHandler);
   const base = {
@@ -211,7 +212,8 @@ test("QueryHandlerRenderPersistence writes the base harness of a kept repair and
     imageWidth: 10,
     imageHeight: 10,
     baseError: null,
-    headError: null
+    headError: null,
+    states: []
   };
   await persistence.saveRenderResult(3, {
     ...base,

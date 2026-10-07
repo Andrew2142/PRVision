@@ -283,7 +283,18 @@ test("persists ratio as a number rounded to 6 decimals, dimensions and visual_ch
       diffPixelRatio: 0.047619,
       width: 7,
       height: 3,
-      states: []
+      // 16 §9.5: a render without states is diffed as one Default state built from base/head.
+      states: [
+        {
+          ordinal: 0,
+          stateName: "Default",
+          visualChange: "changed",
+          diffImagePath: "artifacts/1/1/diff.png",
+          diffPixelRatio: 0.047619,
+          width: 7,
+          height: 3
+        }
+      ]
     }
   ]);
 });
@@ -416,4 +427,131 @@ test("throws IMAGE_DIFF_CANCELLED when cancelled", async () => {
       error instanceof PipelineStepError && error.code === "IMAGE_DIFF_CANCELLED" && error.userMessage === "Cancelled."
   );
   assert.equal(h.db.updates.length, 0);
+});
+
+// ---- 16 §9.5: per-state diffs ----
+
+function stateSide(side: "base" | "head", componentId: number, ordinal: number, width = 20, height = 20) {
+  return okSide(side, componentId, width, height, {
+    imagePath: `artifacts/1/${String(componentId)}/${ordinal === 0 ? "" : `s${String(ordinal)}/`}${side}.png`
+  });
+}
+
+test("ImageDiffService.diff diffs every state, writes state diff paths and aggregates the row", async () => {
+  const same = encodePng(solidPng(20, 20, WHITE));
+  const changed = encodePng(withRect(solidPng(20, 20, WHITE), { x: 0, y: 0, w: 10, h: 10 }, RED));
+  const h = setup([1], {
+    "artifacts/1/1/base.png": same,
+    "artifacts/1/1/head.png": same,
+    "artifacts/1/1/s1/base.png": same,
+    "artifacts/1/1/s1/head.png": changed,
+    "artifacts/1/1/s2/head.png": same
+  });
+  h.db.seed(
+    Table.VISUALIZATION_COMPONENT_STATES,
+    [0, 1, 2].map((ordinal) => ({
+      visualizationComponentId: 1,
+      visualizationId: 1,
+      ordinal,
+      stateName: ["Default", "Overdue", "Empty"][ordinal] ?? "Default",
+      onBase: ordinal !== 2,
+      onHead: true
+    }))
+  );
+  const results = await h.service.diff(h.handle.context, [
+    {
+      componentId: 1,
+      base: stateSide("base", 1, 0),
+      head: stateSide("head", 1, 0),
+      states: [
+        { ordinal: 0, stateName: "Default", base: stateSide("base", 1, 0), head: stateSide("head", 1, 0) },
+        { ordinal: 1, stateName: "Overdue", base: stateSide("base", 1, 1), head: stateSide("head", 1, 1) },
+        { ordinal: 2, stateName: "Empty", base: null, head: stateSide("head", 1, 2) }
+      ]
+    }
+  ]);
+  assert.ok(h.store.files.has("artifacts/1/1/diff.png"));
+  assert.ok(h.store.files.has("artifacts/1/1/s1/diff.png"));
+  assert.ok(!h.store.files.has("artifacts/1/1/s2/diff.png"), "a state only on head is new, not diffed");
+  assert.deepEqual(h.db.updatesFor(1).at(-1), {
+    visualChange: "changed",
+    diffImagePath: "artifacts/1/1/diff.png",
+    diffPixelRatio: 0.25,
+    stateCount: 3,
+    changedStateCount: 2,
+    imageWidth: 20,
+    imageHeight: 20
+  });
+  const rows = h.db.rows(Table.VISUALIZATION_COMPONENT_STATES);
+  assert.deepEqual(
+    rows.map((row) => [row.ordinal, row.visualChange, row.diffImagePath, row.diffPixelRatio]),
+    [
+      [0, "unchanged", "artifacts/1/1/diff.png", 0],
+      [1, "changed", "artifacts/1/1/s1/diff.png", 0.25],
+      [2, "new", null, null]
+    ]
+  );
+  assert.equal(results.length, 1);
+  assert.deepEqual(
+    results[0]?.states.map((state) => [state.stateName, state.visualChange]),
+    [
+      ["Default", "unchanged"],
+      ["Overdue", "changed"],
+      ["Empty", "new"]
+    ]
+  );
+});
+
+test("ImageDiffService.diff: added and removed rows keep new/deleted over their states", async () => {
+  const png = encodePng(solidPng(20, 20, WHITE));
+  const h = setup([1, 2], {
+    "artifacts/1/1/head.png": png,
+    "artifacts/1/1/s1/head.png": png,
+    "artifacts/1/2/base.png": png
+  });
+  await h.service.diff(h.handle.context, [
+    {
+      componentId: 1,
+      base: null,
+      head: stateSide("head", 1, 0),
+      states: [
+        { ordinal: 0, stateName: "Default", base: null, head: stateSide("head", 1, 0) },
+        { ordinal: 1, stateName: "Empty", base: null, head: stateSide("head", 1, 1) }
+      ]
+    },
+    {
+      componentId: 2,
+      base: stateSide("base", 2, 0),
+      head: null,
+      states: [{ ordinal: 0, stateName: "Default", base: stateSide("base", 2, 0), head: null }]
+    }
+  ]);
+  assert.equal(h.db.updatesFor(1).at(-1)?.visualChange, "new");
+  assert.equal(h.db.updatesFor(1).at(-1)?.changedStateCount, 2);
+  assert.equal(h.db.updatesFor(2).at(-1)?.visualChange, "deleted");
+});
+
+test("ImageDiffService.diff: unchanged only when every compared state is unchanged; null when none compared", async () => {
+  const same = encodePng(solidPng(20, 20, WHITE));
+  const h = setup([1, 2], { "artifacts/1/1/base.png": same, "artifacts/1/1/head.png": same });
+  await h.service.diff(h.handle.context, [
+    {
+      componentId: 1,
+      base: stateSide("base", 1, 0),
+      head: stateSide("head", 1, 0),
+      states: [
+        { ordinal: 0, stateName: "Default", base: stateSide("base", 1, 0), head: stateSide("head", 1, 0) },
+        { ordinal: 1, stateName: "Broken", base: failedSide("base"), head: failedSide("head") }
+      ]
+    },
+    {
+      componentId: 2,
+      base: failedSide("base"),
+      head: failedSide("head"),
+      states: [{ ordinal: 0, stateName: "Default", base: failedSide("base"), head: failedSide("head") }]
+    }
+  ]);
+  assert.equal(h.db.updatesFor(1).at(-1)?.visualChange, "unchanged");
+  assert.equal(h.db.updatesFor(1).at(-1)?.changedStateCount, 0);
+  assert.equal(h.db.updatesFor(2).at(-1)?.visualChange, null);
 });

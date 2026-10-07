@@ -467,3 +467,29 @@ test("prompt tells the model a replaced row is a replacement, in the user conten
   assert.ok(!SUMMARY_SYSTEM_PROMPT.includes("replace"));
   assert.ok(!buildSummaryPrompt(promptInput()).includes("Replaces:"), "other rows get no replacement lines");
 });
+
+test("buildSummaryPrompt adds the 16 §9.7 states line and the global-style re-check overview", () => {
+  const prompt = buildSummaryPrompt(
+    promptInput({
+      components: [
+        componentInput(1, {
+          states: [
+            { name: "Default", visualChange: "unchanged", diffPixelRatio: 0 },
+            { name: "Overdue", visualChange: "changed", diffPixelRatio: 0.021 },
+            { name: "Menu open", visualChange: null, diffPixelRatio: null }
+          ]
+        }),
+        componentInput(2)
+      ],
+      recheck: { checked: 201, changed: 14, trigger: "src/index.css" }
+    })
+  );
+  assert.ok(prompt.includes("- states: Default (unchanged), Overdue (changed, 2.10%), Menu open (not compared)\n"));
+  assert.equal(prompt.split("- states:").length - 1, 1, "rows without state rows get no states line");
+  assert.ok(
+    prompt.includes(
+      "201 components were re-checked with saved harnesses after a global style change in src/index.css; 14 changed."
+    )
+  );
+  assert.ok(!buildSummaryPrompt(promptInput()).includes("re-checked"));
+});

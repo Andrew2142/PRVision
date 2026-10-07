@@ -509,3 +509,139 @@ describe("render engine: fixture Button on feature/button-restyle", { timeout: 3
     assert.equal(fs.existsSync(path.join(requireFixtureRepo(), "node_modules", ".vite-temp")), buttonViteTempBefore);
   });
 });
+
+// ---------------------------------------------------------------------------------------------------------------
+// 16 §20.2 / §20.5: multi-state harness, scripted steps with real input, per-state images
+// ---------------------------------------------------------------------------------------------------------------
+
+const MENU_COMPONENT = `import { useState } from "react";
+export default function Menu() {
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={{ padding: 16 }}>
+      <style>{".prv-it-more:hover { background: rgb(0, 0, 255) !important; }"}</style>
+      <button className="prv-it-more" style={{ background: "rgb(255, 255, 255)", padding: 8 }} onClick={() => setOpen(true)}>
+        More actions
+      </button>
+      {open ? <ul style={{ margin: 0 }}><li>Rename</li><li>Delete</li></ul> : null}
+    </div>
+  );
+}
+`;
+
+describe("render engine: multi-state harness with steps (16b/16e)", { timeout: 300_000 }, () => {
+  let run: RunOutput | null = null;
+  const menuId = 301;
+
+  before(async () => {
+    if (SKIP !== false) {
+      return;
+    }
+    const fixture = requireFixtureRepo();
+    const temp = makeTempDir("it-states");
+    cleanups.push(temp.cleanup);
+    for (const side of ["base", "head"] as const) {
+      copyFixture(fixture, path.join(temp.path, side));
+      fs.mkdirSync(path.join(temp.path, side, IT_DIR), { recursive: true });
+      fs.writeFileSync(path.join(temp.path, side, IT_DIR, "Menu.tsx"), MENU_COMPONENT);
+    }
+    const target = { by: "role" as const, role: "button", name: "More actions" };
+    const states = [
+      { name: "Default", steps: [] },
+      { name: "Menu open", steps: [{ action: "click", target }] },
+      { name: "Hovered", steps: [{ action: "hover", target }] },
+      { name: "Missing", steps: [{ action: "click", target: { by: "text" as const, text: "No such element" } }] }
+    ] as const;
+    const source = [
+      'import { definePrvisionHarness } from "../harness-api";',
+      `import Target from "${itImport("Menu")}";`,
+      "export default definePrvisionHarness({",
+      "  states: [",
+      ...states.map(
+        (state) =>
+          `    { name: ${JSON.stringify(state.name)}, render: () => <Target />, steps: ${JSON.stringify(state.steps)} },`
+      ),
+      "  ]",
+      "});",
+      ""
+    ].join("\n");
+    run = await runRender({
+      baseDir: path.join(temp.path, "base"),
+      headDir: path.join(temp.path, "head"),
+      fixture,
+      visualizationId: 9301,
+      inputs: [
+        {
+          candidate: candidate(menuId, `${IT_DIR}/Menu.tsx`, "modified", 0),
+          harness: {
+            componentId: menuId,
+            harnessSource: source,
+            mockedModules: [],
+            notes: "Scripted multi-state harness.",
+            states: states.map((state) => ({ name: state.name, steps: [...state.steps] })),
+            origin: "library", // never repaired: the missing step stays a step_failed state
+            libraryEntryId: null
+          },
+          basePath: `${IT_DIR}/Menu.tsx`
+        }
+      ]
+    });
+  });
+
+  test("renders one PNG pair per state at the state paths", { skip: SKIP }, () => {
+    assert.ok(run);
+    const result = run.results[0];
+    assert.ok(result);
+    assert.deepEqual(
+      result.states.map((state) => [state.stateName, state.base?.ok, state.head?.ok]),
+      [
+        ["Default", true, true],
+        ["Menu open", true, true],
+        ["Hovered", true, true],
+        ["Missing", false, false]
+      ]
+    );
+    for (const [ordinal, folder] of [
+      [0, ""],
+      [1, "s1/"],
+      [2, "s2/"]
+    ] as const) {
+      for (const side of ["base", "head"] as const) {
+        const file = path.join(run.dataDir, `artifacts/9301/${String(menuId)}/${folder}${side}.png`);
+        assert.ok(fs.existsSync(file), `${String(ordinal)} ${side}`);
+      }
+    }
+  });
+
+  test("a click step and a hover step change only their own state's pixels", { skip: SKIP }, () => {
+    assert.ok(run);
+    const image = (folder: string): PNG =>
+      readPng(path.join(run?.dataDir ?? "", `artifacts/9301/${String(menuId)}/${folder}head.png`));
+    const base = image("");
+    const open = image("s1/");
+    const hovered = image("s2/");
+    assert.ok(open.height > base.height || diffRatio(base, open) > 0, "the open menu adds content");
+    assert.ok(diffRatio(base, hovered) > 0, "the hover style is captured");
+    // Base and head of every rendered state are identical (same code on both sides).
+    for (const folder of ["", "s1/", "s2/"]) {
+      const baseSide = readPng(path.join(run.dataDir, `artifacts/9301/${String(menuId)}/${folder}base.png`));
+      assert.equal(diffRatio(baseSide, image(folder)), 0, folder);
+    }
+  });
+
+  test("a missing step target fails only its state with step_failed", { skip: SKIP }, () => {
+    assert.ok(run);
+    const payload = run.persistence.latest(menuId);
+    assert.ok(payload);
+    assert.equal(payload.renderStatus, "partial");
+    const missing = payload.states.find((state) => state.stateName === "Missing");
+    assert.ok(missing);
+    assert.match(
+      missing.headError ?? "",
+      /^\[step_failed\] Interaction step failed: State "Missing", step 1 \(click text "No such element"\): no visible element matched within 3 s\./
+    );
+    assert.equal(missing.headFailureKind, "step_failed");
+    assert.match(payload.headError ?? "", /^State "Missing": \[step_failed\]/);
+    assert.deepEqual(run.repairCalls, [], "a library harness is never repaired");
+  });
+});

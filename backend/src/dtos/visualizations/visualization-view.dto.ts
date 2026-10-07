@@ -1,6 +1,7 @@
 import type { RepositoryFramework } from "../../enums";
 import type { VisualizationModel } from "../../models";
 import { toIsoString, toIsoStringOrNull } from "../../utilities";
+import type { LibraryJobView } from "../harness-library/library-job-view.dto";
 import type { VisualizationComponentView } from "./visualization-component-view.dto";
 
 type SourceType = "github_pr" | "local_branch" | "working_tree" | "commit_range";
@@ -33,6 +34,8 @@ export interface VisualizationSummaryView {
   status: Status;
   componentCount: number;
   changedCount: number;
+  /** 16 §14.5: rows that reached rendering ("N checked, M changed"). */
+  checkedCount: number;
   createdAt: string;
   completedAt: string | null;
 }
@@ -51,6 +54,23 @@ export interface VisualizationDetailView extends VisualizationSummaryView {
   aiUsage: { inputTokens: number; outputTokens: number; calls: number } | null;
   startedAt: string | null;
   components: VisualizationComponentView[];
+  // --- 16e block (16 §14.5) ---
+  reusedHarnessCount: number;
+  newHarnessCount: number;
+  needsUpdateCount: number;
+  globalStyleTrigger: string | null;
+  activeRepairJob: LibraryJobView | null;
+  /** Terminal, ≥ 1 component with a harness, base_sha set, head recreatable. */
+  liveAvailable: boolean;
+  /** Repair all broken confirm; null when nothing needs updating or AI is not configured. */
+  repairEstimateUsd: number | null;
+}
+
+/** 16e: the library and live fields of the detail view, computed by VisualizationsService.get. */
+export interface VisualizationLibraryDetail {
+  activeRepairJob: LibraryJobView | null;
+  liveAvailable: boolean;
+  repairEstimateUsd: number | null;
 }
 
 /** 202 body of POST /api/visualizations (00 §9). */
@@ -86,6 +106,7 @@ export function toVisualizationSummaryView(v: VisualizationModel, repositoryName
     status: v.status,
     componentCount: v.componentCount,
     changedCount: v.changedCount,
+    checkedCount: v.checkedCount,
     createdAt: toIsoString(v.createdAt),
     completedAt: toIsoStringOrNull(v.completedAt)
   };
@@ -95,7 +116,8 @@ export function toVisualizationSummaryView(v: VisualizationModel, repositoryName
 export function toVisualizationDetailView(
   v: VisualizationModel,
   repository: { name: string; framework: RepositoryFramework },
-  components: VisualizationComponentView[]
+  components: VisualizationComponentView[],
+  library: VisualizationLibraryDetail = { activeRepairJob: null, liveAvailable: false, repairEstimateUsd: null }
 ): VisualizationDetailView {
   return {
     ...toVisualizationSummaryView(v, repository.name),
@@ -110,6 +132,13 @@ export function toVisualizationDetailView(
       ? { inputTokens: v.aiUsage.inputTokens, outputTokens: v.aiUsage.outputTokens, calls: v.aiUsage.calls }
       : null,
     startedAt: toIsoStringOrNull(v.startedAt),
-    components
+    components,
+    reusedHarnessCount: v.reusedHarnessCount,
+    newHarnessCount: v.newHarnessCount,
+    needsUpdateCount: v.needsUpdateCount,
+    globalStyleTrigger: v.globalStyleTrigger ?? null,
+    activeRepairJob: library.activeRepairJob,
+    liveAvailable: library.liveAvailable,
+    repairEstimateUsd: library.repairEstimateUsd
   };
 }

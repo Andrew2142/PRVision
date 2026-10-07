@@ -14,7 +14,12 @@ import type { ComponentSourceQueries, PipelineContext } from "../../../types/vis
 import { ChangeAnalysisService } from "./change-analysis-service";
 import { HarnessGenerationService } from "./harness-generation-service";
 import { ImageDiffService } from "./image-diff-service";
-import { RenderService, type RepairHarnessFn } from "./render-service";
+import {
+  RenderService,
+  type ComponentRenderPersistence,
+  type RenderArtifactStore,
+  type RepairHarnessFn
+} from "./render-service";
 import { StructuralDiffService } from "./structural-diff-service";
 import { SummaryService } from "./summary-service";
 
@@ -47,6 +52,30 @@ export type StructuralDiffStage = Pick<StructuralDiffService, "compare">;
 /** Sheet 11 `SummaryService` (11 §5.4). */
 export type SummaryStage = Pick<SummaryService, "summarize">;
 
+// --- 16e block (16 §5.5, §10.4 step 7.4): render overrides for scans (in-memory persistence, scratch artifacts) ---
+
+/** What `render(deps)` receives: 09's repair closure plus optional persistence and artifact store overrides. */
+export interface RenderStageDeps {
+  repairHarness: RepairHarnessFn;
+  persistence?: ComponentRenderPersistence;
+  artifactStore?: RenderArtifactStore;
+}
+
+/** Constructor overrides of a render service from RenderStageDeps (absent overrides keep the defaults). */
+export function renderServiceOverrides(deps: RenderStageDeps): {
+  repairHarness: RepairHarnessFn;
+  createPersistence?: () => ComponentRenderPersistence;
+  artifactStore?: RenderArtifactStore;
+} {
+  const persistence = deps.persistence;
+  return {
+    repairHarness: deps.repairHarness,
+    ...(persistence !== undefined ? { createPersistence: () => persistence } : {}),
+    ...(deps.artifactStore !== undefined ? { artifactStore: deps.artifactStore } : {})
+  };
+}
+// --- end 16e block ---
+
 /** How the orchestrator obtains each stage (07 §5.9.2). Tests swap in fakes. */
 export interface PipelineStepFactories {
   /** 08 — default `new ChangeAnalysisService()`; one instance per job. */
@@ -54,7 +83,7 @@ export interface PipelineStepFactories {
   /** 09 — default `new HarnessGenerationService(ctx, sourceQueries)`; the same instance serves repairs for 10. */
   harnessGeneration(ctx: PipelineContext, sourceQueries: ComponentSourceQueries): HarnessGenerationStage;
   /** 10 — default `new RenderService({ repairHarness })` (10 §5.13.1; other deps use 10's defaults). */
-  render(deps: { repairHarness: RepairHarnessFn }): RenderStage;
+  render(deps: RenderStageDeps): RenderStage;
   /** 11 — defaults `new ImageDiffService()`, `new StructuralDiffService()`, `new SummaryService()`. */
   imageDiff(): ImageDiffStage;
   structuralDiff(): StructuralDiffStage;
@@ -68,7 +97,7 @@ export function defaultPipelineStepFactories(): PipelineStepFactories {
   return {
     changeAnalysis: () => new ChangeAnalysisService(),
     harnessGeneration: (ctx, sourceQueries) => new HarnessGenerationService(ctx, sourceQueries),
-    render: (deps) => new RenderService({ repairHarness: deps.repairHarness }),
+    render: (deps) => new RenderService(renderServiceOverrides(deps)), // 16e block
     imageDiff: () => new ImageDiffService(),
     structuralDiff: () => new StructuralDiffService(),
     summary: () => new SummaryService()

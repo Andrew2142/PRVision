@@ -836,3 +836,113 @@ test("tells the model a replaced row compares two different components, keeping 
     request.prompt
   );
 });
+
+// ---- 16 §9.7: states in the user prompt, image choice and the global-style re-check overview ----
+
+test("SummaryService adds a states line and attaches the first changed state's images with its name", async () => {
+  const stateImage = (kind: "base" | "head" | "diff"): string => `artifacts/1/1/s1/${kind}.png`;
+  const s = setup({
+    components: [changedRow(1, 0.021, { visualChange: "changed" })],
+    files: {
+      ...imagesFor([1], ["base", "head", "diff"]),
+      [stateImage("base")]: SMALL_PNG,
+      [stateImage("head")]: encodePng(solidPng(12, 10, WHITE))
+    },
+    script: { summary: [{ kind: "data", data: aiData([1]) }] }
+  });
+  s.db.seed(Table.VISUALIZATION_COMPONENT_STATES, [
+    {
+      visualizationComponentId: 1,
+      visualizationId: 1,
+      ordinal: 0,
+      stateName: "Default",
+      onBase: true,
+      onHead: true,
+      visualChange: "unchanged",
+      diffPixelRatio: 0
+    },
+    {
+      visualizationComponentId: 1,
+      visualizationId: 1,
+      ordinal: 1,
+      stateName: "Overdue",
+      onBase: true,
+      onHead: true,
+      visualChange: "changed",
+      diffPixelRatio: 0.021,
+      baseImagePath: stateImage("base"),
+      headImagePath: stateImage("head"),
+      diffImagePath: stateImage("diff")
+    },
+    {
+      visualizationComponentId: 1,
+      visualizationId: 1,
+      ordinal: 2,
+      stateName: "Menu open",
+      onBase: true,
+      onHead: true,
+      visualChange: "unchanged",
+      diffPixelRatio: 0
+    }
+  ]);
+  await s.service.summarize(s.handle.context, s.analysis);
+  const request = summaryRequest(s.handle);
+  assert.ok(
+    request.prompt.includes("- states: Default (unchanged), Overdue (changed, 2.10%), Menu open (unchanged)\n"),
+    request.prompt
+  );
+  assert.deepEqual(
+    request.images?.map((image) => image.label),
+    ["#1 C1 — Overdue — after (head)", "#1 C1 — Overdue — before (base)"]
+  );
+  assert.equal(request.images[0]?.base64, encodePng(solidPng(12, 10, WHITE)).toString("base64"));
+});
+
+test("SummaryService keeps Default images and labels when Default changed", async () => {
+  const s = setup({
+    components: [changedRow(1, 0.3)],
+    files: imagesFor([1]),
+    script: { summary: [{ kind: "data", data: aiData([1]) }] }
+  });
+  s.db.seed(Table.VISUALIZATION_COMPONENT_STATES, [
+    {
+      visualizationComponentId: 1,
+      visualizationId: 1,
+      ordinal: 0,
+      stateName: "Default",
+      onBase: true,
+      onHead: true,
+      visualChange: "changed",
+      diffPixelRatio: 0.3
+    }
+  ]);
+  await s.service.summarize(s.handle.context, s.analysis);
+  assert.deepEqual(
+    summaryRequest(s.handle).images?.map((image) => image.label),
+    ["#1 C1 — after (head)", "#1 C1 — before (base)"]
+  );
+});
+
+test("SummaryService reports a global-style re-check and leaves unchanged re-check rows out of the list", async () => {
+  const s = setup({
+    components: [
+      changedRow(1, 0.2, { changeKind: "rechecked" }),
+      { id: 2, rank: 2, visualChange: "unchanged", changeKind: "rechecked", displayName: "Quiet" },
+      { id: 3, rank: 3, visualChange: "unchanged", changeKind: "modified", displayName: "Touched" }
+    ],
+    visualization: { globalStyleTrigger: "src/index.css" },
+    files: imagesFor([1]),
+    script: { summary: [{ kind: "data", data: aiData([1]) }] }
+  });
+  await s.service.summarize(s.handle.context, s.analysis);
+  const prompt = summaryRequest(s.handle).prompt;
+  assert.ok(
+    prompt.includes(
+      "2 components were re-checked with saved harnesses after a global style change in src/index.css; 1 changed."
+    ),
+    prompt
+  );
+  assert.ok(prompt.includes("Unchanged: 2."), "re-check rows are counted");
+  assert.ok(prompt.includes("Touched"));
+  assert.ok(!prompt.includes("Quiet"), "unchanged re-check rows are not listed");
+});

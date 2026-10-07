@@ -18,7 +18,8 @@ import {
   SUMMARY_RELATED_DIFFS_MAX_FILES
 } from "../../../config-consts";
 import { ComponentRenderStatus, ComponentRisk, ComponentVisualChange, Table } from "../../../enums";
-import { VisualizationComponentModel, VisualizationModel } from "../../../models";
+import { VisualizationComponentModel, VisualizationComponentStateModel, VisualizationModel } from "../../../models";
+import { DEFAULT_STATE_NAME } from "../../../types/harness-library";
 import {
   AiProviderError,
   PipelineStepError,
@@ -160,6 +161,62 @@ export function buildBudgetedPrompt(input: SummaryPromptInput): { prompt: string
 type SideKind = "head" | "base";
 type UnitResult = { ok: true; images: AiImage[]; bytes: number; note: string } | { ok: false; note: string };
 
+/** What the screenshots of one component are taken from: its first changed state (16 §9.7), else the row. */
+interface ImageSource {
+  componentId: number;
+  displayName: string;
+  stateName: string;
+  visualChange: string | null;
+  baseImagePath: string | null;
+  headImagePath: string | null;
+  diffImagePath: string | null;
+}
+
+const CHANGED_VISUALS: ReadonlySet<string> = new Set(["changed", "new", "deleted"]);
+
+/** The image source of a row (16 §9.7): the first changed state (Default when Default changed), else the row. */
+export function imageSourceOf(
+  row: VisualizationComponentModel,
+  states: readonly VisualizationComponentStateModel[]
+): ImageSource {
+  const first = [...states]
+    .sort((a, b) => a.ordinal - b.ordinal)
+    .find((state) => state.visualChange !== null && CHANGED_VISUALS.has(state.visualChange));
+  if (first === undefined || first.ordinal === 0) {
+    return {
+      componentId: row.id,
+      displayName: row.displayName,
+      stateName: DEFAULT_STATE_NAME,
+      visualChange: row.visualChange,
+      baseImagePath: row.baseImagePath,
+      headImagePath: row.headImagePath,
+      diffImagePath: row.diffImagePath
+    };
+  }
+  return {
+    componentId: row.id,
+    displayName: row.displayName,
+    stateName: first.stateName,
+    visualChange: first.visualChange,
+    baseImagePath: first.baseImagePath,
+    headImagePath: first.headImagePath,
+    diffImagePath: first.diffImagePath
+  };
+}
+
+/** `Default (unchanged), Overdue (changed, 2.10%)` for the prompt's `states:` line (16 §9.7). */
+export function stateLineEntries(
+  states: readonly VisualizationComponentStateModel[]
+): Array<{ name: string; visualChange: string | null; diffPixelRatio: number | null }> {
+  return [...states]
+    .sort((a, b) => a.ordinal - b.ordinal)
+    .map((state) => ({
+      name: state.stateName,
+      visualChange: state.visualChange ?? null,
+      diffPixelRatio: state.diffPixelRatio ?? null
+    }));
+}
+
 class ScreenshotUnavailable extends Error {
   override readonly name = "ScreenshotUnavailable";
 }
@@ -189,7 +246,8 @@ export class SummaryService {
     const startedAt = Date.now();
 
     // 1. load
-    const { visualization, rows } = await this.load(vid);
+    const { visualization, rows, states } = await this.load(vid);
+    const statesOf = (id: number): VisualizationComponentStateModel[] => states.get(id) ?? [];
 
     // 2. partition
     const skipped = rows.filter((row) => row.renderStatus === ComponentRenderStatus.SKIPPED);
@@ -201,6 +259,9 @@ export class SummaryService {
       (row) =>
         row.renderStatus !== ComponentRenderStatus.SKIPPED && row.visualChange === ComponentVisualChange.UNCHANGED
     );
+    // 16 §9.7: global-style re-check rows are counted; the unchanged ones are left out of the per-component list.
+    const rechecked = rows.filter((row) => row.changeKind === "rechecked");
+    const trigger = visualization.globalStyleTrigger ?? null;
 
     // 3. fixed path
     if (detailed.length === 0) {
@@ -217,7 +278,7 @@ export class SummaryService {
     }
 
     // 5. input (images, related diffs)
-    const { images, notes: imageNotes } = await this.prepareImages(detailed, log);
+    const { images, notes: imageNotes } = await this.prepareImages(detailed, statesOf, log);
     const relatedDiffs = await this.relatedDiffs(ctx, analysis, rows, detailed, log);
     const reasons = new Map(analysis.candidates.map((candidate) => [candidate.componentId, candidate.reason]));
     const components: SummaryComponentInput[] = detailed.map((row) => ({
@@ -237,6 +298,7 @@ export class SummaryService {
       structuralDiff: row.structuralDiff,
       codeDiff: row.codeDiff,
       imageNote: imageNotes.get(row.id) ?? "not attached",
+      ...(statesOf(row.id).length > 0 ? { states: stateLineEntries(statesOf(row.id)) } : {}),
       // 00 §17: tell the model a replaced row compares two different components
       ...(row.changeKind === "replaced" && row.baseDisplayName !== null && row.baseFilePath !== null
         ? {
@@ -271,14 +333,26 @@ export class SummaryService {
         notCompared: count(null),
         unchanged: unchanged.length
       },
+      ...(trigger !== null && rechecked.length > 0
+        ? {
+            recheck: {
+              checked: rechecked.length,
+              changed: rechecked.filter((row) => row.visualChange !== null && CHANGED_VISUALS.has(row.visualChange))
+                .length,
+              trigger
+            }
+          }
+        : {}),
       skipped: { count: skipped.length, displayNames: skipped.map((row) => row.displayName) },
       components,
       relatedDiffs,
-      unchanged: unchanged.map((row) => ({
-        componentId: row.id,
-        displayName: row.displayName,
-        filePath: row.filePath
-      })),
+      unchanged: unchanged
+        .filter((row) => trigger === null || row.changeKind !== "rechecked")
+        .map((row) => ({
+          componentId: row.id,
+          displayName: row.displayName,
+          filePath: row.filePath
+        })),
       framework: ctx.repository.framework
     });
     if (!fits) {
@@ -369,7 +443,11 @@ export class SummaryService {
   // Load and persist
   // -------------------------------------------------------------------------------------------------------------
 
-  private async load(vid: number): Promise<{ visualization: VisualizationModel; rows: VisualizationComponentModel[] }> {
+  private async load(vid: number): Promise<{
+    visualization: VisualizationModel;
+    rows: VisualizationComponentModel[];
+    states: Map<number, VisualizationComponentStateModel[]>;
+  }> {
     const queryHandler = this.deps.createQueryHandler();
     try {
       const visualization = await queryHandler.validateAndSelect(VisualizationModel, { id: vid }, Table.VISUALIZATIONS);
@@ -382,7 +460,19 @@ export class SummaryService {
         Table.VISUALIZATION_COMPONENTS,
         { orderBy: [{ column: "rank", direction: "asc" }] }
       );
-      return { visualization, rows };
+      const stateRows = await queryHandler.selectMany(
+        VisualizationComponentStateModel,
+        { visualizationId: vid },
+        Table.VISUALIZATION_COMPONENT_STATES,
+        { orderBy: [{ column: "ordinal", direction: "asc" }] }
+      );
+      const states = new Map<number, VisualizationComponentStateModel[]>();
+      for (const state of stateRows) {
+        const list = states.get(state.visualizationComponentId) ?? [];
+        list.push(state);
+        states.set(state.visualizationComponentId, list);
+      }
+      return { visualization, rows, states };
     } catch (error: unknown) {
       throw new PipelineStepError(STAGE, "Could not load the visualization for the summary.", {
         code: "SUMMARY_LOAD_FAILED",
@@ -467,6 +557,7 @@ export class SummaryService {
 
   private async prepareImages(
     detailed: readonly VisualizationComponentModel[],
+    statesOf: (componentId: number) => VisualizationComponentStateModel[],
     log: Logger
   ): Promise<{ images: AiImage[]; notes: Map<number, string> }> {
     const byRatio = detailed
@@ -495,7 +586,7 @@ export class SummaryService {
     const images: AiImage[] = [];
     let totalBytes = 0;
     for (const row of selected) {
-      const unit = await this.buildUnit(row, log);
+      const unit = await this.buildUnit(imageSourceOf(row, statesOf(row.id)), log);
       if (!unit.ok) {
         notes.set(row.id, unit.note);
         continue;
@@ -512,15 +603,17 @@ export class SummaryService {
   }
 
   /** The images of one component (head then base for a pair), cropped with one shared window when large. */
-  private async buildUnit(row: VisualizationComponentModel, log: Logger): Promise<UnitResult> {
+  private async buildUnit(source: ImageSource, log: Logger): Promise<UnitResult> {
+    const row = { id: source.componentId, ...source };
     const sides: SideKind[] =
       row.visualChange === ComponentVisualChange.CHANGED
         ? ["head", "base"]
         : row.visualChange === ComponentVisualChange.NEW
           ? ["head"]
           : ["base"];
+    const stateLabel = source.stateName === DEFAULT_STATE_NAME ? "" : ` — ${source.stateName}`;
     const label = (side: SideKind): string =>
-      `#${String(row.id)} ${row.displayName} — ${side === "head" ? "after (head)" : "before (base)"}`;
+      `#${String(row.id)} ${row.displayName}${stateLabel} — ${side === "head" ? "after (head)" : "before (base)"}`;
 
     let buffers: Array<{ side: SideKind; buffer: Buffer; width: number; height: number }>;
     try {
@@ -597,7 +690,10 @@ export class SummaryService {
   }
 
   /** Bounding box of the diff pixels in diff.png, or null when it is missing or unreadable. */
-  private async diffBoundingBox(row: VisualizationComponentModel, log: Logger): Promise<PixelRect | null> {
+  private async diffBoundingBox(
+    row: { id: number; diffImagePath: string | null },
+    log: Logger
+  ): Promise<PixelRect | null> {
     if (row.diffImagePath === null) {
       return null;
     }

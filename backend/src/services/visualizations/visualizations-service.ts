@@ -2,11 +2,19 @@
 // visualizations of soft-deleted repositories, 03 §9.7); QueryHandler cannot express joins.
 import fs from "node:fs/promises";
 import { and, count, desc, eq, inArray, type SQL } from "drizzle-orm";
-import { CONSOLE_PAGE_LIMIT_MAX, WORKING_TREE_HEAD_REF } from "../../config-consts";
+import {
+  CONSOLE_PAGE_LIMIT_MAX,
+  LIBRARY_ESTIMATE_DEFAULT_HARNESS_USAGE,
+  LIBRARY_ESTIMATE_OUTPUT_TOKENS_PER_EXTRA_STATE,
+  WORKING_TREE_HEAD_REF
+} from "../../config-consts";
 import * as schema from "../../database/schema";
 import {
   isValidGitBranchName,
+  synthesizedDefaultStateView,
+  toComponentStateView,
   toConsoleEventView,
+  toLibraryJobView,
   toVisualizationComponentView,
   toVisualizationDetailView,
   toVisualizationSummaryView,
@@ -15,12 +23,15 @@ import {
   type DeleteVisualizationResponse,
   type VisualizationConsoleQueryDTO,
   type VisualizationCreateDTO,
+  type LibraryJobView,
   type VisualizationListQueryDTO,
   type VisualizationSummaryView
 } from "../../dtos";
 import {
+  ACTIVE_LIBRARY_JOB_STATUSES,
   DeletionMode,
   ErrorReason,
+  LibraryJobKind,
   isTerminalVisualizationStatus,
   type RepositoryFramework,
   Table,
@@ -29,8 +40,10 @@ import {
   VisualizationStatus
 } from "../../enums";
 import {
+  HarnessLibraryJobModel,
   RepositoryModel,
   VisualizationComponentModel,
+  VisualizationComponentStateModel,
   VisualizationConsoleEventModel,
   VisualizationModel
 } from "../../models";
@@ -50,6 +63,7 @@ import {
   githubErrorToApiResponse,
   redactSecrets,
   resolvePageRequest,
+  usageCostUsd,
   type AiReadiness,
   type ApiResponse,
   type Database,
@@ -58,6 +72,7 @@ import {
 } from "../../utilities";
 import { SettingsStore, type SecretRead } from "../settings/settings-store";
 import { VisualizationConsoleService } from "./visualization-console-service";
+import { describeStep } from "./pipeline/harness-step-text";
 import { transitionVisualization } from "./visualization-state-machine";
 
 /** Longest stored title (07 §5.4.1 step 4); longer titles are cut to TITLE_MAX_LENGTH - 1 and get "…". */
@@ -118,6 +133,7 @@ type VisibleVisualization = {
   visualization: VisualizationModel;
   repositoryName: string;
   repositoryFramework: RepositoryFramework;
+  repositoryStateAllowance: number;
 };
 
 /**
@@ -299,14 +315,73 @@ export class VisualizationsService {
           ]
         }
       );
-      const views = components.map((component) =>
-        toVisualizationComponentView(component, (relativePath) => this.deps.artifacts.toPublicUrl(relativePath))
-      );
+      // --- 16e block (16 §14.5): states, harness status, active repair job, live and repair estimate ---
+      const toPublicUrl = (relativePath: string | null): string | null => this.deps.artifacts.toPublicUrl(relativePath);
+      const [stateRows, repairJob] = await Promise.all([
+        this.deps.queryHandler.selectMany(
+          VisualizationComponentStateModel,
+          { visualizationId: id },
+          Table.VISUALIZATION_COMPONENT_STATES,
+          { orderBy: [{ column: "ordinal", direction: "asc" }] }
+        ),
+        this.deps.queryHandler.validateAndSelect(
+          HarnessLibraryJobModel,
+          { visualizationId: id, kind: LibraryJobKind.REPAIR, status: Where.in([...ACTIVE_LIBRARY_JOB_STATUSES]) },
+          Table.HARNESS_LIBRARY_JOBS
+        )
+      ]);
+      const statesByComponent = new Map<number, VisualizationComponentStateModel[]>();
+      for (const state of stateRows) {
+        const list = statesByComponent.get(state.visualizationComponentId) ?? [];
+        list.push(state);
+        statesByComponent.set(state.visualizationComponentId, list);
+      }
+      const activeRepairJob: LibraryJobView | null =
+        repairJob === null ? null : toLibraryJobView(repairJob, visible.repositoryName);
+      const repairing = new Set(activeRepairJob?.componentIds ?? []);
+      const views = components.map((component) => {
+        const rows = statesByComponent.get(component.id) ?? [];
+        const states =
+          rows.length > 0
+            ? rows.map((state) => toComponentStateView(state, toPublicUrl, describeStep))
+            : [synthesizedDefaultStateView(component, toPublicUrl)];
+        return toVisualizationComponentView(component, toPublicUrl, { states, repairing: repairing.has(component.id) });
+      });
       const repository = { name: visible.repositoryName, framework: visible.repositoryFramework };
-      return { status: 200, data: toVisualizationDetailView(visible.visualization, repository, views) };
+      const library = {
+        activeRepairJob,
+        liveAvailable: isLiveAvailable(visible.visualization, components),
+        repairEstimateUsd: await this.repairEstimateUsd(
+          visible.visualization.needsUpdateCount,
+          visible.repositoryStateAllowance
+        )
+      };
+      return { status: 200, data: toVisualizationDetailView(visible.visualization, repository, views, library) };
+      // --- end 16e block ---
     } catch (error: unknown) {
       return this.unexpected(error, "get");
     }
+  }
+
+  /**
+   * 16e block (16 §14.5): needsUpdateCount × the default per-harness cost with the repository's allowance, at the
+   * current AI model, rounded to cents; null when nothing needs updating or AI is not configured.
+   */
+  private async repairEstimateUsd(needsUpdateCount: number, stateAllowance: number): Promise<number | null> {
+    if (needsUpdateCount <= 0) {
+      return null;
+    }
+    const readiness = await this.deps.aiReadiness();
+    if (!readiness.ready) {
+      return null;
+    }
+    const usage = {
+      ...LIBRARY_ESTIMATE_DEFAULT_HARNESS_USAGE,
+      outputTokens:
+        LIBRARY_ESTIMATE_DEFAULT_HARNESS_USAGE.outputTokens +
+        LIBRARY_ESTIMATE_OUTPUT_TOKENS_PER_EXTRA_STATE * Math.max(0, stateAllowance - 1)
+    };
+    return Math.round(needsUpdateCount * usageCostUsd(readiness.model, usage).usd * 100) / 100;
   }
 
   /** GET /api/visualizations/:id/console — events after `afterId` (exclusive), oldest first, at most `limit`. */
@@ -710,7 +785,12 @@ export class VisualizationsService {
     const v = schema.visualizations;
     const r = schema.repositories;
     const rows = await this.deps.db
-      .select({ visualization: v, repositoryName: r.name, repositoryFramework: r.framework })
+      .select({
+        visualization: v,
+        repositoryName: r.name,
+        repositoryFramework: r.framework,
+        repositoryStateAllowance: r.stateAllowance
+      })
       .from(v)
       .innerJoin(r, eq(r.id, v.repositoryId))
       .where(and(eq(v.isDeleted, false), eq(r.isDeleted, false), eq(v.id, id)))
@@ -720,7 +800,8 @@ export class VisualizationsService {
       ? {
           visualization: ModelHandler.hydrate(VisualizationModel, row.visualization),
           repositoryName: row.repositoryName,
-          repositoryFramework: row.repositoryFramework
+          repositoryFramework: row.repositoryFramework,
+          repositoryStateAllowance: row.repositoryStateAllowance
         }
       : null;
   }
@@ -743,6 +824,24 @@ export class VisualizationsService {
     );
     return INTERNAL_ERROR;
   }
+}
+
+/**
+ * 16e block (16 §14.5): live mode is available for a terminal run with at least one harness snapshot, a base
+ * commit, and a recreatable head (a head commit, or the kept working-tree snapshot).
+ */
+export function isLiveAvailable(
+  v: Pick<VisualizationModel, "status" | "baseSha" | "headSha" | "sourceType" | "workingTreeSnapshot">,
+  components: ReadonlyArray<Pick<VisualizationComponentModel, "harnessSource">>
+): boolean {
+  if (!isTerminalVisualizationStatus(v.status) || v.baseSha === null || v.baseSha === "") {
+    return false;
+  }
+  const headRecreatable =
+    v.sourceType === VisualizationSourceType.WORKING_TREE
+      ? v.workingTreeSnapshot
+      : v.headSha !== null && v.headSha !== "";
+  return headRecreatable && components.some((component) => (component.harnessSource ?? "").trim() !== "");
 }
 
 function resolveVisualizationsDependencies(

@@ -9,7 +9,7 @@ import { createAngularHarnessGeneration } from "../angular/angular-harness-gener
 import { AngularStructuralDiffService } from "../angular/angular-structural-diff-service";
 import { ImageDiffService } from "../image-diff-service";
 import { AngularRenderService } from "../render/angular/angular-render-service";
-import type { PipelineStepFactories } from "../stage-registry";
+import { renderServiceOverrides, type PipelineStepFactories } from "../stage-registry";
 import { SummaryService } from "../summary-service";
 import type { FrameworkStrategy } from "./framework-strategy";
 
@@ -18,7 +18,7 @@ export function angularStepFactories(): PipelineStepFactories {
   return {
     changeAnalysis: () => new AngularChangeAnalysisService(),
     harnessGeneration: (ctx, sourceQueries) => createAngularHarnessGeneration(ctx, sourceQueries),
-    render: (deps) => new AngularRenderService({ repairHarness: deps.repairHarness }),
+    render: (deps) => new AngularRenderService(renderServiceOverrides(deps)), // 16e block
     imageDiff: () => new ImageDiffService(),
     structuralDiff: () => new AngularStructuralDiffService(),
     summary: () => new SummaryService()

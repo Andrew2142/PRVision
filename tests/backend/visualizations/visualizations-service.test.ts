@@ -6,7 +6,8 @@ import { Table } from "../../../backend/src/enums";
 import { VisualizationModel } from "../../../backend/src/models";
 import {
   VisualizationsService,
-  type VisualizationsServiceDependencies
+  type VisualizationsServiceDependencies,
+  isLiveAvailable
 } from "../../../backend/src/services/visualizations/visualizations-service";
 import {
   ArtifactStore,
@@ -819,4 +820,229 @@ test('VisualizationsService every 500 response is { error: "Internal server erro
     assert.deepEqual(await run(() => h.service(1)[action]()), expected, action);
   }
   assert.deepEqual(await run(() => h.service(1).console({})), expected);
+});
+
+// ---------------------------------------------------------------------------------------------------------------
+// 16e (16 §14.5): states, harness status, active repair job, live availability, repair estimate
+// ---------------------------------------------------------------------------------------------------------------
+
+test("VisualizationsService.get maps state rows with step summaries and synthesizes Default for legacy rows", async (t) => {
+  const h = setup(t);
+  h.store.seed(Table.VISUALIZATIONS, [
+    makeVisualizationRow({
+      id: 1,
+      status: "completed",
+      completedAt: new Date(),
+      componentCount: 2,
+      checkedCount: 2,
+      reusedHarnessCount: 1,
+      newHarnessCount: 1
+    })
+  ]);
+  h.store.seed(Table.VISUALIZATION_COMPONENTS, [
+    makeComponentRow({
+      id: 1,
+      rank: 0,
+      displayName: "InvoiceRow",
+      renderStatus: "partial",
+      stateCount: 2,
+      changedStateCount: 1,
+      harnessOrigin: "library",
+      libraryEntryId: 9,
+      harnessNeedsUpdate: true,
+      sourceChangedSinceWrite: true
+    }),
+    makeComponentRow({
+      id: 2,
+      rank: 1,
+      displayName: "Legacy",
+      changeKind: "added",
+      renderStatus: "rendered",
+      visualChange: "new",
+      headImagePath: "artifacts/1/2/head.png",
+      imageWidth: 100,
+      imageHeight: 40
+    })
+  ]);
+  h.store.seed(Table.VISUALIZATION_COMPONENT_STATES, [
+    {
+      visualizationComponentId: 1,
+      visualizationId: 1,
+      ordinal: 1,
+      stateName: "Menu open",
+      onBase: true,
+      onHead: true,
+      steps: [{ action: "click", target: { by: "role", role: "button", name: "More actions" } }],
+      renderStatus: "partial",
+      visualChange: null,
+      headError: "[step_failed] x",
+      headFailureKind: "step_failed",
+      baseImagePath: "artifacts/1/1/s1/base.png"
+    },
+    {
+      visualizationComponentId: 1,
+      visualizationId: 1,
+      ordinal: 0,
+      stateName: "Default",
+      onBase: true,
+      onHead: true,
+      renderStatus: "rendered",
+      visualChange: "changed",
+      diffPixelRatio: 0.1,
+      diffImagePath: "artifacts/1/1/diff.png"
+    }
+  ]);
+  const response = await run(() => h.service(1).get());
+  assert.equal(response.status, 200);
+  const view = response.data as Record<string, unknown> & { components: Array<Record<string, unknown>> };
+  assert.equal(view.checkedCount, 2);
+  assert.equal(view.reusedHarnessCount, 1);
+  assert.equal(view.newHarnessCount, 1);
+  const [row, legacy] = view.components as Array<{
+    states: Array<Record<string, unknown>>;
+    stateCount: number;
+    changedStateCount: number;
+    harness: Record<string, unknown>;
+  }>;
+  assert.deepEqual(
+    row?.states.map((state) => [state.ordinal, state.name, state.stepSummary, state.baseImageUrl, state.diffImageUrl]),
+    [
+      [0, "Default", [], null, "/artifacts/1/1/diff.png"],
+      [1, "Menu open", ['Click button "More actions"'], "/artifacts/1/1/s1/base.png", null]
+    ]
+  );
+  assert.ok(row);
+  assert.equal(row.states[1]?.headError, "[step_failed] x");
+  assert.deepEqual([row.stateCount, row.changedStateCount], [2, 1]);
+  assert.deepEqual(row.harness, {
+    origin: "library",
+    baseOrigin: null,
+    libraryEntryId: 9,
+    baseLibraryEntryId: null,
+    needsUpdate: true,
+    sourceChangedSinceWrite: true,
+    repairing: false
+  });
+  assert.deepEqual(legacy?.states, [
+    {
+      ordinal: 0,
+      name: "Default",
+      onBase: false,
+      onHead: true,
+      steps: [],
+      stepSummary: [],
+      renderStatus: "rendered",
+      visualChange: "new",
+      baseImageUrl: null,
+      headImageUrl: "/artifacts/1/2/head.png",
+      diffImageUrl: null,
+      imageWidth: 100,
+      imageHeight: 40,
+      diffPixelRatio: null,
+      baseError: null,
+      headError: null
+    }
+  ]);
+  assert.ok(legacy);
+  assert.deepEqual([legacy.stateCount, legacy.changedStateCount], [1, 1]);
+});
+
+test("VisualizationsService.get lists the active repair job and marks its components repairing", async (t) => {
+  const h = setup(t);
+  h.store.seed(Table.VISUALIZATIONS, [makeVisualizationRow({ id: 1, status: "completed", completedAt: new Date() })]);
+  h.store.seed(Table.VISUALIZATION_COMPONENTS, [makeComponentRow({ id: 1 }), makeComponentRow({ id: 2, rank: 1 })]);
+  h.store.seed(Table.HARNESS_LIBRARY_JOBS, [
+    {
+      repositoryId: 1,
+      kind: "repair",
+      status: "completed",
+      visualizationId: 1,
+      componentIds: [1, 2],
+      stateAllowance: 3,
+      aiModel: "claude-opus-5-5"
+    },
+    {
+      repositoryId: 1,
+      kind: "repair",
+      status: "running",
+      visualizationId: 1,
+      componentIds: [2],
+      stateAllowance: 3,
+      aiModel: "claude-opus-5-5",
+      writtenCount: 0
+    }
+  ]);
+  const view = (await run(() => h.service(1).get())).data as {
+    activeRepairJob: Record<string, unknown> | null;
+    components: Array<{ id: number; harness: { repairing: boolean } }>;
+  };
+  const job = view.activeRepairJob;
+  assert.ok(job);
+  assert.equal(job.kind, "repair");
+  assert.deepEqual(job.componentIds, [2]);
+  assert.equal(job.repositoryName, "sample-react-app");
+  assert.equal(job.priceExact, true);
+  assert.equal(job.status, "running");
+  assert.deepEqual(
+    view.components.map((component) => [component.id, component.harness.repairing]),
+    [
+      [1, false],
+      [2, true]
+    ]
+  );
+});
+
+test("isLiveAvailable: terminal, a harness snapshot, base_sha and a recreatable head", () => {
+  const run = {
+    status: "completed" as const,
+    baseSha: "b".repeat(40),
+    headSha: "a".repeat(40),
+    sourceType: "local_branch" as const,
+    workingTreeSnapshot: false
+  };
+  const withHarness = [{ harnessSource: "export default 1;" }];
+  assert.equal(isLiveAvailable(run, withHarness), true);
+  assert.equal(isLiveAvailable({ ...run, status: "rendering" }, withHarness), false, "not terminal");
+  assert.equal(isLiveAvailable({ ...run, status: "failed" }, withHarness), true, "failed runs are terminal");
+  assert.equal(isLiveAvailable(run, [{ harnessSource: null }]), false, "no harness");
+  assert.equal(isLiveAvailable({ ...run, baseSha: null }, withHarness), false, "no base commit");
+  assert.equal(isLiveAvailable({ ...run, headSha: null }, withHarness), false, "no head commit");
+  const workingTree = { ...run, sourceType: "working_tree" as const, headSha: null };
+  assert.equal(isLiveAvailable(workingTree, withHarness), false, "no snapshot");
+  assert.equal(isLiveAvailable({ ...workingTree, workingTreeSnapshot: true }, withHarness), true);
+});
+
+test("VisualizationsService.get: repairEstimateUsd at allowance 1 and 3; null without broken rows or AI settings", async (t) => {
+  const h = setup(t);
+  h.store.seed(Table.VISUALIZATIONS, [
+    makeVisualizationRow({ id: 1, status: "completed", completedAt: new Date(), needsUpdateCount: 2 }),
+    makeVisualizationRow({ id: 2, status: "completed", completedAt: new Date(), needsUpdateCount: 0 })
+  ]);
+  const estimate = async (id: number): Promise<unknown> =>
+    ((await run(() => h.service(id).get())).data as { repairEstimateUsd: unknown }).repairEstimateUsd;
+  // claude-opus-5-5, default usage (26 000 in incl. 4 500 cache reads, 9 000 out): 0.2669 per harness.
+  await h.store.update({ stateAllowance: 1 }, { id: 1 }, Table.REPOSITORIES);
+  assert.equal(await estimate(1), 0.53);
+  // allowance 3: +3 000 output tokens × $20/MTok = +0.06 per harness → 0.3269 × 2
+  await h.store.update({ stateAllowance: 3 }, { id: 1 }, Table.REPOSITORIES);
+  assert.equal(await estimate(1), 0.65);
+  assert.equal(await estimate(2), null, "nothing needs updating");
+  const noAi = setup(t, {
+    aiReadiness: () => Promise.resolve({ ready: false, reason: "ai_not_configured", message: "No key" })
+  });
+  noAi.store.seed(Table.VISUALIZATIONS, [
+    makeVisualizationRow({ id: 1, status: "completed", completedAt: new Date(), needsUpdateCount: 2 })
+  ]);
+  assert.equal(
+    ((await run(() => noAi.service(1).get())).data as { repairEstimateUsd: unknown }).repairEstimateUsd,
+    null
+  );
+});
+
+test("VisualizationsService.list carries checkedCount", async (t) => {
+  const h = setup(t);
+  h.store.seed(Table.VISUALIZATIONS, [makeVisualizationRow({ id: 1, componentCount: 6, checkedCount: 5 })]);
+  const response = await run(() => h.service().list({}));
+  const items = (response.data as { items: Array<Record<string, unknown>> }).items;
+  assert.equal(items[0]?.checkedCount, 5);
 });

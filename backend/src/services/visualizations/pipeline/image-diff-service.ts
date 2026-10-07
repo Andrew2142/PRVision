@@ -1,11 +1,12 @@
 /**
  * ImageDiffService (11 §5.2): the pixel half of the `diffing` stage.
  *
- * For every rendered component it classifies the render (11 §5.2.1), compares base and head pixel by pixel with
- * pixelmatch, writes `diff.png` through ArtifactStore and persists `visual_change`, `diff_image_path`,
- * `diff_pixel_ratio`, `image_width` and `image_height` (the final size write of 00 §14.12). Image problems are
- * per component; DB failures and cancellation throw PipelineStepError. `visualizations.changed_count` is written by
- * the orchestrator (07), never here.
+ * For every rendered component and every state (16 §9.5) it classifies the render (11 §5.2.1), compares base and
+ * head pixel by pixel with pixelmatch, writes the state's `diff.png` through ArtifactStore and persists the state
+ * rows plus the row aggregates: `visual_change`, `diff_image_path`, `image_width` and `image_height` of state 0 (the
+ * final size write of 00 §14.12), the largest `diff_pixel_ratio`, `state_count` and `changed_state_count`. Image
+ * problems are per component; DB failures and cancellation throw PipelineStepError. `visualizations.changed_count`
+ * is written by the orchestrator (07), never here.
  */
 import { setImmediate as yieldToEventLoop } from "node:timers/promises";
 import pixelmatch from "pixelmatch";
@@ -13,14 +14,18 @@ import { PNG } from "pngjs";
 import { DIFF_MAX_PNG_BYTES, PIXELMATCH_THRESHOLD, UNCHANGED_RATIO_CUTOFF } from "../../../config-consts";
 import { ComponentVisualChange, Table } from "../../../enums";
 import { VisualizationComponentModel } from "../../../models";
+import { DEFAULT_STATE_NAME } from "../../../types/harness-library";
 import {
   PipelineStepError,
   type ComponentRenderResult,
   type ImageDiffResult,
   type PipelineContext,
-  type RenderSideResult
+  type RenderSideResult,
+  type StateDiffResult,
+  type StateRenderResult
 } from "../../../types/visualization-pipeline";
 import { ArtifactStore, QueryHandler, createLogger, getErrorMessage, type ApiResponse } from "../../../utilities";
+import { aggregateComponentStates, updateComponentStateDiffs } from "./component-state-persistence";
 import { ImageDecodeError, createTransparentPng, cropPng, decodePng, encodePng, readPngHeader } from "./png-utils";
 
 const STAGE = "diffing" as const;
@@ -84,8 +89,8 @@ function hasImage(side: RenderSideResult): side is SideWithImage {
   return side.ok && side.imagePath !== null;
 }
 
-/** Classifies one render per the 11 §5.2.1 table. */
-export function classifyRender(render: ComponentRenderResult): RenderClassification {
+/** Classifies one render (or one state's render) per the 11 §5.2.1 table. */
+export function classifyRender(render: Pick<ComponentRenderResult, "base" | "head">): RenderClassification {
   const { base, head } = render;
   if (base === null && head === null) {
     return { kind: "not_comparable", reason: MISSING_ON_BOTH_SIDES };
@@ -171,8 +176,33 @@ function classifyImageError(error: unknown, phase: "read" | "write"): ImageError
 }
 
 type CompareOutcome =
-  | { ok: true; values: Record<string, unknown>; result: ImageDiffResult; changed: boolean; ratio: number }
+  | { ok: true; diffImagePath: string; changed: boolean; ratio: number; width: number; height: number }
   | { ok: false; reason: ImageErrorReason; error: unknown };
+
+/** The states of a render; renders without states (legacy fakes) are one Default state from `base`/`head`. */
+export function statesOfRender(render: ComponentRenderResult): StateRenderResult[] {
+  return render.states.length > 0
+    ? render.states
+    : [{ ordinal: 0, stateName: DEFAULT_STATE_NAME, base: render.base, head: render.head }];
+}
+
+/**
+ * Row visual change from its states (16 §9.5): an added or removed row keeps `new`/`deleted`; otherwise `changed`
+ * when any state is changed, new or deleted, `unchanged` when every compared state is unchanged, null when none
+ * was compared.
+ */
+export function rowVisualChange(
+  rowClassification: RenderClassification["kind"],
+  states: ReadonlyArray<Pick<StateDiffResult, "visualChange">>
+): StateDiffResult["visualChange"] {
+  if (rowClassification === "new" || rowClassification === "deleted") {
+    return rowClassification;
+  }
+  if (states.some((state) => state.visualChange !== null && state.visualChange !== "unchanged")) {
+    return ComponentVisualChange.CHANGED;
+  }
+  return states.some((state) => state.visualChange === "unchanged") ? ComponentVisualChange.UNCHANGED : null;
+}
 
 /** Pixel-diffs every rendered component and persists the outcome (11 §5.2.3). */
 export class ImageDiffService {
@@ -210,80 +240,121 @@ export class ImageDiffService {
       }
       const componentStartedAt = Date.now();
       const componentId = render.componentId;
-      const classification = classifyRender(render);
-      let ratio: number | null = null;
-      switch (classification.kind) {
-        case "new":
-          await this.persist(ctx, queryHandler, componentId, {
-            visualChange: ComponentVisualChange.NEW,
-            imageWidth: classification.head.width,
-            imageHeight: classification.head.height,
-            diffImagePath: null,
-            diffPixelRatio: null
-          });
-          counts.new += 1;
-          break;
-        case "deleted":
-          await this.persist(ctx, queryHandler, componentId, {
-            visualChange: ComponentVisualChange.DELETED,
-            imageWidth: classification.base.width,
-            imageHeight: classification.base.height,
-            diffImagePath: null,
-            diffPixelRatio: null
-          });
-          counts.deleted += 1;
-          break;
-        case "not_comparable":
-          if (classification.reason === MISSING_ON_BOTH_SIDES) {
-            log.warn(
-              { event: "image_diff.component.missing", componentId },
-              "Component missing on both sides; nothing to compare"
-            );
-          }
-          await this.persist(ctx, queryHandler, componentId, {
-            visualChange: null,
-            diffImagePath: null,
-            diffPixelRatio: null
-          });
-          counts.notCompared += 1;
-          break;
-        case "compare": {
-          const outcome = await this.compareOne(ctx, componentId, classification.base, classification.head);
+      const rowClassification = classifyRender(render);
+      if (rowClassification.kind === "not_comparable" && rowClassification.reason === MISSING_ON_BOTH_SIDES) {
+        log.warn(
+          { event: "image_diff.component.missing", componentId },
+          "Component missing on both sides; nothing to compare"
+        );
+      }
+      const stateDiffs: StateDiffResult[] = [];
+      for (const state of statesOfRender(render)) {
+        const classification = classifyRender(state);
+        const stateDiff: StateDiffResult = {
+          ordinal: state.ordinal,
+          stateName: state.stateName,
+          visualChange: null,
+          diffImagePath: null,
+          diffPixelRatio: null,
+          width: null,
+          height: null
+        };
+        if (classification.kind === "new" || classification.kind === "deleted") {
+          const side = classification.kind === "new" ? classification.head : classification.base;
+          stateDiff.visualChange = classification.kind;
+          stateDiff.width = side.width;
+          stateDiff.height = side.height;
+        } else if (classification.kind === "compare") {
+          const outcome = await this.compareOne(
+            ctx,
+            componentId,
+            state.ordinal,
+            classification.base,
+            classification.head
+          );
           if (outcome.ok) {
-            await this.persist(ctx, queryHandler, componentId, outcome.values);
-            results.push(outcome.result);
-            ratio = outcome.ratio;
-            if (outcome.changed) {
-              counts.changed += 1;
-            } else {
-              counts.unchanged += 1;
-            }
+            stateDiff.visualChange = outcome.changed ? ComponentVisualChange.CHANGED : ComponentVisualChange.UNCHANGED;
+            stateDiff.diffImagePath = outcome.diffImagePath;
+            stateDiff.diffPixelRatio = outcome.ratio;
+            stateDiff.width = outcome.width;
+            stateDiff.height = outcome.height;
           } else {
             log.warn(
-              { event: "image_diff.component.failed", componentId, reason: outcome.reason, err: outcome.error },
+              {
+                event: "image_diff.component.failed",
+                componentId,
+                state: state.ordinal,
+                reason: outcome.reason,
+                err: outcome.error
+              },
               "Could not compare screenshots"
             );
             const name = names.get(componentId) ?? `component #${String(componentId)}`;
+            const label = state.stateName === DEFAULT_STATE_NAME ? name : `${name} (${state.stateName})`;
             await ctx.console.warn(
               STAGE,
-              `Could not compare screenshots for ${name}: ${IMAGE_ERROR_TEXT[outcome.reason]}.`
+              `Could not compare screenshots for ${label}: ${IMAGE_ERROR_TEXT[outcome.reason]}.`
             );
-            await this.persist(ctx, queryHandler, componentId, {
-              visualChange: null,
-              diffImagePath: null,
-              diffPixelRatio: null
-            });
-            counts.notCompared += 1;
           }
-          break;
         }
+        stateDiffs.push(stateDiff);
+      }
+      const visualChange = rowVisualChange(rowClassification.kind, stateDiffs);
+      const first = stateDiffs[0];
+      const aggregate = aggregateComponentStates(stateDiffs);
+      const values: Record<string, unknown> = {
+        visualChange,
+        diffImagePath: first?.diffImagePath ?? null,
+        diffPixelRatio: aggregate.maxDiffPixelRatio
+      };
+      if (render.states.length > 0) {
+        values.stateCount = aggregate.stateCount;
+        values.changedStateCount = aggregate.changedStateCount;
+      }
+      if (first !== undefined && first.width !== null && first.height !== null) {
+        values.imageWidth = first.width;
+        values.imageHeight = first.height;
+      }
+      await this.persist(ctx, queryHandler, componentId, values);
+      if (render.states.length > 0) {
+        await this.persistStates(queryHandler, componentId, stateDiffs);
+      }
+      const compared = stateDiffs.find((state) => state.diffImagePath !== null);
+      if (compared !== undefined && compared.diffImagePath !== null && compared.diffPixelRatio !== null) {
+        const sized = first !== undefined && first.diffImagePath !== null ? first : compared;
+        results.push({
+          componentId,
+          diffImagePath: sized.diffImagePath ?? compared.diffImagePath,
+          diffPixelRatio: aggregate.maxDiffPixelRatio ?? compared.diffPixelRatio,
+          width: sized.width ?? compared.width ?? 0,
+          height: sized.height ?? compared.height ?? 0,
+          states: stateDiffs
+        });
+      }
+      switch (visualChange) {
+        case "changed":
+          counts.changed += 1;
+          break;
+        case "unchanged":
+          counts.unchanged += 1;
+          break;
+        case "new":
+          counts.new += 1;
+          break;
+        case "deleted":
+          counts.deleted += 1;
+          break;
+        case null:
+          counts.notCompared += 1;
+          break;
       }
       log.debug(
         {
           event: "image_diff.component.completed",
           componentId,
-          kind: classification.kind,
-          ratio,
+          kind: rowClassification.kind,
+          states: stateDiffs.length,
+          ratio: aggregate.maxDiffPixelRatio,
           durationMs: Date.now() - componentStartedAt
         },
         "Component compared"
@@ -302,10 +373,11 @@ export class ImageDiffService {
     return results;
   }
 
-  /** Reads, guards, decodes and diffs one pair, then writes diff.png. Never throws. */
+  /** Reads, guards, decodes and diffs one pair, then writes the state's diff.png. Never throws. */
   private async compareOne(
     ctx: PipelineContext,
     componentId: number,
+    ordinal: number,
     base: SideWithImage,
     head: SideWithImage
   ): Promise<CompareOutcome> {
@@ -319,34 +391,35 @@ export class ImageDiffService {
     } catch (error: unknown) {
       return { ok: false, reason: classifyImageError(error, "read"), error };
     }
-    const diffPath = this.deps.artifactStore.componentImagePath(ctx.visualizationId, componentId, "diff");
+    const diffPath = this.deps.artifactStore.componentStateImagePath(ctx.visualizationId, componentId, ordinal, "diff");
     try {
       await this.deps.artifactStore.write(diffPath, encodePng(output.diff));
     } catch (error: unknown) {
       return { ok: false, reason: classifyImageError(error, "write"), error };
     }
-    const rounded = roundRatio(output.ratio);
-    const changed = output.ratio > UNCHANGED_RATIO_CUTOFF;
     return {
       ok: true,
-      changed,
-      ratio: rounded,
-      values: {
-        visualChange: changed ? ComponentVisualChange.CHANGED : ComponentVisualChange.UNCHANGED,
-        diffImagePath: diffPath,
-        diffPixelRatio: rounded,
-        imageWidth: output.width,
-        imageHeight: output.height
-      },
-      result: {
-        componentId,
-        diffImagePath: diffPath,
-        diffPixelRatio: rounded,
-        width: output.width,
-        height: output.height,
-        states: [] // 16a compile shim (16 §6.12): 16e diffs every state
-      }
+      changed: output.ratio > UNCHANGED_RATIO_CUTOFF,
+      ratio: roundRatio(output.ratio),
+      diffImagePath: diffPath,
+      width: output.width,
+      height: output.height
     };
+  }
+
+  private async persistStates(
+    queryHandler: QueryHandler,
+    componentId: number,
+    diffs: readonly StateDiffResult[]
+  ): Promise<void> {
+    try {
+      await updateComponentStateDiffs(queryHandler, componentId, diffs);
+    } catch (error: unknown) {
+      throw new PipelineStepError(STAGE, "Could not save the image comparison results.", {
+        code: "IMAGE_DIFF_PERSIST_FAILED",
+        cause: error
+      });
+    }
   }
 
   /** ArtifactStore.read with the DIFF_MAX_PNG_BYTES cap (png_too_large; nothing is decoded). */

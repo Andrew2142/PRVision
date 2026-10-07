@@ -650,3 +650,62 @@ test("AngularRenderService repairs only the failed side's own harness of a repla
     /repaired/
   );
 });
+
+// ---- 16e (16 §9): per-state pages and the fix-up rules ----
+
+test("AngularRenderService renders every state on both sides with state paths and one build per group", async (t) => {
+  const f = setup(t, { ids: [1] });
+  const stateful: RenderComponentInput = {
+    ...input(1),
+    harness: {
+      ...angularHarness(1),
+      states: [
+        { name: "Default", steps: [] },
+        { name: "Unread", steps: [] }
+      ]
+    }
+  };
+  const [result] = await f.service.renderAll(f.env.handle.context, [stateful]);
+  assert.deepEqual(f.session.renders.map((render) => `${render.stateName}:${render.side}`).sort(), [
+    "Default:base",
+    "Default:head",
+    "Unread:base",
+    "Unread:head"
+  ]);
+  assert.equal(f.builds.length, 2, "states share the group's build");
+  assert.deepEqual(
+    result?.states.map((state) => [state.stateName, state.head?.imagePath]),
+    [
+      ["Default", "artifacts/1/1/head.png"],
+      ["Unread", "artifacts/1/1/s1/head.png"]
+    ]
+  );
+  assert.equal(f.persistence.latest(1)?.states.length, 2);
+});
+
+test("AngularRenderService never repairs a library harness and repairs a written one with the failing state's name", async (t) => {
+  const failing: ScriptedOutcome = { ok: false, kind: "render_error", error: "[render_error] Render error: NG0201" };
+  const f = setup(t, {
+    ids: [1, 2],
+    outcomes: {
+      "1:base@Unread": failing,
+      "1:head@Unread": failing,
+      "2:base@Unread": failing,
+      "2:head@Unread": failing
+    },
+    repair: (componentId) => ({ ok: false, reason: "budget_exhausted", message: `no ${String(componentId)}` })
+  });
+  const states = [
+    { name: "Default", steps: [] },
+    { name: "Unread", steps: [] }
+  ];
+  await f.service.renderAll(f.env.handle.context, [
+    { ...input(1), harness: { ...angularHarness(1), states, origin: "library" } },
+    { ...input(2), harness: { ...angularHarness(2), states, origin: "written" } }
+  ]);
+  assert.deepEqual(
+    f.repairs.map((repair) => [repair.componentId, repair.error.stateName]),
+    [[2, "Unread"]]
+  );
+  assert.equal(f.persistence.latest(1)?.renderStatus, "partial");
+});

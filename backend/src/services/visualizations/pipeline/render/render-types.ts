@@ -5,6 +5,7 @@
  * PURE: this module is loaded by the Vite host child process (10 §5.2). It imports only types and must never
  * import the logger, the database, the utilities barrel or the config-consts barrel.
  */
+import type { HarnessStep } from "../../../../types/harness-library";
 import type {
   ComponentCandidate,
   HarnessGenerationResult,
@@ -319,6 +320,22 @@ export interface RenderWorkItem {
   baseAcceptedMocks?: MockedModule[];
   /** 00 §17, replaced rows: repairs used per side (each side repairs its own harness). */
   sideRepairsUsed?: Partial<Record<RenderSide, number>>;
+  // --- 16e block (16 §9.1) ---
+  /** States rendered for this row, ordinal order (Default = 0); planned with `planStates` (live-planning.ts). */
+  states: StatePlan[];
+  /** Where the head (or only) harness came from; `library` harnesses are never repaired automatically (D8). */
+  origin: "library" | "written";
+  /** Replaced rows: where the base harness came from. */
+  baseOrigin?: "library" | "written";
+}
+
+/** One state of a render work item (16 §9.1). */
+export interface StatePlan {
+  ordinal: number; // 0 = Default
+  name: string;
+  onBase: boolean; // the base side's harness declares it (and the side is present)
+  onHead: boolean;
+  steps: HarnessStep[]; // head harness's steps (base's when only on base)
 }
 
 export interface PlannedSideFailure {
