@@ -114,9 +114,11 @@ AI writes the harness. Real code renders the pixels.
 - Your GitHub token and Anthropic key are encrypted at rest with a key generated on your machine, and the API never sends them back.
 - The only thing that leaves your machine is what the AI needs to write harnesses and the summary: the changed components, the code around them and the diff.
 
-## AI
+## AI providers
 
-PRVision uses your own Anthropic API key, set in **Settings**. Usage is billed to the account that owns the key. The four-component run in the screenshots used 88K input and 6.2K output tokens.
+**Anthropic API key** is the default. Usage is billed to the account that owns the key. The four-component run in the screenshots used 88K input and 6.2K output tokens.
+
+**Claude Code (your subscription).** PRVision can instead run the Claude Code CLI installed on your machine, signed in to your Claude Pro or Max plan, the same way [Paperclip](https://github.com/paperclipai/paperclip)'s local Claude adapter does. Install Claude Code, run `claude auth login` once, then pick **Claude Code** in **Settings** and press **Test**. Each AI call is one headless `claude --print` run with no tools and none of your Claude Code customisations; usage counts against your plan's limits. Under `docker compose up` PRVision runs `~/.local/bin/claude` (set `PRVISION_CLAUDE_COMMAND` if yours lives elsewhere). Anthropic's rules for using a subscription outside Claude Code itself have changed several times; check its current terms before relying on this.
 
 ## FAQ
 

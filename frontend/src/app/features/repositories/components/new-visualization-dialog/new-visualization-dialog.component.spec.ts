@@ -65,7 +65,7 @@ function settings(hasGithubToken = true): SettingsView {
   return {
     hasGithubToken,
     githubLogin: hasGithubToken ? 'octocat' : null,
-    aiProvider: 'anthropic_api',
+    aiProvider: 'claude_code',
     hasAnthropicApiKey: false,
     aiModel: 'claude-opus-5-5',
     aiHarnessEffort: 'medium',

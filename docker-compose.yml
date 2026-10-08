@@ -24,7 +24,7 @@ x-app: &app
   user: "${PRVISION_UID:-1000}:${PRVISION_GID:-1000}"
   ipc: host
   environment:
-    # Same home as on this machine, so git inside the container sees your normal config.
+    # Same home as on this machine, so tools PRVision runs (git, Claude Code) see your normal config.
     HOME: ${HOME}
     DATABASE_URL: postgres://prvision:prvision@postgres:5432/prvision
     REDIS_URL: redis://redis:6379
@@ -32,6 +32,8 @@ x-app: &app
     PRVISION_SECRET_KEY: ${PRVISION_SECRET_KEY:-}
     FRONTEND_URL: http://localhost:4210
     LOG_LEVEL: ${LOG_LEVEL:-info}
+    # The Claude Code provider runs your own `claude` from your home folder (the native installer's location).
+    PRVISION_CLAUDE_COMMAND: ${PRVISION_CLAUDE_COMMAND:-${HOME}/.local/bin/claude}
   volumes:
     - ${HOME}:${HOME}
     - ${PRVISION_REPOS_DIR:-${HOME}}:${PRVISION_REPOS_DIR:-${HOME}}

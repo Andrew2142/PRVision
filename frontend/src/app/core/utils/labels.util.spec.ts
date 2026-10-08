@@ -50,7 +50,7 @@ describe('labels.util', () => {
     expect(isSafeGithubUrl(null)).toBeFalse();
   });
 
-  it('providerLabel maps anthropic_api and the legacy claude_code, title-cases unknown values', () => {
+  it('providerLabel maps anthropic_api and claude_code, title-cases unknown values', () => {
     expect(providerLabel('anthropic_api')).toBe('Anthropic API');
     expect(providerLabel('claude_code')).toBe('Claude Code');
     expect(providerLabel('some_other')).toBe('Some Other');

@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { jobAbortReason } from "../../../backend/src/utilities/services/queue-service";
-import { anthropicErrors, anthropicFinalMessage, fakeAnthropicStream } from "../helpers/ai-sdk-fakes";
+import {
+  agentResult,
+  anthropicErrors,
+  anthropicFinalMessage,
+  fakeClaudeCli,
+  fakeAnthropicStream
+} from "../helpers/ai-sdk-fakes";
 import { ConsoleRecorder, recordLogger } from "../helpers/console-recorder";
 import { createFakeGithubPort, githubHttpError, rawPull } from "../helpers/fake-github-port";
 import { FakeQueue, makeJob } from "../helpers/fake-queue";
@@ -101,6 +107,23 @@ test("fakeAnthropicStream records params and signal", async () => {
   assert.equal(calls.length, 2);
   assert.equal(calls[0]?.params, params);
   assert.equal(calls[0].signal, controller.signal);
+});
+
+test("fakeClaudeCli returns scripted runs as JSONL and records each call", async () => {
+  const { run, calls } = fakeClaudeCli([{ events: [{ type: "system" }, agentResult("{}")] }, new Error("boom")]);
+  const first = await run("claude", ["--print"], { cwd: "/w", timeoutMs: 10, input: "hi" });
+  assert.deepEqual(
+    first.stdout
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as unknown),
+    [{ type: "system" }, agentResult("{}")]
+  );
+  assert.equal(first.exitCode, 0);
+  await assert.rejects(run("claude", [], { cwd: "/w", timeoutMs: 10 }), { message: "boom" });
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0]?.options.input, "hi");
+  assert.equal(calls[1]?.systemPrompt, null);
 });
 
 test('ConsoleRecorder.assertStagesAreStatusNames rejects "render:Button"', async () => {

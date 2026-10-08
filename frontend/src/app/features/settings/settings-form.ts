@@ -6,13 +6,12 @@ import {
   type ValidatorFn,
   Validators,
 } from '@angular/forms';
-import { type Effort, type SelectableAiProviderKind } from '../../core/models/domain-enums.model';
+import { type AiProviderKind, type Effort } from '../../core/models/domain-enums.model';
 import { type SettingsUpdateRequest, type SettingsView } from '../../core/models/settings.model';
 
 export interface SettingsFormValue {
   githubToken: string;
-  /** Always anthropic_api; differs from the saved value only when that is the legacy claude_code. */
-  aiProvider: SelectableAiProviderKind;
+  aiProvider: AiProviderKind;
   anthropicApiKey: string;
   aiModel: string;
   aiHarnessEffort: Effort;
@@ -52,10 +51,14 @@ export const NO_WHITESPACE = Validators.pattern(/^\S*$/);
 /** Same rule as 05's SettingsUpdateDTO.aiModel (`^[a-z0-9][a-z0-9.-]*$`, max 100), so the form never sends a model the API rejects. */
 export const AI_MODEL_PATTERN = /^[a-z0-9][a-z0-9.-]*$/;
 
-/** Group validator: the Anthropic API key is required, either saved (not being cleared) or newly typed. */
+/** Group validator: anthropic_api needs a saved key (not being cleared) or a newly typed key. */
 export function anthropicKeyRequired(hasSavedKey: () => boolean, clearing: () => boolean): ValidatorFn {
   return (control: AbstractControl): ValidationErrors | null => {
-    const group = control as FormGroup<{ anthropicApiKey: FormControl<string> }>;
+    const group = control as FormGroup<{
+      aiProvider: FormControl<AiProviderKind>;
+      anthropicApiKey: FormControl<string>;
+    }>;
+    if (group.controls.aiProvider.value !== 'anthropic_api') return null;
     const usable = (hasSavedKey() && !clearing()) || group.controls.anthropicApiKey.getRawValue().trim().length > 0;
     return usable ? null : { anthropicKeyRequired: true };
   };

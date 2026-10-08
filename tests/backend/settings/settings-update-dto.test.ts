@@ -67,15 +67,7 @@ test("SettingsUpdateDTO rejects anthropicApiKey without sk-ant- prefix", async (
 
 test("SettingsUpdateDTO rejects unknown aiProvider", async () => {
   const errors = await rejects({ aiProvider: "openai" });
-  assert.ok(errors.some((message) => message.includes("aiProvider must be one of: anthropic_api")));
-});
-
-test("SettingsUpdateDTO rejects the legacy claude_code provider and accepts anthropic_api", async () => {
-  const errors = await rejects({ aiProvider: "claude_code" });
-  assert.ok(errors.some((message) => message.includes("aiProvider must be one of: anthropic_api")));
-  const [isValid, , dto] = await validate({ aiProvider: "anthropic_api" });
-  assert.equal(isValid, true);
-  assert.equal(dto.aiProvider, "anthropic_api");
+  assert.ok(errors.some((message) => message.includes("aiProvider must be one of: anthropic_api, claude_code")));
 });
 
 test("SettingsUpdateDTO rejects unknown effort value", async () => {

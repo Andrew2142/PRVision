@@ -20,6 +20,8 @@ export * from "./services/ai/ai-connection-test";
 export * from "./services/ai/ai-provider";
 export * from "./services/ai/ai-provider-factory";
 export * from "./services/ai/anthropic-api-provider";
+export * from "./services/ai/claude-code-provider";
+export * from "./services/ai/claude-code-result";
 export * from "./services/ai/json-schema-validator";
 export * from "./services/artifact-store";
 export * from "./services/db-pool";

@@ -111,8 +111,9 @@ export const DB_POOL_MAX = 10;
 // ---- Child processes (01 §5.9, 00 §14.5) ----
 
 /**
- * The only parent variables a child process (git, Vite host) may inherit. Never contains PRVISION_*,
- * DATABASE_URL, REDIS_URL, NODE_OPTIONS, GIT_* or ANTHROPIC_*.
+ * The only parent variables a child process (git, Vite host, Claude Code) may inherit. Never contains
+ * PRVISION_*, DATABASE_URL, REDIS_URL, NODE_OPTIONS, GIT_* or ANTHROPIC_* (the Claude Code child also gets
+ * its login variables, AI_CLAUDE_CODE_PARENT_ENV).
  */
 export const CHILD_PROCESS_ENV_ALLOWLIST = [
   "PATH",

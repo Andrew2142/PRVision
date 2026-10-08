@@ -2,6 +2,7 @@
  * AI provider, harness-generation and summary configuration (consumed by 03, 05, 09, 11). Defaults match 00 D5.
  * Settings rows override provider/model/effort at runtime; these are the initial values and the limits.
  */
+import { optionalEnv, pickEnv } from "../utilities/helpers/env";
 
 // ---- Defaults (must equal 03's column defaults) ----
 
@@ -36,11 +37,47 @@ export const AI_SERVER_SIDE_FALLBACK_BETA = "server-side-fallback-2026-07-01";
 export const AI_MAX_IMAGE_BASE64_CHARS = 6_900_000;
 
 export const AI_CONNECTION_TEST_TIMEOUT_MS = 60_000;
+export const AI_CLAUDE_CODE_CONNECTION_TEST_TIMEOUT_MS = 180_000;
+
+// ---- Claude Code CLI provider (05 §5.12, Revision 10) ----
+
+/** Executable of the local Claude Code CLI, resolved through the child's PATH. */
+export const AI_CLAUDE_CODE_COMMAND: string = optionalEnv("PRVISION_CLAUDE_COMMAND") ?? "claude";
+/** Whole-run deadline of one `claude --print` call (harness calls write up to 64k tokens). */
+export const AI_CLAUDE_CODE_TIMEOUT_MS = 900_000;
+/** `claude --version` probe used by readiness checks. */
+export const AI_CLAUDE_CODE_VERSION_TIMEOUT_MS = 15_000;
+/** How long a successful version probe is reused. */
+export const AI_CLAUDE_CODE_VERSION_CACHE_MS = 300_000;
+/**
+ * Turn cap. The CLI runs with no tools except its StructuredOutput tool: PRVision already packs every source file
+ * the model needs into the prompt, and letting the agent browse the repository cost ~10x the tokens.
+ */
+export const AI_CLAUDE_CODE_MAX_TURNS = 4;
+export const AI_CLAUDE_CODE_INVALID_OUTPUT_RETRIES = 1;
+/** stream-json output of one call (assistant messages + result) is capped per stream at this size. */
+export const AI_CLAUDE_CODE_MAX_OUTPUT_BYTES = 64 * 1024 * 1024;
+/** The JSON schema goes on argv; Linux caps a single argument at 128 KiB. */
+export const AI_CLAUDE_CODE_MAX_SCHEMA_CHARS = 100_000;
+
+/**
+ * Parent variables the Claude Code child inherits on top of CHILD_PROCESS_BASE_ENV: only where the CLI keeps its
+ * login. ANTHROPIC_* is deliberately left out, so the CLI uses its own sign-in (the Claude subscription) and never
+ * an API key from PRVision's environment; CLAUDECODE and CLAUDE_CODE_* session variables of a parent Claude Code
+ * session are left out too (the CLI refuses to start inside another session).
+ */
+export const AI_CLAUDE_CODE_ENV_ALLOWLIST = ["CLAUDE_CONFIG_DIR", "CLAUDE_CODE_OAUTH_TOKEN"] as const;
+
+/** Frozen snapshot of the allow-listed Claude Code login variables (05's buildClaudeCodeEnv adds them). */
+export const AI_CLAUDE_CODE_PARENT_ENV: Readonly<Record<string, string>> = Object.freeze(
+  pickEnv(AI_CLAUDE_CODE_ENV_ALLOWLIST)
+);
 
 // ---- Harness generation (09) ----
 
 export const HARNESS_PROMPT_TOKEN_BUDGET = 48_000;
 export const HARNESS_CONCURRENCY_ANTHROPIC_API = 4;
+export const HARNESS_CONCURRENCY_CLAUDE_CODE = 4;
 export const HARNESS_RETRY_DELAY_MS = 10_000;
 export const HARNESS_MAX_CALLS_PER_COMPONENT = 3;
 /** Repair rounds after a failed head render (09 generates, 10 drives the loop). */

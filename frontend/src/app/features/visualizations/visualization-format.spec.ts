@@ -47,7 +47,6 @@ describe('visualization-format', () => {
     );
     expect(full).not.toContain('ago');
 
-    // A visualization created with the removed Claude Code provider keeps its label (legacy claude_code).
     const running = summaryLine(detailView({ completedAt: null, aiUsage: null, aiProvider: 'claude_code' }));
     expect(running).toBe(`Started ${start} · claude-opus-5-5 via Claude Code`);
 

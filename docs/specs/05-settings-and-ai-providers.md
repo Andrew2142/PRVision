@@ -1,6 +1,8 @@
 # 05 — Settings and AI Providers
 
 > **Revision 8 (00 §20):** the Claude Code provider was removed from the public build. Only the Anthropic API key provider exists; `claude_code` is a legacy enum value that cannot be selected. Claude Code sections below are historical.
+>
+> **Revision 10 (00 §22):** the Claude Code provider is back, rebuilt on the Claude Code CLI (`claude --print`, stream-json) instead of the Agent SDK. 00 §22 is authoritative for it; §5.12 below describes the old SDK design (tool policy, permission hook) and is historical.
 
 Owner: build agent (wave 3)
 Depends on: 00 (contracts), 03 (schema/models), 04 (core infrastructure). Consumes one narrow method from 06 (`GitHubClient.verifyToken`).

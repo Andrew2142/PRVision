@@ -1,4 +1,4 @@
-import { type AiProviderKind, type Effort, type SelectableAiProviderKind } from './domain-enums.model';
+import { type AiProviderKind, type Effort } from './domain-enums.model';
 
 export interface SettingsView {
   hasGithubToken: boolean;
@@ -17,7 +17,7 @@ export interface SettingsView {
 export interface SettingsUpdateRequest {
   githubToken?: string;
   anthropicApiKey?: string;
-  aiProvider?: SelectableAiProviderKind;
+  aiProvider?: AiProviderKind;
   aiModel?: string;
   aiHarnessEffort?: Effort;
   aiSummaryEffort?: Effort;

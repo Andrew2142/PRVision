@@ -4,6 +4,10 @@ import { AiProviderError } from "../../../backend/src/types/visualization-pipeli
 import type { ResolvedAiSettings } from "../../../backend/src/utilities/services/ai/ai-provider";
 import { AiProviderFactory } from "../../../backend/src/utilities/services/ai/ai-provider-factory";
 import { AnthropicApiProvider } from "../../../backend/src/utilities/services/ai/anthropic-api-provider";
+import {
+  ClaudeCodeProvider,
+  NOT_INSTALLED_MESSAGE
+} from "../../../backend/src/utilities/services/ai/claude-code-provider";
 import { DrizzleDb } from "../../../backend/src/utilities/services/drizzle-db";
 import { patchStaticMethod } from "../helpers/test-context";
 
@@ -39,7 +43,7 @@ test("AiProviderFactory.create returns AnthropicApiProvider when key present", (
 test("AiProviderFactory.create throws config when key absent", () => {
   configError(
     () => AiProviderFactory.create(settings({ anthropicApiKey: { state: "absent" } })),
-    "Add an Anthropic API key in Settings."
+    "Add an Anthropic API key, or switch the provider to Claude Code."
   );
 });
 
@@ -50,13 +54,12 @@ test("AiProviderFactory.create throws config when key unreadable", () => {
   );
 });
 
-test("AiProviderFactory.create treats the legacy claude_code provider as not configured, even with a key", () => {
-  for (const anthropicApiKey of [{ state: "absent" as const }, { state: "present" as const, value: KEY }]) {
-    configError(
-      () => AiProviderFactory.create(settings({ provider: "claude_code", anthropicApiKey })),
-      "The Claude Code provider is no longer available. Add an Anthropic API key in Settings and save."
-    );
-  }
+test("AiProviderFactory.create returns ClaudeCodeProvider without a key", () => {
+  const provider = AiProviderFactory.create(
+    settings({ provider: "claude_code", anthropicApiKey: { state: "absent" } })
+  );
+  assert.ok(provider instanceof ClaudeCodeProvider);
+  assert.equal(provider.kind, "claude_code");
 });
 
 test("AiProviderFactory.create throws config for empty model", () => {
@@ -74,7 +77,7 @@ test("AiProviderFactory.readiness(settings) returns ai_not_configured message wi
   assert.deepEqual(await AiProviderFactory.readiness(settings({ anthropicApiKey: { state: "absent" } })), {
     ready: false,
     reason: "ai_not_configured",
-    message: "Add an Anthropic API key in Settings."
+    message: "Add an Anthropic API key, or switch the provider to Claude Code."
   });
   assert.deepEqual(await AiProviderFactory.readiness(settings()), {
     ready: true,
@@ -83,10 +86,23 @@ test("AiProviderFactory.readiness(settings) returns ai_not_configured message wi
   });
 });
 
-test("AiProviderFactory.readiness for the legacy claude_code provider is ai_not_configured", async () => {
-  assert.deepEqual(await AiProviderFactory.readiness(settings({ provider: "claude_code" })), {
+test("AiProviderFactory.readiness for claude_code checks that the claude CLI runs", async (t) => {
+  let status: Awaited<ReturnType<typeof ClaudeCodeProvider.checkCli>> = {
+    available: false,
+    message: NOT_INSTALLED_MESSAGE
+  };
+  const restore = patchStaticMethod(ClaudeCodeProvider, "checkCli", () => Promise.resolve(status));
+  t.after(restore);
+  const claude = settings({ provider: "claude_code", anthropicApiKey: { state: "absent" } });
+  assert.deepEqual(await AiProviderFactory.readiness(claude), {
     ready: false,
     reason: "ai_not_configured",
-    message: "The Claude Code provider is no longer available. Add an Anthropic API key in Settings and save."
+    message: NOT_INSTALLED_MESSAGE
+  });
+  status = { available: true, version: "2.1.280" };
+  assert.deepEqual(await AiProviderFactory.readiness(claude), {
+    ready: true,
+    provider: "claude_code",
+    model: "claude-opus-5-5"
   });
 });

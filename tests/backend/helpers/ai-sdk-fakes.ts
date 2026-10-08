@@ -1,12 +1,17 @@
 /**
- * Fakes for sheet 05's SDK injection point (sheet 14 §5.4.9): AnthropicApiProviderOptions.streamFn
- * (AnthropicStreamFn).
+ * Fakes for sheet 05's injection points (sheet 14 §5.4.9): AnthropicApiProviderOptions.streamFn
+ * (AnthropicStreamFn) and ClaudeCodeProvider({ run }) (ClaudeCodeRunFn). The event shapes are sheet 05's
+ * (claude-code-result.ts); keep these builders in step with them.
  */
+import { readFile } from "node:fs/promises";
 import Anthropic from "@anthropic-ai/sdk";
 
 /*
- * Structural copy of sheet 05's seam type (05 §5.11.1). TypeScript is structural: passing these fakes to the real
- * provider type-checks them against the real declarations at the call site.
+ * Structural copies of sheet 05's seam types (05 §5.11.1, §5.12). Sheet 05 creates
+ * utilities/services/ai/{anthropic-api-provider,claude-code-provider}.ts in wave 3, after this helper (wave 2),
+ * so they cannot be imported yet without breaking `npm run typecheck`. TypeScript is structural: passing these
+ * fakes to the real providers type-checks them against the real declarations at the call site. Wave 6 replaces
+ * these copies with `import type` from the spec paths (14 build notes, deviation 3).
  */
 /** The SDK's BetaMessageStreamParams (not re-exported through the Anthropic.Beta.Messages namespace). */
 type StreamParams = Parameters<Anthropic["beta"]["messages"]["stream"]>[0];
@@ -117,3 +122,69 @@ export const anthropicErrors = {
   timeout: (): Error => new Anthropic.APIConnectionTimeoutError({ message: "timed out" }),
   abort: (): Error => new Anthropic.APIUserAbortError()
 };
+
+/** One scripted `claude --print` run: stream-json events on stdout, or an Error thrown by the process runner. */
+export type FakeCliRun = { events: Array<Record<string, unknown>>; stderr?: string; exitCode?: number } | Error;
+
+/** A recorded call of the fake process runner (= ClaudeCodeRunFn's arguments, 05 §5.12). */
+export interface FakeCliCall {
+  command: string;
+  args: readonly string[];
+  options: {
+    cwd: string;
+    env?: Readonly<Record<string, string>>;
+    timeoutMs: number;
+    input?: string | Buffer;
+    allowedExitCodes?: readonly number[];
+    signal?: AbortSignal;
+  };
+  /** Contents of the --system-prompt-file while the run was in flight (the provider deletes it afterwards). */
+  systemPrompt: string | null;
+}
+
+/**
+ * Fake runProcess for ClaudeCodeProvider({ run }): returns the scripted runs in order as JSONL stdout and records
+ * each call. Structurally typed against ClaudeCodeRunFn at the call site.
+ */
+export function fakeClaudeCli(runs: FakeCliRun[]): {
+  run: (
+    command: string,
+    args: readonly string[],
+    options: FakeCliCall["options"]
+  ) => Promise<{ stdout: string; stderr: string; exitCode: number; durationMs: number }>;
+  calls: FakeCliCall[];
+} {
+  const calls: FakeCliCall[] = [];
+  const run = async (command: string, args: readonly string[], options: FakeCliCall["options"]) => {
+    const promptFlag = args.indexOf("--system-prompt-file");
+    const promptFile = promptFlag === -1 ? undefined : args[promptFlag + 1];
+    const systemPrompt = promptFile === undefined ? null : await readFile(promptFile, "utf8").catch(() => null);
+    calls.push({ command, args, options, systemPrompt });
+    const next = runs.shift();
+    if (next === undefined) {
+      throw new Error("fakeClaudeCli: no scripted run");
+    }
+    if (next instanceof Error) {
+      throw next;
+    }
+    const stdout = next.events.map((event) => JSON.stringify(event)).join("\n");
+    return { stdout: `${stdout}\n`, stderr: next.stderr ?? "", exitCode: next.exitCode ?? 0, durationMs: 5 };
+  };
+  return { run, calls };
+}
+
+/** A Claude Code stream-json `result` event (success unless overridden). */
+export function agentResult(text: string, overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    type: "result",
+    subtype: "success",
+    is_error: false,
+    duration_ms: 1500,
+    num_turns: 2,
+    result: text,
+    usage: { input_tokens: 900, output_tokens: 250 },
+    total_cost_usd: 0,
+    session_id: "sess_test",
+    ...overrides
+  };
+}
