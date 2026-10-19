@@ -35,7 +35,8 @@
     "test:frontend": "npm run test --prefix frontend",
     "verify": "npm run verify --prefix backend && npm run verify --prefix frontend",
     "fixture:create": "node tools/create-fixture-repo.mjs",
-    "fixture:create:angular": "node tools/create-angular-fixture-repo.mjs"
+    "fixture:create:angular": "node tools/create-angular-fixture-repo.mjs",
+    "skill:install": "node scripts/install-claude-skill.mjs"
   },
   "devDependencies": {
     "concurrently": "^9.2.1"
