@@ -15,7 +15,7 @@ Run the driver from the repository you changed, **in the background** (`run_in_b
 node ~/.claude/skills/prvision/prvision-run.mjs
 ```
 
-It starts PRVision with Docker if it is down, registers the repository if needed, starts the run, opens it in the browser, and waits.
+It starts PRVision with Docker if it is down, switches PRVision's AI provider to Claude Code (the user's subscription, not the API key) if it is not already, registers the repository if needed, starts the run, opens it in the browser, and waits.
 
 What it visualizes (`--source`, default `auto`):
 
@@ -29,7 +29,7 @@ Other flags: `--path <dir>` (another repository), `--limit <n>` (render up to n 
 
 - **0**: completed. The output has the run URL, the summary, and every component sorted by risk with its `base`, `head` and `diff` PNG paths.
 - **2**: paused. More than 12 components changed and PRVision waits before spending AI tokens. Tell the user the count and ask how many to render. Then run `node ~/.claude/skills/prvision/prvision-run.mjs continue <id> --limit <n>` in the background. If the user picks in the browser instead, run `... wait <id>`.
-- **1**: failed or error. Relay the message. Common fixes: `ai_not_configured` → add an AI provider in PRVision Settings; `missing_node_modules` → install dependencies in the repository; `unsupported_framework` → PRVision supports React on Vite and Angular 17–21.
+- **1**: failed or error. Relay the message. Common fixes: `ai_not_configured` or `ai_unauthorized` → the user runs `claude auth login` in a terminal; `missing_node_modules` → install dependencies in the repository; `unsupported_framework` → PRVision supports React on Vite and Angular 17–21.
 
 ## Report
 

@@ -117,6 +117,14 @@ async function ensureRunning() {
   log("PRVision is up");
 }
 
+/** Runs started from Claude Code use the Claude Code provider (the user's subscription), never the API key. */
+async function ensureClaudeCodeProvider() {
+  const settings = await api("GET", "/api/settings");
+  if (settings.aiProvider === "claude_code") return;
+  await api("PUT", "/api/settings", { aiProvider: "claude_code" });
+  log(`Switched the AI provider from ${settings.aiProvider} to claude_code (model ${settings.aiModel})`);
+}
+
 function git(cwd, args) {
   return execFileSync("git", ["-C", cwd, ...args], {
     encoding: "utf8",
@@ -246,6 +254,7 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   await ensureRunning();
   let id = args.id;
+  if (args.command !== "wait") await ensureClaudeCodeProvider();
   if (args.command === "run") {
     const topLevel = gitTopLevel(args.path);
     const repository = await findOrRegisterRepository(topLevel, realpathSync(args.path));
