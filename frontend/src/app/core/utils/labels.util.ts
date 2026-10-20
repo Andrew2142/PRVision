@@ -63,5 +63,8 @@ export function isSafeGithubUrl(url: string | null | undefined): url is string {
 
 /** Shared by 13's Settings (Test AI result) and visualization detail (summary line). */
 export function providerLabel(p: string): string {
+  if (p === 'agent') {
+    return 'Claude Code session'; // 17 §11: answered by the session that started the run
+  }
   return p === 'anthropic_api' ? 'Anthropic API' : p === 'claude_code' ? 'Claude Code' : formatPillLabel(p);
 }

@@ -50,6 +50,10 @@ describe('labels.util', () => {
     expect(isSafeGithubUrl(null)).toBeFalse();
   });
 
+  it('providerLabel maps agent runs to the Claude Code session (17 §11)', () => {
+    expect(providerLabel('agent')).toBe('Claude Code session');
+  });
+
   it('providerLabel maps anthropic_api and claude_code, title-cases unknown values', () => {
     expect(providerLabel('anthropic_api')).toBe('Anthropic API');
     expect(providerLabel('claude_code')).toBe('Claude Code');
