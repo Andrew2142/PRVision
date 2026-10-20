@@ -35,3 +35,6 @@ export * from "./live/live-heartbeat.dto";
 export * from "./live/live-open.dto";
 export * from "./live/live-session-view.dto";
 export * from "./live/live-stop.dto";
+export * from "./agent-requests/agent-request-answer.dto";
+export * from "./agent-requests/agent-request-fail.dto";
+export * from "./agent-requests/agent-request-view.dto";

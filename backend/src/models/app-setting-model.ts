@@ -7,7 +7,7 @@
 export class AppSettingModel {
   private _aiHarnessEffort!: "low" | "medium" | "high" | "xhigh" | "max";
   private _aiModel!: string;
-  private _aiProvider!: "anthropic_api" | "claude_code";
+  private _aiProvider!: "anthropic_api" | "claude_code" | "agent";
   private _aiSummaryEffort!: "low" | "medium" | "high" | "xhigh" | "max";
   private _anthropicApiKeyEncrypted!: string | null;
   private _createdAt!: Date;
@@ -39,7 +39,7 @@ export class AppSettingModel {
   setAiModel(value: string): void {
     this._aiModel = value;
   }
-  setAiProvider(value: "anthropic_api" | "claude_code"): void {
+  setAiProvider(value: "anthropic_api" | "claude_code" | "agent"): void {
     this._aiProvider = value;
   }
   setAiSummaryEffort(value: "low" | "medium" | "high" | "xhigh" | "max"): void {
@@ -71,7 +71,7 @@ export class AppSettingModel {
   get aiModel(): string {
     return this._aiModel;
   }
-  get aiProvider(): "anthropic_api" | "claude_code" {
+  get aiProvider(): "anthropic_api" | "claude_code" | "agent" {
     return this._aiProvider;
   }
   get aiSummaryEffort(): "low" | "medium" | "high" | "xhigh" | "max" {

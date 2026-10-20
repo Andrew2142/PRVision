@@ -80,7 +80,7 @@ export interface ServiceSetup {
 
 export interface ServiceSetupOptions {
   script?: Script;
-  kind?: "anthropic_api" | "claude_code";
+  kind?: "anthropic_api" | "claude_code" | "agent";
   candidates: ComponentCandidate[];
   /** Which sides each candidate file exists on (default: base and head unless added/removed). */
   deps?: HarnessGenerationDeps;
@@ -108,8 +108,8 @@ export function setupService(t: TestContext, options: ServiceSetupOptions): Serv
     headDir: trees.headDir,
     ...(options.script ? { script: options.script } : {})
   });
-  if (options.kind === "claude_code") {
-    Object.assign(handle.ai, { kind: "claude_code" });
+  if (options.kind !== undefined && options.kind !== "anthropic_api") {
+    Object.assign(handle.ai, { kind: options.kind });
   }
   const db = new InMemoryQueryHandler();
   db.seed(Table.VISUALIZATIONS, [makeVisualizationRow({ id: VISUALIZATION_ID, status: "generating_harnesses" })]);

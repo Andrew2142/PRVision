@@ -3,6 +3,7 @@
 import fs from "node:fs/promises";
 import { and, count, desc, eq, inArray, type SQL } from "drizzle-orm";
 import {
+  AI_AGENT_MODEL_LABEL,
   CONSOLE_PAGE_LIMIT_MAX,
   LIBRARY_ESTIMATE_DEFAULT_HARNESS_USAGE,
   LIBRARY_ESTIMATE_OUTPUT_TOKENS_PER_EXTRA_STATE,
@@ -29,6 +30,7 @@ import {
 } from "../../dtos";
 import {
   ACTIVE_LIBRARY_JOB_STATUSES,
+  AiProviderKind,
   DeletionMode,
   ErrorReason,
   LibraryJobKind,
@@ -49,7 +51,9 @@ import {
 } from "../../models";
 import {
   AiProviderFactory,
+  AgentRequestStore,
   ArtifactStore,
+  agentRequestImageDir,
   DrizzleDb,
   GitClient,
   GitCommandError,
@@ -123,6 +127,8 @@ export interface VisualizationsServiceDependencies {
   removeWorkingTreeSnapshot: (visualizationId: number) => Promise<void>;
   /** 16i block (16 §12.6): asks the running live sessions of these runs to stop (reason `user`). */
   stopLiveSessions: (visualizationIds: readonly number[]) => Promise<number>;
+  /** 17 block (17 §9.3): deletes a removed run's agent requests and `<dataDir>/agent-requests/<id>/`. */
+  removeAgentRequests: (visualizationId: number) => Promise<void>;
 }
 
 type ResolvedSource = {
@@ -174,7 +180,11 @@ export class VisualizationsService {
         return { status: 404, error: "Repository not found", error_reason: ErrorReason.NOT_FOUND };
       }
 
-      const readiness = await this.deps.aiReadiness();
+      // 17 §9.1: an agent run needs no key or CLI; the Claude Code session that starts it answers its AI requests.
+      const readiness: AiReadiness =
+        dto.aiProvider === AiProviderKind.AGENT
+          ? { ready: true, provider: AiProviderKind.AGENT, model: AI_AGENT_MODEL_LABEL }
+          : await this.deps.aiReadiness();
       if (!readiness.ready) {
         return { status: 400, error: readiness.message, error_reason: ErrorReason.AI_NOT_CONFIGURED };
       }
@@ -602,6 +612,15 @@ export class VisualizationsService {
           "Working-tree snapshot removal failed; the visualization is deleted anyway"
         );
       }
+      // 17 block (17 §9.3): agent requests (prompts hold source code) and their images go with the run
+      try {
+        await this.deps.removeAgentRequests(id);
+      } catch (error: unknown) {
+        this.log.warn(
+          { event: "visualization.agent_requests.remove_failed", visualizationId: id, err: error },
+          "Agent request removal failed; the visualization is deleted anyway"
+        );
+      }
       const data: DeleteVisualizationResponse = { id };
       return { status: 200, data };
     } catch (error: unknown) {
@@ -883,9 +902,10 @@ function resolveVisualizationsDependencies(
   overrides: Partial<VisualizationsServiceDependencies>
 ): VisualizationsServiceDependencies {
   const queryHandler = overrides.queryHandler ?? new QueryHandler();
+  const db = overrides.db ?? DrizzleDb.getInstance();
   return {
     queryHandler,
-    db: overrides.db ?? DrizzleDb.getInstance(),
+    db,
     transaction: overrides.transaction ?? ((fn) => DrizzleDb.transaction(fn)),
     git: overrides.git ?? new GitClient(),
     aiReadiness:
@@ -897,7 +917,13 @@ function resolveVisualizationsDependencies(
     consoleFactory: overrides.consoleFactory ?? ((id) => new VisualizationConsoleService(id, queryHandler)),
     now: overrides.now ?? (() => new Date()),
     removeWorkingTreeSnapshot: overrides.removeWorkingTreeSnapshot ?? ((id) => removeWorkingTreeSnapshot(id)),
-    stopLiveSessions: overrides.stopLiveSessions ?? ((ids) => stopLiveSessionsOfRuns(queryHandler, ids))
+    stopLiveSessions: overrides.stopLiveSessions ?? ((ids) => stopLiveSessionsOfRuns(queryHandler, ids)),
+    removeAgentRequests:
+      overrides.removeAgentRequests ??
+      (async (id) => {
+        await new AgentRequestStore(db).deleteForVisualization(id);
+        await fs.rm(agentRequestImageDir(id), { recursive: true, force: true });
+      })
   };
 }
 

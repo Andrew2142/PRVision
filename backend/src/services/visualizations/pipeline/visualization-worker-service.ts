@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import {
+  AI_AGENT_MODEL_LABEL,
   MAX_COMPONENTS,
   QUEUED_RECOVERY_GRACE_MS,
   RECOVERY_BATCH_LIMIT,
@@ -13,6 +14,7 @@ import {
 } from "../../../config-consts";
 import {
   ACTIVE_VISUALIZATION_STATUSES,
+  AiProviderKind,
   ComponentChangeKind,
   ComponentHarnessOrigin,
   ComponentRenderStatus,
@@ -54,6 +56,8 @@ import {
   type WorktreeSide
 } from "../../../types/visualization-pipeline";
 import {
+  AgentAiProvider,
+  AgentRequestStore,
   AiProviderFactory,
   ArtifactStore,
   DrizzleDb,
@@ -489,6 +493,10 @@ export interface VisualizationWorkerDependencies {
   readAiSettings: () => Promise<ResolvedAiSettings>;
   /** AiProviderFactory.create. */
   createProvider: (settings: ResolvedAiSettings) => AiProvider;
+  /** 17 §9.2: provider of an agent run (default `new AgentAiProvider({ visualizationId })`). */
+  createAgentProvider: (visualizationId: number) => AiProvider;
+  /** 17 §9.2: cancels an agent run's open requests when the run ends (default AgentRequestStore.cancelOpen). */
+  cancelAgentRequests: (visualizationId: number, message: string) => Promise<number>;
   /** Test override: when set, used for every framework (15 §5.3). */
   steps?: PipelineStepFactories;
   /** Stage factories of a repository's framework; default `stepFactoriesFor` (the only framework branch). */
@@ -631,8 +639,13 @@ export class VisualizationWorkerService {
       const repo = repository;
 
       // 4. One settings read → provider and ctx.aiSettings (05 §5.2). Config problems surface before any git work.
-      const settings = await this.deps.readAiSettings();
-      const ai = this.deps.createProvider(settings);
+      // An agent run (17 §9.2) keeps the efforts from Settings but is answered by the session that started it.
+      const stored = await this.deps.readAiSettings();
+      const isAgentRun = visualization.aiProvider === AiProviderKind.AGENT;
+      const settings: ResolvedAiSettings = isAgentRun
+        ? { ...stored, provider: AiProviderKind.AGENT, model: AI_AGENT_MODEL_LABEL }
+        : stored;
+      const ai = isAgentRun ? this.deps.createAgentProvider(visualizationId) : this.deps.createProvider(settings);
 
       // 5. queued → preparing
       await this.advance(
@@ -642,6 +655,12 @@ export class VisualizationWorkerService {
         { aiProvider: settings.provider, aiModel: settings.model, errorMessage: null },
         `Preparing workspace (${describeSource(visualization)}).`
       );
+      if (isAgentRun) {
+        await consoleSvc.info(
+          VisualizationStatus.PREPARING,
+          "AI work is done by the Claude Code session that started this run."
+        );
+      }
 
       // 6. Workspace (cleanup runs in finally even if prepare fails halfway).
       workspaceStarted = true;
@@ -870,6 +889,17 @@ export class VisualizationWorkerService {
           { event: "visualization.cancel.clear_failed", visualizationId, err: error },
           "Cancel flag clear failed"
         );
+      }
+      // 17 §9.2: nothing may stay claimable once the run is over.
+      if (visualization.aiProvider === AiProviderKind.AGENT) {
+        try {
+          await this.deps.cancelAgentRequests(visualizationId, "The run ended");
+        } catch (error: unknown) {
+          log.warn(
+            { event: "visualization.agent_requests.cancel_failed", visualizationId, err: error },
+            "Agent request cancel failed"
+          );
+        }
       }
     }
   }
@@ -1741,6 +1771,11 @@ function resolveWorkerDependencies(
     workspace: overrides.workspace ?? new WorkspacePrepareService(),
     readAiSettings: overrides.readAiSettings ?? (() => new SettingsStore().readAiSettings()),
     createProvider: overrides.createProvider ?? ((settings) => AiProviderFactory.create(settings)),
+    createAgentProvider:
+      overrides.createAgentProvider ?? ((visualizationId) => new AgentAiProvider({ visualizationId })),
+    cancelAgentRequests:
+      overrides.cancelAgentRequests ??
+      ((visualizationId, message) => new AgentRequestStore().cancelOpen(visualizationId, message)),
     ...(overrides.steps === undefined ? {} : { steps: overrides.steps }),
     stepsFor: overrides.stepsFor ?? stepFactoriesFor,
     queue: overrides.queue ?? QueueService,

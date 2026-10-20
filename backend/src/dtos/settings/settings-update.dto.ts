@@ -1,9 +1,15 @@
 import { Transform } from "class-transformer";
 import { IsIn, IsOptional, IsString, Matches, MaxLength, MinLength, ValidateIf } from "class-validator";
 // Enum types instead of 05's ai-provider.ts aliases: DTOs may not import utilities/services (01 §5.3.1).
-import { AI_EFFORT_VALUES, AI_PROVIDER_KIND_VALUES, type AiEffort, type AiProviderKind } from "../../enums";
+import {
+  AI_EFFORT_VALUES,
+  SELECTABLE_AI_PROVIDER_KINDS,
+  type AiEffort,
+  type SelectableAiProviderKind
+} from "../../enums";
 
-const AI_PROVIDER_VALUES = AI_PROVIDER_KIND_VALUES;
+/** `agent` is chosen per run, never stored as a setting (17 E1). */
+const AI_PROVIDER_VALUES = SELECTABLE_AI_PROVIDER_KINDS;
 
 /** Trims surrounding whitespace but leaves whitespace-only strings intact so they fail @Matches. */
 const trimNonBlank = ({ value }: { value: unknown }): unknown =>
@@ -31,7 +37,7 @@ export class SettingsUpdateDTO {
   @IsOptional()
   @IsString()
   @IsIn(AI_PROVIDER_VALUES, { message: `aiProvider must be one of: ${AI_PROVIDER_VALUES.join(", ")}` })
-  aiProvider?: AiProviderKind;
+  aiProvider?: SelectableAiProviderKind;
 
   /** "" clears; omitted keeps. */
   @ValidateIf(isPresent)

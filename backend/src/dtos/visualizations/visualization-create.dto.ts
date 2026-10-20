@@ -12,7 +12,7 @@ import {
   type ValidationArguments,
   type ValidatorConstraintInterface
 } from "class-validator";
-import { VisualizationSourceType } from "../../enums";
+import { AiProviderKind, VisualizationSourceType } from "../../enums";
 
 /** Longest ref name accepted (git allows more; PRVision stores head_ref/base_ref as text up to this). */
 const MAX_BRANCH_NAME_LENGTH = 255;
@@ -175,4 +175,9 @@ export class VisualizationCreateDTO {
   @ValidateIf((o: VisualizationCreateDTO) => o.renderViewport !== undefined)
   @IsIn(["desktop", "tablet", "mobile"])
   renderViewport?: "desktop" | "tablet" | "mobile";
+
+  /** 17 §9.1: "agent" = the Claude Code session that starts the run answers its AI requests. Omitted = Settings. */
+  @ValidateIf((o: VisualizationCreateDTO) => o.aiProvider !== undefined)
+  @IsIn([AiProviderKind.AGENT], { message: 'aiProvider must be "agent" or omitted' })
+  aiProvider?: typeof AiProviderKind.AGENT;
 }

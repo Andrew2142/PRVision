@@ -1,5 +1,6 @@
 import type { Express, RequestHandler } from "express";
 import type {
+  AgentRequestsController,
   HarnessLibraryController,
   HealthController,
   LiveSessionsController,
@@ -19,6 +20,8 @@ export type RouteDependencies = {
   harnessLibraryController: HarnessLibraryController;
   /** 16i: live mode routes. */
   liveSessionsController: LiveSessionsController;
+  /** 17: agent requests of agent runs. */
+  agentRequestsController: AgentRequestsController;
 };
 
 /** The single explicit route map (guidelines §4.2). Every /api route carries requireLocal. */
@@ -150,4 +153,24 @@ export function registerRoutes(app: Express, dependencies: RouteDependencies): v
   );
   app.post("/api/visualizations/:id/live/stop", requireLocal, liveSessionsController.stop.bind(liveSessionsController));
   // ----- end 16i -----
+
+  // ----- 17: agent requests (17 §8) -----
+  const { agentRequestsController } = dependencies;
+  app.get(
+    "/api/visualizations/:id/agent-requests",
+    requireLocal,
+    agentRequestsController.list.bind(agentRequestsController)
+  );
+  app.post(
+    "/api/visualizations/:id/agent-requests/claim",
+    requireLocal,
+    agentRequestsController.claim.bind(agentRequestsController)
+  );
+  app.post(
+    "/api/agent-requests/:id/answer",
+    requireLocal,
+    agentRequestsController.answer.bind(agentRequestsController)
+  );
+  app.post("/api/agent-requests/:id/fail", requireLocal, agentRequestsController.fail.bind(agentRequestsController));
+  // ----- end 17 -----
 }

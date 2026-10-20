@@ -94,6 +94,9 @@ export const LIVE_DIR_NAME = "live";
 /** `<dataDir>/snapshots/<visualizationId>/`: a working-tree run's uncommitted changes (16 §16.4, E18). */
 export const WORKING_TREE_SNAPSHOT_DIR_NAME = "snapshots";
 
+/** `<dataDir>/agent-requests/<visualizationId>/`: images of an agent run's AI requests (17 E5). */
+export const AGENT_REQUESTS_DIR_NAME = "agent-requests";
+
 // ---- Required secrets and connections (00 §4). "" when unset; validateConfig() fails boot. ----
 
 /** `DATABASE_URL` (required). Never log it: it contains the password. */

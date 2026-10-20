@@ -192,3 +192,14 @@ test('isValidGitBranchName rejects -x, a..b, "a b", fix#12, a~1, a^, a:b, a@{1},
   }
   assert.equal(isValidGitBranchName(42), false);
 });
+
+test('VisualizationCreateDTO accepts aiProvider "agent" (17 §9.1) and rejects every other provider', async () => {
+  const accepted = await validate({ repositoryId: 1, sourceType: "working_tree", aiProvider: "agent" });
+  assert.equal(accepted.ok, true);
+  assert.equal(accepted.dto?.aiProvider, "agent");
+  for (const aiProvider of ["anthropic_api", "claude_code", "", null]) {
+    const result = await validate({ repositoryId: 1, sourceType: "working_tree", aiProvider });
+    assert.equal(result.ok, false, JSON.stringify(aiProvider));
+    assert.ok(result.errors.some((e) => e.includes('aiProvider must be "agent" or omitted')));
+  }
+});

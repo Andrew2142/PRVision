@@ -7,7 +7,7 @@ import type { AiUsage } from "../types/visualization-pipeline";
  */
 export class VisualizationModel {
   private _aiModel!: string;
-  private _aiProvider!: "anthropic_api" | "claude_code";
+  private _aiProvider!: "anthropic_api" | "claude_code" | "agent";
   private _aiUsage!: AiUsage | null;
   private _baseRef!: string;
   private _baseSha!: string | null;
@@ -79,7 +79,7 @@ export class VisualizationModel {
   setAiModel(value: string): void {
     this._aiModel = value;
   }
-  setAiProvider(value: "anthropic_api" | "claude_code"): void {
+  setAiProvider(value: "anthropic_api" | "claude_code" | "agent"): void {
     this._aiProvider = value;
   }
   setAiUsage(value: AiUsage | null): void {
@@ -201,7 +201,7 @@ export class VisualizationModel {
   get aiModel(): string {
     return this._aiModel;
   }
-  get aiProvider(): "anthropic_api" | "claude_code" {
+  get aiProvider(): "anthropic_api" | "claude_code" | "agent" {
     return this._aiProvider;
   }
   get aiUsage(): AiUsage | null {

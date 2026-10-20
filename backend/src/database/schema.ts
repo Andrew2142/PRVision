@@ -19,6 +19,8 @@ import {
 import {
   ACTIVE_LIBRARY_JOB_STATUSES,
   ACTIVE_LIVE_SESSION_STATUSES,
+  AgentRequestPurpose,
+  AgentRequestStatus,
   AiEffort,
   AiProviderKind,
   ComponentChangeKind,
@@ -44,6 +46,7 @@ import {
   enumValues
 } from "../enums";
 import type { HarnessStateSpec, HarnessStep, LiveHostState, LiveOpenRequestRecord } from "../types/harness-library";
+import type { AgentRequestImage } from "../types/agent-request";
 import type {
   AiUsage,
   MockedModule,
@@ -830,6 +833,48 @@ export const liveSessions = pgTable(
 );
 
 // ---------------------------------------------------------------------------------------------
+// agent_ai_requests — AI calls of an agent run, answered by the Claude Code session that started it (17 §6.2).
+// Hard rows, deleted with the visualization.
+// ---------------------------------------------------------------------------------------------
+export const agentAiRequests = pgTable(
+  "agent_ai_requests",
+  {
+    id: serial("id").primaryKey(),
+    visualizationId: integer("visualization_id")
+      .notNull()
+      .references(() => visualizations.id, { onDelete: "cascade" }),
+    purpose: text("purpose", { enum: enumValues(AgentRequestPurpose) }).notNull(),
+    status: text("status", { enum: enumValues(AgentRequestStatus) })
+      .notNull()
+      .default(AgentRequestStatus.PENDING),
+    systemPrompt: text("system_prompt").notNull(),
+    prompt: text("prompt").notNull(),
+    jsonSchema: jsonb("json_schema").$type<Record<string, unknown>>().notNull(),
+    /** Summary images written under <dataDir>/agent-requests/<visualizationId>/ (absolute paths). */
+    images: jsonb("images")
+      .$type<AgentRequestImage[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    /** Set only with `answered`; already validated against json_schema by the API. */
+    response: jsonb("response").$type<Record<string, unknown>>(),
+    errorMessage: text("error_message"),
+    claimedAt: timestampTz("claimed_at"),
+    answeredAt: timestampTz("answered_at"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt()
+  },
+  (table) => [
+    index("agent_ai_requests_visualization_id_status_id_idx").on(table.visualizationId, table.status, table.id),
+    check("agent_ai_requests_purpose_check", checkIn(table.purpose, enumValues(AgentRequestPurpose))),
+    check("agent_ai_requests_status_check", checkIn(table.status, enumValues(AgentRequestStatus))),
+    check(
+      "agent_ai_requests_answered_check",
+      sql`(${table.status} = 'answered') = (${table.answeredAt} is not null and ${table.response} is not null)`
+    )
+  ]
+);
+
+// ---------------------------------------------------------------------------------------------
 // Relations (for db.query.* relational reads in services that justify direct Drizzle)
 // ---------------------------------------------------------------------------------------------
 export const repositoriesRelations = relations(repositories, ({ many }) => ({
@@ -842,7 +887,8 @@ export const visualizationsRelations = relations(visualizations, ({ one, many })
   repository: one(repositories, { fields: [visualizations.repositoryId], references: [repositories.id] }),
   components: many(visualizationComponents),
   consoleEvents: many(visualizationConsoleEvents),
-  liveSessions: many(liveSessions)
+  liveSessions: many(liveSessions),
+  agentAiRequests: many(agentAiRequests)
 }));
 
 export const visualizationComponentsRelations = relations(visualizationComponents, ({ one, many }) => ({
@@ -884,6 +930,10 @@ export const liveSessionsRelations = relations(liveSessions, ({ one }) => ({
   visualization: one(visualizations, { fields: [liveSessions.visualizationId], references: [visualizations.id] })
 }));
 
+export const agentAiRequestsRelations = relations(agentAiRequests, ({ one }) => ({
+  visualization: one(visualizations, { fields: [agentAiRequests.visualizationId], references: [visualizations.id] })
+}));
+
 // ---------------------------------------------------------------------------------------------
 // Inferred row types (for direct-Drizzle code paths; services normally use generated models)
 // ---------------------------------------------------------------------------------------------
@@ -906,3 +956,5 @@ export type VisualizationComponentStateRow = typeof visualizationComponentStates
 export type NewVisualizationComponentStateRow = typeof visualizationComponentStates.$inferInsert;
 export type LiveSessionRow = typeof liveSessions.$inferSelect;
 export type NewLiveSessionRow = typeof liveSessions.$inferInsert;
+export type AgentAiRequestRow = typeof agentAiRequests.$inferSelect;
+export type NewAgentAiRequestRow = typeof agentAiRequests.$inferInsert;

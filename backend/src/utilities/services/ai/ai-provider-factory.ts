@@ -15,6 +15,9 @@ export const AI_MESSAGE_KEY_ABSENT = "Add an Anthropic API key, or switch the pr
 export const AI_MESSAGE_KEY_UNREADABLE =
   "The stored Anthropic API key can no longer be decrypted (PRVISION_SECRET_KEY changed). Enter the key again.";
 
+export const AI_MESSAGE_AGENT_NOT_A_SETTING =
+  "The agent provider is chosen per run by the prvision skill. Choose Anthropic API key or Claude Code in Settings.";
+
 const log = createLogger("ai.provider_factory");
 
 /** Builds the configured AiProvider from already-resolved settings. Pure: never reads the database. */
@@ -69,6 +72,9 @@ export class AiProviderFactory {
         // The CLI is found at call time; readiness() probes it up front.
         provider = new ClaudeCodeProvider({ model });
         break;
+      case "agent":
+        // Per run only (17 E1): the worker builds AgentAiProvider itself. Reaching here means a hand-edited setting.
+        throw new AiProviderError(AI_MESSAGE_AGENT_NOT_A_SETTING, "config", false);
       default:
         // Impossible by the CHECK constraint; kept for rows edited by hand.
         throw new AiProviderError("Unknown AI provider", "config", false);

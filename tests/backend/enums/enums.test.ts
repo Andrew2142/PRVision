@@ -74,7 +74,8 @@ test("Table values are the snake_case SQL table names", () => {
     "harness_library_jobs",
     "harness_library_job_events",
     "visualization_component_states",
-    "live_sessions"
+    "live_sessions",
+    "agent_ai_requests"
   ]);
 });
 

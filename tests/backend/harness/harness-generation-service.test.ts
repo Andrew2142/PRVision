@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { setTimeout as delay } from "node:timers/promises";
 import { test, type TestContext } from "node:test";
+import { HARNESS_CONCURRENCY_AGENT } from "../../../backend/src/config-consts";
 import { Table } from "../../../backend/src/enums";
 import {
   HARNESS_RESPONSE_SCHEMA,
@@ -102,6 +103,26 @@ test("runs first component alone then up to four in parallel for claude_code", a
   assert.equal(probe.inFlightAtStart[1], 1, "second call starts after the first finished");
   assert.equal(probe.maxInFlight, 4);
   assert.ok(console.has("info", "(claude_code, model claude-opus-5-5, effort high, concurrency 4)."));
+});
+
+test("runs up to HARNESS_CONCURRENCY_AGENT in parallel for agent runs (17 §9.2)", async (t) => {
+  const probe = new ConcurrencyProbe();
+  const candidates = ["C1", "C2", "C3", "C4", "C5", "C6"].map((name, index) =>
+    componentCandidate(name, { componentId: index + 1, rank: index })
+  );
+  const { service, console } = setupService(t, {
+    kind: "agent",
+    candidates,
+    script: { harness: candidates.map(() => probe.step((request) => okResponse(componentOf(request)), 10)) }
+  });
+  await service.generateAll(candidates);
+  assert.equal(probe.maxInFlight, HARNESS_CONCURRENCY_AGENT);
+  assert.ok(
+    console.has(
+      "info",
+      new RegExp(`\\(agent, model [^,]+, effort high, concurrency ${HARNESS_CONCURRENCY_AGENT}\\)\\.`)
+    )
+  );
 });
 
 test("uses identical system prompt, schema and effort for every call", async (t) => {

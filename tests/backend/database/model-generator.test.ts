@@ -25,11 +25,12 @@ function fieldLine(source: string, field: string): string {
   return match[1].replace(/\s+/g, " ").trim();
 }
 
-test("produces the five class names from §9.2 and the five of 16 §6.10", () => {
+test("produces the five class names from §9.2, the five of 16 §6.10 and the one of 17 §6.2", () => {
   const tables = readSchemaTables();
   assert.deepEqual(
     tables.map((table) => [table.exportName, table.tableName, table.className]),
     [
+      ["agentAiRequests", "agent_ai_requests", "AgentAiRequestModel"],
       ["appSettings", "app_settings", "AppSettingModel"],
       ["harnessLibraryEntries", "harness_library_entries", "HarnessLibraryEntryModel"],
       ["harnessLibraryJobEvents", "harness_library_job_events", "HarnessLibraryJobEventModel"],
@@ -68,7 +69,7 @@ test("nullable columns are typed T | null and not-null columns T", () => {
 test("enum text columns become literal unions", () => {
   const tables = readSchemaTables();
   const visualization = generateModelClass(tableByName(tables, "visualizations"));
-  assert.equal(fieldLine(visualization, "aiProvider"), '"anthropic_api" | "claude_code"');
+  assert.equal(fieldLine(visualization, "aiProvider"), '"anthropic_api" | "claude_code" | "agent"');
   assert.equal(
     fieldLine(visualization, "failedStage"),
     '"queued" | "preparing" | "analyzing" | "generating_harnesses" | "rendering" | "diffing" | "summarizing" | null'

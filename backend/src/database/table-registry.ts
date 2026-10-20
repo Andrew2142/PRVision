@@ -2,6 +2,7 @@ import { getTableColumns } from "drizzle-orm";
 import type { PgTable } from "drizzle-orm/pg-core";
 import { Table } from "../enums";
 import {
+  agentAiRequests,
   appSettings,
   harnessLibraryEntries,
   harnessLibraryJobEvents,
@@ -25,7 +26,8 @@ export const TABLE_SCHEMAS = {
   [Table.HARNESS_LIBRARY_JOBS]: harnessLibraryJobs,
   [Table.HARNESS_LIBRARY_JOB_EVENTS]: harnessLibraryJobEvents,
   [Table.VISUALIZATION_COMPONENT_STATES]: visualizationComponentStates,
-  [Table.LIVE_SESSIONS]: liveSessions
+  [Table.LIVE_SESSIONS]: liveSessions,
+  [Table.AGENT_AI_REQUESTS]: agentAiRequests
 } as const satisfies Record<Table, PgTable>;
 
 /** Drizzle table object for a logical Table value. */

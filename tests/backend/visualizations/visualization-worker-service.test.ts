@@ -337,6 +337,43 @@ test("VisualizationWorkerService.run passes a commit_range's stored commits and 
   assert.ok(messages.includes("Preparing workspace (commits 1111111…2222222 on feature/x)."), messages.join("\n"));
 });
 
+test("VisualizationWorkerService.run an agent row uses the agent provider, keeps agent/agent and cancels open requests when it ends (17 §9.2)", async (t) => {
+  const h = setup(t, { visualization: { aiProvider: "agent", aiModel: "agent" } });
+  const agentProvider = { kind: "agent" as const, generateStructured: () => Promise.reject(new Error("unused")) };
+  const built: number[] = [];
+  const cancelled: Array<[number, string]> = [];
+  h.deps.createAgentProvider = (visualizationId) => {
+    built.push(visualizationId);
+    return agentProvider;
+  };
+  h.deps.cancelAgentRequests = (visualizationId, message) => {
+    cancelled.push([visualizationId, message]);
+    return Promise.resolve(0);
+  };
+  await h.worker().run(makeJob(1).job);
+  assert.deepEqual(built, [1]);
+  assert.deepEqual(h.providerArgs, [], "the Settings provider is never built for an agent run");
+  assert.equal(h.calls.analyzeCtx?.ai, agentProvider);
+  const updates = h.store.callsFor("update", Table.VISUALIZATIONS).map((c) => c.args[0] as Record<string, unknown>);
+  assert.equal(updates[0]?.aiProvider, "agent");
+  assert.equal(updates[0].aiModel, "agent");
+  assert.ok(
+    h.consoleRows().some((row) => row.message === "AI work is done by the Claude Code session that started this run.")
+  );
+  assert.deepEqual(cancelled, [[1, "The run ended"]]);
+});
+
+test("VisualizationWorkerService.run a Settings-provider run never touches agent requests", async (t) => {
+  const h = setup(t);
+  let cancels = 0;
+  h.deps.cancelAgentRequests = () => {
+    cancels += 1;
+    return Promise.resolve(0);
+  };
+  await h.worker().run(makeJob(1).job);
+  assert.equal(cancels, 0);
+});
+
 test("VisualizationWorkerService.run never writes ai_usage or summary_markdown", async (t) => {
   const h = setup(t, {
     steps: { summary: { status: "failed", summaryMarkdown: null, usage: null, failureReason: "x" } }

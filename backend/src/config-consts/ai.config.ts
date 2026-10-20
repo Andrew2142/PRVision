@@ -73,11 +73,28 @@ export const AI_CLAUDE_CODE_PARENT_ENV: Readonly<Record<string, string>> = Objec
   pickEnv(AI_CLAUDE_CODE_ENV_ALLOWLIST)
 );
 
+// ---- Agent provider (17 §12) ----
+
+/** `visualizations.ai_model` of an agent run: the Claude Code session's model is not visible to PRVision. */
+export const AI_AGENT_MODEL_LABEL = "agent";
+/** How often the worker re-reads an open agent request. */
+export const AGENT_REQUEST_POLL_MS = 1_000;
+/** A request nobody claims within this fails the run (`config`): no session is driving it. */
+export const AGENT_REQUEST_CLAIM_TIMEOUT_MS = 600_000;
+/** A claimed request not answered within this fails its component (`network`, not retryable). */
+export const AGENT_REQUEST_ANSWER_TIMEOUT_MS = 1_800_000;
+/** Requests handed out by one claim call. */
+export const AGENT_CLAIM_MAX = 20;
+export const AGENT_FAIL_MESSAGE_MAX_CHARS = 2_000;
+/** ajv messages returned for a rejected answer. */
+export const AGENT_ANSWER_MAX_ERRORS = 20;
+
 // ---- Harness generation (09) ----
 
 export const HARNESS_PROMPT_TOKEN_BUDGET = 48_000;
 export const HARNESS_CONCURRENCY_ANTHROPIC_API = 4;
 export const HARNESS_CONCURRENCY_CLAUDE_CODE = 4;
+export const HARNESS_CONCURRENCY_AGENT = 4;
 export const HARNESS_RETRY_DELAY_MS = 10_000;
 export const HARNESS_MAX_CALLS_PER_COMPONENT = 3;
 /** Repair rounds after a failed head render (09 generates, 10 drives the loop). */

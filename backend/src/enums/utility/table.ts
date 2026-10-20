@@ -14,7 +14,8 @@ export const Table = {
   HARNESS_LIBRARY_JOBS: "harness_library_jobs",
   HARNESS_LIBRARY_JOB_EVENTS: "harness_library_job_events",
   VISUALIZATION_COMPONENT_STATES: "visualization_component_states",
-  LIVE_SESSIONS: "live_sessions"
+  LIVE_SESSIONS: "live_sessions",
+  AGENT_AI_REQUESTS: "agent_ai_requests"
 } as const;
 export type Table = ValueOf<typeof Table>;
 export const TABLE_VALUES = enumValues(Table);

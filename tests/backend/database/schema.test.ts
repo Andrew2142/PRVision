@@ -29,7 +29,8 @@ const TABLES: PgTable[] = [
   schema.harnessLibraryJobs,
   schema.harnessLibraryJobEvents,
   schema.visualizationComponentStates,
-  schema.liveSessions
+  schema.liveSessions,
+  schema.agentAiRequests
 ];
 
 /** Append-only tables (no updated_at): 00 §6 console events and 16 §6.5 library job events. */
@@ -53,10 +54,11 @@ function column(table: PgTable, name: string) {
   return found;
 }
 
-test("defines exactly the five tables named in 00 §6 plus the five of 16 §6.3–§6.9", () => {
+test("defines exactly the five tables named in 00 §6, the five of 16 §6.3–§6.9 and the one of 17 §6.2", () => {
   const exportsList: unknown[] = Object.values(schema);
   const tableExports = exportsList.filter((value): value is PgTable => is(value, drizzlePgCore.PgTable));
   assert.deepEqual(tableExports.map((table) => getTableName(table)).sort(), [
+    "agent_ai_requests",
     "app_settings",
     "harness_library_entries",
     "harness_library_job_events",
@@ -218,6 +220,7 @@ test("schema.ts does not import config-consts or utilities", () => {
     [...new Set(specifiers)].sort(),
     [
       "../enums",
+      "../types/agent-request",
       "../types/harness-library",
       "../types/visualization-pipeline",
       "drizzle-orm",
@@ -623,4 +626,24 @@ test("16 §6.9: live_sessions status, stop reason CHECKs and the partial active 
     onDelete: "cascade",
     target: "visualizations"
   });
+});
+
+test("17 §6.2: agent_ai_requests status, purpose and answered CHECKs, cascade FK and claim index", () => {
+  assert.equal(column(schema.agentAiRequests, "status").default, "pending");
+  assert.ok(checkNames(schema.agentAiRequests).includes("agent_ai_requests_purpose_check"));
+  assert.ok(checkNames(schema.agentAiRequests).includes("agent_ai_requests_status_check"));
+  const answered = checkSql(schema.agentAiRequests, "agent_ai_requests_answered_check");
+  assert.match(answered, /'answered'/);
+  assert.match(answered, /answered_at/);
+  assert.match(answered, /response/);
+  assert.deepEqual(indexColumnNames(schema.agentAiRequests, "agent_ai_requests_visualization_id_status_id_idx"), [
+    "visualization_id",
+    "status",
+    "id"
+  ]);
+  assert.deepEqual(foreignKeyTo(schema.agentAiRequests, "visualization_id"), {
+    onDelete: "cascade",
+    target: "visualizations"
+  });
+  assert.match(checkSql(schema.visualizations, "visualizations_ai_provider_check"), /'agent'/);
 });

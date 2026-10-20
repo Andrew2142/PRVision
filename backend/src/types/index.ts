@@ -2,3 +2,4 @@
 export * from "./visualization-pipeline";
 export * from "./harness-library";
 export * from "./local-user";
+export * from "./agent-request";

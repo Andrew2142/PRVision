@@ -319,7 +319,7 @@ export interface AiStructuredResult<T> {
   model: string;
 }
 export interface AiProvider {
-  readonly kind: "anthropic_api" | "claude_code";
+  readonly kind: "anthropic_api" | "claude_code" | "agent";
   generateStructured<T>(request: AiStructuredRequest): Promise<AiStructuredResult<T>>;
 }
 

@@ -13,6 +13,7 @@ import {
 } from "./config-consts";
 import { validateConfig } from "./config-consts/config-validation";
 import {
+  AgentRequestsController,
   HarnessLibraryController,
   HealthController,
   LiveSessionsController,
@@ -117,7 +118,8 @@ export function buildRouteDependencies(localAuth: LocalAuthMiddleware): RouteDep
     repositoriesController: new RepositoriesController(),
     visualizationsController: new VisualizationsController(),
     harnessLibraryController: new HarnessLibraryController(), // 16f (16g and 16k add routes to it)
-    liveSessionsController: new LiveSessionsController() // 16i
+    liveSessionsController: new LiveSessionsController(), // 16i
+    agentRequestsController: new AgentRequestsController() // 17
   };
 }
 

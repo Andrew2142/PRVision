@@ -89,3 +89,8 @@ test("SettingsUpdateDTO rejects unknown property hasGithubToken", async () => {
   const errors = await rejects({ hasGithubToken: true });
   assert.ok(errors.some((message) => message.includes("hasGithubToken")));
 });
+
+test("SettingsUpdateDTO rejects aiProvider agent: it is chosen per run, never stored (17 E1)", async () => {
+  const errors = await rejects({ aiProvider: "agent" });
+  assert.ok(errors.some((e) => e.includes("aiProvider must be one of: anthropic_api, claude_code")));
+});

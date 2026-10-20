@@ -428,6 +428,22 @@ test("VisualizationsService.create inserts queued with job_id viz-<id> in one tr
   assert.ok(logs.lines.some((l) => l.event === "visualization.job.queued"));
 });
 
+test('VisualizationsService.create with aiProvider "agent" skips the AI readiness check and stores agent/agent (17 §9.1)', async (t) => {
+  let readinessCalls = 0;
+  const h = setup(t, {
+    aiReadiness: () => {
+      readinessCalls += 1;
+      return Promise.resolve({ ready: false, reason: "ai_not_configured", message: "Add an Anthropic API key." });
+    }
+  });
+  const response = await run(() => h.service().create(createDto({ aiProvider: "agent" })));
+  assert.equal(response.status, 202);
+  assert.equal(readinessCalls, 0);
+  const row = h.store.rows(Table.VISUALIZATIONS)[0];
+  assert.equal(row?.aiProvider, "agent");
+  assert.equal(row.aiModel, "agent");
+});
+
 test("VisualizationsService.create rolls back the insert when the job_id update fails", async (t) => {
   const h = setup(t);
   h.store.failNext("update");
@@ -1153,4 +1169,24 @@ test("VisualizationsService.remove stops the run's running live session (reason 
   t.after(logs.restore);
   assert.deepEqual(await run(() => failing.service(3).remove()), { status: 200, data: { id: 3 } });
   assert.ok(logs.lines.some((line) => line.event === "visualization.live.stop_failed"));
+});
+
+test("VisualizationsService.remove deletes the run's agent requests and images, best effort (17 §9.3)", async (t) => {
+  const removed: number[] = [];
+  const h = setup(t, {
+    removeAgentRequests: (id) => {
+      removed.push(id);
+      return Promise.resolve();
+    }
+  });
+  h.store.seed(Table.VISUALIZATIONS, [makeVisualizationRow({ id: 2, status: "completed", completedAt: NOW })]);
+  assert.deepEqual(await run(() => h.service(2).remove()), { status: 200, data: { id: 2 } });
+  assert.deepEqual(removed, [2]);
+
+  const failing = setup(t, { removeAgentRequests: () => Promise.reject(new Error("db down")) });
+  failing.store.seed(Table.VISUALIZATIONS, [makeVisualizationRow({ id: 3, status: "cancelled", completedAt: NOW })]);
+  const logs = recordLogger();
+  t.after(logs.restore);
+  assert.deepEqual(await run(() => failing.service(3).remove()), { status: 200, data: { id: 3 } });
+  assert.ok(logs.lines.some((line) => line.event === "visualization.agent_requests.remove_failed"));
 });

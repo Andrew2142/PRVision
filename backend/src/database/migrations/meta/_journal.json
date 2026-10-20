@@ -71,6 +71,13 @@
       "when": 1791368136840,
       "tag": "0009_harness_library",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1792481106504,
+      "tag": "0010_agent_ai_requests",
+      "breakpoints": true
     }
   ]
 }

@@ -7,6 +7,10 @@ import {
   AI_EFFORT_VALUES,
   AI_PROVIDER_KIND_VALUES,
   AiEffort,
+  AGENT_REQUEST_PURPOSE_VALUES,
+  AGENT_REQUEST_STATUS_VALUES,
+  AgentRequestPurpose,
+  AgentRequestStatus,
   AiProviderKind,
   COMPONENT_CHANGE_KIND_VALUES,
   COMPONENT_HARNESS_ORIGIN_VALUES,
@@ -62,7 +66,19 @@ const EXPECTED: Array<{
     name: "AiProviderKind",
     object: AiProviderKind,
     tuple: AI_PROVIDER_KIND_VALUES,
-    values: ["anthropic_api", "claude_code"]
+    values: ["anthropic_api", "claude_code", "agent"]
+  },
+  {
+    name: "AgentRequestStatus",
+    object: AgentRequestStatus,
+    tuple: AGENT_REQUEST_STATUS_VALUES,
+    values: ["pending", "claimed", "answered", "failed", "cancelled"]
+  },
+  {
+    name: "AgentRequestPurpose",
+    object: AgentRequestPurpose,
+    tuple: AGENT_REQUEST_PURPOSE_VALUES,
+    values: ["harness", "harness_repair", "summary"]
   },
   {
     name: "AiEffort",
@@ -205,7 +221,8 @@ test("Table values are the snake_case SQL table names (00 §14.3)", () => {
     HARNESS_LIBRARY_JOBS: "harness_library_jobs",
     HARNESS_LIBRARY_JOB_EVENTS: "harness_library_job_events",
     VISUALIZATION_COMPONENT_STATES: "visualization_component_states",
-    LIVE_SESSIONS: "live_sessions"
+    LIVE_SESSIONS: "live_sessions",
+    AGENT_AI_REQUESTS: "agent_ai_requests"
   });
   assert.deepEqual([...TABLE_VALUES], Object.values(Table));
   assert.deepEqual(DeletionMode, { SOFT: "soft", HARD: "hard" });

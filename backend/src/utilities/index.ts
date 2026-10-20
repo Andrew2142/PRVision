@@ -17,6 +17,8 @@ export * from "./loggers/logger";
 export * from "./mappers/dto-mapper";
 export * from "./processors/encryption";
 export * from "./services/ai/ai-connection-test";
+export * from "./services/ai/agent-provider";
+export * from "./services/ai/agent-request-store";
 export * from "./services/ai/ai-provider";
 export * from "./services/ai/ai-provider-factory";
 export * from "./services/ai/anthropic-api-provider";
