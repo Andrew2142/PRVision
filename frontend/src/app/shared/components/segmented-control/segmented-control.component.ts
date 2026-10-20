@@ -13,6 +13,11 @@ export interface SegmentOption<T extends string> {
   testId?: string;
 }
 
+const BOXED_BUTTON =
+  'inline-flex min-h-8 items-center justify-center gap-1.5 rounded-xl px-3 text-[0.8125rem] font-extrabold text-[var(--color-text-secondary)] transition hover:bg-[color:color-mix(in_srgb,var(--shell-accent)_7%,transparent)] hover:text-[var(--color-text-primary)] disabled:cursor-not-allowed disabled:opacity-40 max-sm:flex-1';
+const PLAIN_BUTTON =
+  'inline-flex min-h-10 items-center gap-1.5 pb-0.5 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-40';
+
 /**
  * Uply's time-range button group (monitor detail "Performance trend"), generalized. `mode="tabs"` gives the same look
  * with tablist semantics: `role="tab"`, `aria-selected`, roving tabindex and arrow/Home/End keys (selection follows
@@ -27,8 +32,8 @@ export interface SegmentOption<T extends string> {
     <div
       [attr.role]="isTabs() ? 'tablist' : 'group'"
       [attr.aria-label]="ariaLabel()"
-      class="inline-flex w-max max-w-full flex-wrap gap-1 rounded-2xl border border-[color:color-mix(in_srgb,var(--shell-accent)_10%,var(--color-border))] bg-[color:color-mix(in_srgb,var(--color-bg-tertiary)_58%,transparent)] p-1"
-      [class.max-sm:w-full]="fullWidthOnMobile()"
+      [class]="containerClass()"
+      [class.max-sm:w-full]="fullWidthOnMobile() && !isPlain()"
     >
       @for (option of options(); track option.value) {
         <button
@@ -44,16 +49,9 @@ export interface SegmentOption<T extends string> {
           [attr.data-testid]="option.testId ?? null"
           (click)="select(option)"
           (keydown)="onKeydown($event)"
-          class="inline-flex min-h-8 items-center justify-center gap-1.5 rounded-xl px-3 text-[0.8125rem] font-extrabold text-[var(--color-text-secondary)] transition hover:bg-[color:color-mix(in_srgb,var(--shell-accent)_7%,transparent)] hover:text-[var(--color-text-primary)] disabled:cursor-not-allowed disabled:opacity-40 max-sm:flex-1"
-          [class.bg-[color:color-mix(in_srgb,var(--shell-accent)_12%,var(--color-bg-secondary))]]="
-            value() === option.value
-          "
-          [class.!text-[var(--shell-accent)]]="value() === option.value"
-          [class.shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--shell-accent)_16%,transparent)]]="
-            value() === option.value
-          "
+          [class]="value() === option.value ? selectedButtonClass() : buttonClass()"
         >
-          @if (option.icon) {
+          @if (option.icon && !isPlain()) {
             <mat-icon class="!h-4 !w-4 !text-base !leading-4" aria-hidden="true">{{ option.icon }}</mat-icon>
           }
           <span>{{ option.label }}</span>
@@ -66,9 +64,7 @@ export interface SegmentOption<T extends string> {
             ></span>
           }
           @if (option.count !== undefined && option.count !== null) {
-            <span class="rounded-full bg-[var(--color-bg-tertiary)] px-1.5 text-[0.6875rem] tabular-nums">{{
-              option.count
-            }}</span>
+            <span [class]="countClass()">{{ option.count }}</span>
           }
         </button>
       }
@@ -85,7 +81,31 @@ export class SegmentedControlComponent<T extends string> {
   /** Prefix for tab and panel ids in `tabs` mode. */
   readonly idPrefix = input('segment');
 
+  /** `boxed` (default): pill buttons in a tinted box. `plain`: text buttons, the selected one underlined, no icons. */
+  readonly look = input<'boxed' | 'plain'>('boxed');
+
   protected readonly isTabs = computed(() => this.mode() === 'tabs');
+  protected readonly isPlain = computed(() => this.look() === 'plain');
+  protected readonly containerClass = computed(() =>
+    this.isPlain()
+      ? 'inline-flex w-max max-w-full flex-wrap gap-5'
+      : 'inline-flex w-max max-w-full flex-wrap gap-1 rounded-2xl border border-[color:color-mix(in_srgb,var(--shell-accent)_10%,var(--color-border))] bg-[color:color-mix(in_srgb,var(--color-bg-tertiary)_58%,transparent)] p-1',
+  );
+  protected readonly buttonClass = computed(() =>
+    this.isPlain()
+      ? `${PLAIN_BUTTON} text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]`
+      : BOXED_BUTTON,
+  );
+  protected readonly selectedButtonClass = computed(() =>
+    this.isPlain()
+      ? `${PLAIN_BUTTON} text-[var(--color-text-primary)] shadow-[inset_0_-2px_0_var(--color-text-primary)]`
+      : `${BOXED_BUTTON} bg-[color:color-mix(in_srgb,var(--shell-accent)_12%,var(--color-bg-secondary))] !text-[var(--shell-accent)] shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--shell-accent)_16%,transparent)]`,
+  );
+  protected readonly countClass = computed(() =>
+    this.isPlain()
+      ? 'text-[0.8125rem] font-normal tabular-nums text-[var(--color-text-tertiary)]'
+      : 'rounded-full bg-[var(--color-bg-tertiary)] px-1.5 text-[0.6875rem] tabular-nums',
+  );
 
   protected select(option: SegmentOption<T>): void {
     if (!option.disabled) this.value.set(option.value);

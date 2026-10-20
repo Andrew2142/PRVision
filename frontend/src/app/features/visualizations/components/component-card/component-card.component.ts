@@ -70,10 +70,17 @@ export function failingSideText(c: VisualizationComponentView, states: readonly 
   return base ? 'base side' : 'head side';
 }
 
+/** The risk shown beside the title; low or unknown risk shows nothing. */
+export interface RiskMark {
+  label: string;
+  color: string;
+}
+
 /**
- * One component result (13 §5.9.8; revision 5): pills, a "What changed" block (AI note, change reason), image viewer
- * and expandable code/structure panels. A replaced component (00 §17) is titled "OldName → NewName", lists both
- * paths and the plain evidence for the pairing.
+ * One component result (13 §5.9.8; revision 6, minimal): a title row with the risk, Play (live mode) and a details
+ * toggle; the before/after screenshots side by side; the AI note as one line underneath. Paths, pills, the change
+ * reason, code diff and structure sit in the details panel. A replaced component (00 §17) is titled
+ * "OldName → NewName" and its details list both paths and the plain evidence for the pairing.
  */
 @Component({
   selector: 'app-component-card',
@@ -93,7 +100,7 @@ export function failingSideText(c: VisualizationComponentView, states: readonly 
     MatProgressSpinnerModule,
   ],
   templateUrl: './component-card.component.html',
-  host: { class: 'block' },
+  host: { class: 'block border-b border-[color:var(--color-border)] pb-10 pt-2 last:border-b-0' },
 })
 export class ComponentCardComponent {
   readonly component = input.required<VisualizationComponentView>();
@@ -174,6 +181,27 @@ export class ComponentCardComponent {
   protected readonly liveEnabled = computed(
     () => this.liveAvailable() && !this.runActive() && this.component().harnessSource !== null,
   );
+  /** Play shows where the screenshots show: not for pending or skipped rows, nor unchanged ones kept folded. */
+  protected readonly canPlay = computed(() => {
+    const status = this.component().renderStatus;
+    if (!this.liveEnabled() || status === 'pending' || status === 'skipped') return false;
+    return !this.isUnchanged() || this.showUnchangedShots();
+  });
+  private readonly playRequested = signal(false);
+  /** The card shows the live components instead of the screenshots. */
+  protected readonly playing = computed(() => this.playRequested() && this.canPlay());
+  /** Paths, pills, change reason, code diff and structure; folded by default. */
+  protected readonly detailsOpen = signal(false);
+  protected readonly riskMark = computed<RiskMark | null>(() => {
+    switch (this.component().risk) {
+      case 'likely_regression':
+        return { label: 'Likely regression', color: 'var(--color-error)' };
+      case 'check':
+        return { label: 'Check', color: 'var(--color-warning)' };
+      default:
+        return null;
+    }
+  });
   protected readonly liveTarget = computed<LiveTarget>(() => {
     const s = this.state();
     return { componentId: this.component().id, stateName: s.name, onBase: s.onBase, onHead: s.onHead };
@@ -238,6 +266,10 @@ export class ComponentCardComponent {
     const c = this.component();
     return c.changeKind === 'affected_parent' && !c.codeDiff && !c.changeReason;
   });
+
+  protected togglePlay(): void {
+    this.playRequested.set(!this.playing());
+  }
 
   protected requestRepair(): void {
     if (!this.repairing()) this.repair.emit(this.component().id);

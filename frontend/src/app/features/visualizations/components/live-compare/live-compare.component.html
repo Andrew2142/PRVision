@@ -7,7 +7,7 @@
   @for (s of sides(); track s.side) {
     <section class="min-w-0" [attr.data-testid]="'live-side-' + s.side" [attr.aria-label]="s.caption + ', live'">
       <div class="mb-2 flex items-center justify-between gap-2">
-        <h4 class="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--color-text-tertiary)]">
+        <h4 class="text-xs font-normal text-[var(--color-text-tertiary)]">
           {{ s.caption }}
         </h4>
         <button

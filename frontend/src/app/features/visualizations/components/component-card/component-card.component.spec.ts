@@ -73,7 +73,9 @@ describe('ComponentCardComponent', () => {
       'Total wraps <b>onto</b> two lines.',
     );
     expect(block.querySelector('b')).toBeNull();
-    expect(block.querySelector('[data-testid="change-reason"]')?.textContent?.trim()).toBe(
+    // The reason moved into the folded details panel.
+    expect(block.querySelector('[data-testid="change-reason"]')).toBeNull();
+    expect(el.querySelector('[data-testid="card-details"] [data-testid="change-reason"]')?.textContent?.trim()).toBe(
       'Changed because: imports changed hook src/hooks/useCart.ts',
     );
     expect(pills()).toContain('Check');
@@ -98,14 +100,48 @@ describe('ComponentCardComponent', () => {
     expect(el.querySelector('[data-testid="what-changed"]')).toBeNull();
   });
 
-  it('"What changed" sits above the screenshots and replaces the old AI-note callout', () => {
+  it('"What changed" sits below the screenshots and replaces the old AI-note callout', () => {
     render({ aiNote: 'The header is taller.', changeReason: 'Component code changed' });
     const block = el.querySelector('[data-testid="what-changed"]')!;
     const viewer = el.querySelector('app-image-compare')!;
-    expect(block.compareDocumentPosition(viewer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(block.compareDocumentPosition(viewer) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
     expect(el.querySelector('[data-testid="ai-note"]')).toBeNull();
     expect(Array.from(el.querySelectorAll('mat-icon')).map((i) => i.textContent?.trim())).not.toContain('psychology');
     expect(el.querySelectorAll('[data-testid="change-reason"]').length).toBe(1);
+  });
+
+  it('title row: the risk shows beside the title only when it needs a look', () => {
+    render({ risk: 'check' });
+    expect(el.querySelector('[data-testid="risk-mark"]')?.textContent?.trim()).toBe('Check');
+    render({ risk: 'likely_regression' });
+    expect(el.querySelector('[data-testid="risk-mark"]')?.textContent?.trim()).toBe('Likely regression');
+    render({ risk: 'none' });
+    expect(el.querySelector('[data-testid="risk-mark"]')).toBeNull();
+    render({ risk: null });
+    expect(el.querySelector('[data-testid="risk-mark"]')).toBeNull();
+  });
+
+  it('details (paths, pills, code) are folded until the details button is pressed', () => {
+    render({ codeDiff: DIFF });
+    const details = el.querySelector<HTMLElement>('[data-testid="card-details"]')!;
+    const toggle = el.querySelector<HTMLButtonElement>('[data-testid="details-toggle"]')!;
+    expect(details.hidden).toBeTrue();
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(toggle.getAttribute('aria-controls')).toBe(details.id);
+    expect(details.querySelector('[data-testid="component-path"]')).not.toBeNull();
+    expect(details.querySelector('details[data-section="code"]')).not.toBeNull();
+    toggle.click();
+    fixture.detectChanges();
+    expect(details.hidden).toBeFalse();
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(toggle.getAttribute('aria-label')).toBe('Hide details');
+  });
+
+  it('render errors stay outside the folded details', () => {
+    render({ headError: 'TypeError: x is undefined' });
+    const errors = section('errors');
+    expect(errors).not.toBeNull();
+    expect(el.querySelector('[data-testid="card-details"]')?.contains(errors)).toBeFalse();
   });
 
   it('pending shows waiting placeholder', () => {
@@ -485,6 +521,36 @@ describe('ComponentCardComponent', () => {
       el.querySelector<HTMLButtonElement>('app-state-tabs [data-value="0"]')?.click();
       fixture.detectChanges();
       expect(liveInputs().target).toEqual({ componentId: 11, stateName: 'Default', onBase: true, onHead: true });
+    });
+
+    it('Play shows the live components and Stop returns to the screenshots', () => {
+      fixture.componentRef.setInput('liveAvailable', true);
+      render({ harnessSource: 'x' });
+      const play = (): HTMLButtonElement => el.querySelector<HTMLButtonElement>('[data-testid="play"]')!;
+      expect(play().textContent).toContain('Play');
+      expect(play().getAttribute('aria-pressed')).toBe('false');
+      expect(compare().live()).toBeFalse();
+      play().click();
+      fixture.detectChanges();
+      expect(compare().live()).toBeTrue();
+      expect(play().textContent).toContain('Stop');
+      expect(play().getAttribute('aria-pressed')).toBe('true');
+      play().click();
+      fixture.detectChanges();
+      expect(compare().live()).toBeFalse();
+    });
+
+    it('no Play when the card cannot go live or its screenshots are not shown', () => {
+      render({ harnessSource: 'x' });
+      expect(el.querySelector('[data-testid="play"]')).toBeNull();
+      fixture.componentRef.setInput('liveAvailable', true);
+      render({ harnessSource: 'x', renderStatus: 'pending' });
+      expect(el.querySelector('[data-testid="play"]')).toBeNull();
+      render({ harnessSource: 'x', visualChange: 'unchanged' });
+      expect(el.querySelector('[data-testid="play"]')).toBeNull();
+      el.querySelector<HTMLButtonElement>('[data-testid="show-screenshots"]')?.click();
+      fixture.detectChanges();
+      expect(el.querySelector('[data-testid="play"]')).not.toBeNull();
     });
 
     it('off when the run cannot go live, the row has no harness, or the run is still active', () => {

@@ -13,6 +13,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCardModule } from '@angular/material/card';
 import { MatIconModule } from '@angular/material/icon';
+import { MatMenuModule } from '@angular/material/menu';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { Title } from '@angular/platform-browser';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
@@ -27,7 +28,7 @@ import { NotificationService } from '../../../core/services/notification.service
 import { setPageTitle } from '../../../core/services/page-title.strategy';
 import { sourceLabel } from '../../../core/utils/labels.util';
 import { parseRouteId } from '../../../core/utils/route-params.util';
-import { PIPELINE_STAGES } from '../../../core/utils/visualization-status.util';
+import { PIPELINE_STAGES, stageIndex } from '../../../core/utils/visualization-status.util';
 
 /** New harnesses written per run by default and the most a user can choose (backend MAX_COMPONENTS / COMPONENT_LIMIT_MAX). */
 const DEFAULT_COMPONENT_LIMIT = 12;
@@ -113,6 +114,14 @@ function refsParts(
  * `/visualizations/:id`: live progress, console, AI summary and per-component results (13 §5.9). Revision 5: the
  * header and stepper stay on top; a tab selector (`?view=summary|components|console`) shows one section at a time.
  */
+/** The thin progress bar shown while a run is going. */
+interface RunProgressView {
+  step: number;
+  total: number;
+  percent: number;
+  text: string;
+}
+
 @Component({
   selector: 'app-visualization-detail',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -125,6 +134,7 @@ function refsParts(
     MatButtonModule,
     MatCardModule,
     MatIconModule,
+    MatMenuModule,
     MatProgressSpinnerModule,
     PageHeaderComponent,
     StatusPillComponent,
@@ -225,10 +235,25 @@ export class VisualizationDetailComponent {
   protected readonly activeView = computed<DetailView>(
     () => this.chosenView() ?? defaultDetailView(this.store.status()),
   );
+  /** While a run is going: one thin bar and "Step 5 of 7 · Rendering" in place of the stepper. */
+  protected readonly progress = computed<RunProgressView | null>(() => {
+    const status = this.store.detail()?.status;
+    if (!status || this.store.isTerminal()) return null;
+    const index = stageIndex(status);
+    const stage = PIPELINE_STAGES[index];
+    if (!stage) return null;
+    const total = PIPELINE_STAGES.length;
+    return {
+      step: index + 1,
+      total,
+      percent: Math.round(((index + 0.5) / total) * 100),
+      text: `Step ${String(index + 1)} of ${String(total)} · ${stage.label}`,
+    };
+  });
   protected readonly viewOptions = computed<SegmentOption<DetailView>[]>(() => [
-    { value: 'components', label: 'Components', icon: 'widgets', count: this.store.counts().all },
-    { value: 'summary', label: 'Summary', icon: 'auto_awesome' },
-    { value: 'console', label: 'Console', icon: 'terminal' },
+    { value: 'components', label: 'Components', count: this.store.counts().all },
+    { value: 'summary', label: 'Summary' },
+    { value: 'console', label: 'Console' },
   ]);
   /** Set while the run is paused because it needs more new harnesses than the default limit (16 E12). */
   protected readonly limitChoice = computed<LimitChoice | null>(() => {

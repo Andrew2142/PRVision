@@ -1,262 +1,121 @@
-<div class="flex flex-wrap items-center justify-between gap-3">
-  <app-segmented-control
-    ariaLabel="Comparison mode"
-    [options]="modeOptions()"
-    [value]="effectiveMode()"
-    (valueChange)="mode.set($event)"
-  />
-  @if (!isLive()) {
-    <app-segmented-control
-      ariaLabel="Zoom"
-      [options]="zoomOptions"
-      [value]="zoom()"
-      (valueChange)="zoom.set($event)"
-      [fullWidthOnMobile]="false"
-    />
-  }
-</div>
-
-<div class="mt-3">
-  @if (livePanel(); as panel) {
-    @switch (panel.kind) {
-      @case ('ready') {
-        @if (liveTarget(); as target) {
-          <app-live-compare
-            data-testid="live-compare"
-            [componentId]="target.componentId"
-            [stateName]="target.stateName"
-            [label]="label()"
-            [onBase]="target.onBase"
-            [onHead]="target.onHead"
-            [stepSummary]="stepSummary()"
-          />
-        }
-      }
-      @case ('starting') {
-        <div
-          class="grid min-h-40 place-content-center justify-items-center gap-3 rounded-xl border border-[color:var(--color-border)] bg-[var(--color-bg-tertiary)] p-6 text-center text-sm text-[var(--color-text-secondary)]"
-          role="status"
-          data-testid="live-starting"
-        >
-          <mat-spinner diameter="28" />
-          <span>{{ panel.message }}</span>
-        </div>
-      }
-      @case ('stopping') {
-        <div
-          class="grid min-h-40 place-content-center justify-items-center gap-3 rounded-xl border border-[color:var(--color-border)] bg-[var(--color-bg-tertiary)] p-6 text-center text-sm text-[var(--color-text-secondary)]"
-          role="status"
-          data-testid="live-stopping"
-        >
-          <mat-spinner diameter="28" />
-          <span>{{ panel.message }}</span>
-        </div>
-      }
-      @default {
-        <div
-          class="grid min-h-40 place-content-center justify-items-center gap-3 rounded-xl border border-dashed border-[color:var(--color-border)] p-6 text-center text-sm"
-          [attr.data-testid]="'live-' + panel.kind"
-        >
-          <mat-icon class="text-[var(--shell-accent)]" aria-hidden="true">sensors</mat-icon>
-          @if (panel.kind === 'start') {
-            <p class="max-w-prose text-[var(--color-text-secondary)]">
-              Live mode runs the before and after components in your browser, each side on its own. Start it for this
-              run?
-            </p>
-          }
-          @if (panel.message) {
-            <p
-              class="max-w-prose break-words"
-              [class.text-[var(--color-error)]]="panel.kind !== 'stopped'"
-              [class.text-[var(--color-text-secondary)]]="panel.kind === 'stopped'"
-              [attr.role]="panel.kind === 'stopped' ? 'status' : 'alert'"
-              data-testid="live-message"
-            >
-              {{ panel.message }}
-            </p>
-          }
-          <button
-            mat-flat-button
-            type="button"
-            class="!rounded-xl"
-            data-testid="live-start-button"
-            (click)="startLive()"
-          >
-            <mat-icon aria-hidden="true">play_arrow</mat-icon>
-            {{ panel.actionLabel }}
-          </button>
-        </div>
-      }
-    }
-  } @else if (isActualZoom()) {
-    <div
-      class="max-h-[70vh] overflow-auto rounded-xl border border-[color:var(--color-border)] p-2"
-      tabindex="0"
-      role="region"
-      [attr.aria-label]="zoomRegionLabel()"
-    >
-      <ng-container [ngTemplateOutlet]="stage" />
-    </div>
-  } @else {
-    <div class="w-full"><ng-container [ngTemplateOutlet]="stage" /></div>
-  }
-</div>
-
-<ng-template #stage>
-  @switch (effectiveMode()) {
-    @case ('slider') {
-      <div
-        class="pv-checkerboard relative touch-none select-none overflow-hidden rounded-xl border border-[color:var(--color-border)]"
-        [style.aspect-ratio]="aspectRatio()"
-        [style.width.px]="frameWidth()"
-        data-testid="slider-stage"
-        (pointerdown)="onPointerDown($event)"
-        (pointermove)="onPointerMove($event)"
-        (pointerup)="stopDragging()"
-        (pointercancel)="stopDragging()"
-      >
-        @if (baseSrc(); as base) {
-          <img
-            [src]="base"
-            [alt]="baseAlt()"
-            [attr.width]="width()"
-            [attr.height]="height()"
-            class="absolute inset-0 h-full w-full object-contain object-left-top"
-            draggable="false"
-            (error)="markFailed('base')"
-          />
-        }
-        @if (headSrc(); as head) {
-          <img
-            [src]="head"
-            [alt]="headAlt()"
-            [attr.width]="width()"
-            [attr.height]="height()"
-            class="absolute inset-0 h-full w-full object-contain object-left-top"
-            draggable="false"
-            [style.clip-path]="clipPath()"
-            (error)="markFailed('head')"
-          />
-        }
-        <div
-          class="pointer-events-none absolute inset-y-0 w-0.5 bg-[var(--shell-accent)] shadow"
-          [style.left.%]="split()"
-          aria-hidden="true"
-        ></div>
-        <span class="dd-pill dd-pill--muted absolute left-2 top-2">Base</span>
-        <span class="dd-pill dd-pill--muted absolute right-2 top-2">Head</span>
-      </div>
-      <label class="mt-3 flex items-center gap-3 text-sm text-[var(--color-text-secondary)]">
-        <span class="shrink-0">Base</span>
-        <input
-          type="range"
-          min="0"
-          max="100"
-          step="1"
-          class="w-full accent-[var(--shell-accent)]"
-          [value]="split()"
-          (input)="onSplitInput($event)"
-          [attr.aria-label]="sliderLabel()"
-          [attr.aria-valuetext]="sliderValueText()"
+@if (livePanel(); as panel) {
+  @switch (panel.kind) {
+    @case ('ready') {
+      @if (liveTarget(); as target) {
+        <app-live-compare
+          data-testid="live-compare"
+          [componentId]="target.componentId"
+          [stateName]="target.stateName"
+          [label]="label()"
+          [onBase]="target.onBase"
+          [onHead]="target.onHead"
+          [stepSummary]="stepSummary()"
         />
-        <span class="shrink-0">Head</span>
-      </label>
+      }
     }
-    @case ('diff') {
+    @case ('starting') {
       <div
-        class="pv-checkerboard relative overflow-hidden rounded-xl border border-[color:var(--color-border)]"
-        [style.aspect-ratio]="aspectRatio()"
-        [style.width.px]="frameWidth()"
-        data-testid="diff-stage"
+        class="grid min-h-40 place-content-center justify-items-center gap-3 rounded-xl border border-[color:var(--color-border)] bg-[var(--color-bg-tertiary)] p-6 text-center text-sm text-[var(--color-text-secondary)]"
+        role="status"
+        data-testid="live-starting"
       >
-        @if (!diffOnly()) {
-          @if (headSrc(); as head) {
-            <img
-              [src]="head"
-              [alt]="headAlt()"
-              [attr.width]="width()"
-              [attr.height]="height()"
-              class="absolute inset-0 h-full w-full object-contain object-left-top"
-              draggable="false"
-              (error)="markFailed('head')"
-            />
-          }
-        }
-        @if (diffSrc(); as diff) {
-          <img
-            [src]="diff"
-            [alt]="diffAlt()"
-            [attr.width]="width()"
-            [attr.height]="height()"
-            class="absolute inset-0 h-full w-full object-contain object-left-top"
-            draggable="false"
-            [style.opacity]="diffImageOpacity()"
-            (error)="markFailed('diff')"
-          />
-        }
+        <mat-spinner diameter="28" />
+        <span>{{ panel.message }}</span>
       </div>
-      <div class="mt-3 flex flex-wrap items-center gap-4 text-sm text-[var(--color-text-secondary)]">
-        <label class="flex flex-1 items-center gap-3">
-          <span class="shrink-0">Diff opacity</span>
-          <input
-            type="range"
-            min="0"
-            max="100"
-            step="5"
-            class="w-full accent-[var(--shell-accent)]"
-            [disabled]="diffOnly()"
-            [value]="diffOpacity()"
-            (input)="onOpacityInput($event)"
-            [attr.aria-valuetext]="diffOpacityText()"
-          />
-        </label>
-        <mat-slide-toggle [checked]="diffOnly()" (change)="diffOnly.set($event.checked)">Diff only</mat-slide-toggle>
+    }
+    @case ('stopping') {
+      <div
+        class="grid min-h-40 place-content-center justify-items-center gap-3 rounded-xl border border-[color:var(--color-border)] bg-[var(--color-bg-tertiary)] p-6 text-center text-sm text-[var(--color-text-secondary)]"
+        role="status"
+        data-testid="live-stopping"
+      >
+        <mat-spinner diameter="28" />
+        <span>{{ panel.message }}</span>
       </div>
-      <p class="mt-2 text-xs text-[var(--color-text-tertiary)]">{{ diffLegend() }}</p>
     }
     @default {
       <div
-        class="grid gap-4"
-        [class.md:grid-cols-2]="!isActualZoom()"
-        [class.md:grid-flow-col]="isActualZoom()"
-        [class.w-max]="isActualZoom()"
+        class="grid min-h-40 place-content-center justify-items-center gap-3 rounded-xl border border-dashed border-[color:var(--color-border)] p-6 text-center text-sm"
+        [attr.data-testid]="'live-' + panel.kind"
       >
-        @for (side of sides(); track side.key) {
-          <figure class="min-w-0">
-            <figcaption
-              class="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.08em] text-[var(--color-text-tertiary)]"
-            >
-              {{ side.caption }}
-            </figcaption>
+        @if (panel.message) {
+          <p
+            class="max-w-prose break-words"
+            [class.text-[var(--color-error)]]="panel.kind !== 'stopped'"
+            [class.text-[var(--color-text-secondary)]]="panel.kind === 'stopped'"
+            [attr.role]="panel.kind === 'stopped' ? 'status' : 'alert'"
+            data-testid="live-message"
+          >
+            {{ panel.message }}
+          </p>
+        }
+        <button mat-flat-button type="button" class="!rounded-xl" data-testid="live-start-button" (click)="startLive()">
+          <mat-icon aria-hidden="true">play_arrow</mat-icon>
+          {{ panel.actionLabel }}
+        </button>
+      </div>
+    }
+  }
+} @else {
+  <div class="grid gap-4 md:grid-cols-2" data-testid="side-by-side">
+    @for (side of sides(); track side.key) {
+      <figure class="m-0 flex min-w-0 flex-col gap-2">
+        <figcaption class="text-xs text-[var(--color-text-tertiary)]">{{ side.caption }}</figcaption>
+        @if (side.src; as url) {
+          @if (cropStyle(); as c) {
             <div
-              class="pv-checkerboard overflow-hidden rounded-xl border border-[color:var(--color-border)]"
-              [style.aspect-ratio]="aspectRatio()"
-              [style.width.px]="frameWidth()"
+              class="flex flex-1 items-center justify-center overflow-hidden rounded-xl"
+              [style.background]="c.background"
+              data-testid="cropped-tile"
             >
-              @if (side.src; as url) {
+              <div
+                class="relative w-full overflow-hidden"
+                [style.max-width.px]="c.maxWidth"
+                [style.aspect-ratio]="c.ratio"
+              >
                 <img
                   [src]="url"
                   [alt]="side.alt"
                   [attr.width]="width()"
                   [attr.height]="height()"
-                  loading="lazy"
+                  crossorigin="anonymous"
                   decoding="async"
                   draggable="false"
-                  class="block h-auto w-full object-contain object-left-top"
+                  class="absolute block h-auto max-w-none"
+                  [style.width.%]="c.imgWidth"
+                  [style.left.%]="c.left"
+                  [style.top.%]="c.top"
                   (error)="markFailed(side.key)"
                 />
-              } @else {
-                <div
-                  class="grid h-full min-h-40 place-content-center justify-items-center gap-2 bg-[var(--color-bg-tertiary)] p-6 text-center text-sm text-[var(--color-text-tertiary)]"
-                >
-                  <mat-icon aria-hidden="true">{{ side.placeholder.icon }}</mat-icon
-                  ><span>{{ side.placeholder.text }}</span>
-                </div>
-              }
+              </div>
             </div>
-          </figure>
+          } @else {
+            <div
+              class="overflow-hidden rounded-xl border border-[color:var(--color-border)]"
+              [style.aspect-ratio]="aspectRatio()"
+            >
+              <img
+                [src]="url"
+                [alt]="side.alt"
+                [attr.width]="width()"
+                [attr.height]="height()"
+                crossorigin="anonymous"
+                decoding="async"
+                draggable="false"
+                class="block h-auto w-full"
+                (error)="markFailed(side.key)"
+              />
+            </div>
+          }
+        } @else {
+          <div
+            class="grid min-h-40 flex-1 place-content-center justify-items-center gap-2 rounded-xl bg-[var(--color-bg-tertiary)] p-6 text-center text-sm text-[var(--color-text-tertiary)]"
+          >
+            <mat-icon aria-hidden="true">{{ side.placeholder.icon }}</mat-icon
+            ><span>{{ side.placeholder.text }}</span>
+          </div>
         }
-      </div>
+      </figure>
     }
-  }
-</ng-template>
+  </div>
+}

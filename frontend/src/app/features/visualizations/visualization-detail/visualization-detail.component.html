@@ -31,18 +31,16 @@
         <ng-container pageHeaderMeta>
           <div class="pv-header-meta">
             @if (h.sourceType === 'github_pr') {
-              <span class="pv-header-meta__item">
-                <mat-icon aria-hidden="true">merge</mat-icon>{{ h.sourceLabel }}
-              </span>
+              <span class="pv-header-meta__item">{{ h.sourceLabel }}</span>
             }
             <a class="pv-header-meta__item pv-header-meta__link" [routerLink]="['/repositories', h.repositoryId]">
-              <mat-icon aria-hidden="true">folder_open</mat-icon>{{ h.repositoryName }}
+              {{ h.repositoryName }}
             </a>
-            <span class="pv-header-meta__item">
-              <mat-icon aria-hidden="true">code</mat-icon><span data-testid="framework">{{ h.frameworkLabel }}</span>
-            </span>
+            <span class="pv-header-meta__item"
+              ><span data-testid="framework">{{ h.frameworkLabel }}</span></span
+            >
             <span class="pv-header-meta__item pv-code" data-testid="refs">
-              <mat-icon aria-hidden="true">commit</mat-icon>{{ h.refsBase }}
+              {{ h.refsBase }}
               <svg class="pv-header-meta__arrow" viewBox="0 0 16 16" aria-hidden="true">
                 <path
                   d="M2 8h11M9 4l4 4-4 4"
@@ -56,6 +54,11 @@
               <span class="sr-only">to </span>{{ h.refsHead }}
             </span>
           </div>
+          @if (h.summaryLine) {
+            <p class="w-full text-xs text-[var(--color-text-tertiary)]" data-testid="summary-line">
+              {{ h.summaryLine }}
+            </p>
+          }
         </ng-container>
         <ng-container pageHeaderActions>
           @if (repairAll(); as ra) {
@@ -93,21 +96,23 @@
             </button>
           } @else {
             <button
-              mat-stroked-button
-              color="warn"
+              mat-icon-button
               type="button"
-              class="!rounded-xl"
-              [disabled]="store.deleting()"
-              (click)="confirmDelete()"
+              aria-label="More actions"
+              data-testid="run-menu"
+              [matMenuTriggerFor]="runMenu"
             >
-              <mat-icon aria-hidden="true">delete</mat-icon> Delete
+              <mat-icon aria-hidden="true">more_horiz</mat-icon>
             </button>
+            <mat-menu #runMenu="matMenu" xPosition="before">
+              <button mat-menu-item type="button" [disabled]="store.deleting()" (click)="confirmDelete()">
+                <mat-icon aria-hidden="true">delete</mat-icon>
+                <span>Delete</span>
+              </button>
+            </mat-menu>
           }
         </ng-container>
       </app-page-header>
-      @if (h.summaryLine) {
-        <p class="-mt-4 text-sm text-[var(--color-text-tertiary)]" data-testid="summary-line">{{ h.summaryLine }}</p>
-      }
       @if (h.globalStyleTrigger; as trigger) {
         <p class="-mt-3">
           <span class="dd-pill dd-pill--info inline-flex items-center gap-1" data-testid="global-style-trigger"
@@ -116,11 +121,28 @@
         </p>
       }
 
-      <mat-card
-        class="!rounded-2xl border border-[color:var(--color-border)] bg-[var(--color-bg-secondary)] px-5 py-4 shadow-[var(--shadow-md)]"
-      >
-        <app-pipeline-stepper [status]="h.status" [stoppedStageIndex]="store.stoppedStageIndex()" />
-      </mat-card>
+      @if (progress(); as p) {
+        <div class="flex max-w-xl flex-col gap-1.5" data-testid="run-progress">
+          <div
+            class="h-[3px] overflow-hidden rounded-full bg-[var(--color-border)]"
+            role="progressbar"
+            aria-label="Pipeline progress"
+            aria-valuemin="0"
+            [attr.aria-valuemax]="p.total"
+            [attr.aria-valuenow]="p.step"
+            [attr.aria-valuetext]="p.text"
+          >
+            <div class="h-full bg-[var(--shell-accent)] transition-[width]" [style.width.%]="p.percent"></div>
+          </div>
+          <p class="text-xs text-[var(--color-text-secondary)]">{{ p.text }}</p>
+        </div>
+      } @else if (store.isTerminal() && h.status !== 'completed') {
+        <mat-card
+          class="!rounded-2xl border border-[color:var(--color-border)] bg-[var(--color-bg-secondary)] px-5 py-4 shadow-[var(--shadow-md)]"
+        >
+          <app-pipeline-stepper [status]="h.status" [stoppedStageIndex]="store.stoppedStageIndex()" />
+        </mat-card>
+      }
 
       @if (store.connectionLost()) {
         <app-inline-alert tone="warning" title="Connection lost"
@@ -166,14 +188,31 @@
         >
       }
 
-      <app-segmented-control
-        mode="tabs"
-        idPrefix="viz-view"
-        ariaLabel="Visualization sections"
-        [options]="viewOptions()"
-        [value]="activeView()"
-        (valueChange)="selectView($event)"
-      />
+      <div
+        class="flex flex-wrap items-end justify-between gap-x-6 gap-y-2 border-b border-[color:var(--color-border)]"
+        data-testid="view-bar"
+      >
+        <app-segmented-control
+          mode="tabs"
+          look="plain"
+          idPrefix="viz-view"
+          ariaLabel="Visualization sections"
+          [fullWidthOnMobile]="false"
+          [options]="viewOptions()"
+          [value]="activeView()"
+          (valueChange)="selectView($event)"
+        />
+        @if (activeView() === 'components' && store.components().length) {
+          <app-segmented-control
+            look="plain"
+            ariaLabel="Filter components"
+            [fullWidthOnMobile]="false"
+            [options]="filterOptions()"
+            [value]="store.filter()"
+            (valueChange)="store.setFilter($event)"
+          />
+        }
+      </div>
 
       <div
         id="viz-view-panel"
@@ -216,14 +255,6 @@
           }
           @case ('components') {
             <h2 class="sr-only">Components</h2>
-            @if (store.components().length) {
-              <app-segmented-control
-                ariaLabel="Filter components"
-                [options]="filterOptions()"
-                [value]="store.filter()"
-                (valueChange)="store.setFilter($event)"
-              />
-            }
             @if (!store.components().length) {
               <app-empty-state [title]="h.noComponentsTitle" [message]="h.noComponentsMessage" />
             } @else if (!store.filteredComponents().length) {

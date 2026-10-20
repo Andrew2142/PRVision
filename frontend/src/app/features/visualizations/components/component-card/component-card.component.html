@@ -1,104 +1,178 @@
-<article
-  class="rounded-2xl border border-[color:var(--color-border)] bg-[var(--color-bg-secondary)] p-5 shadow-[var(--shadow-sm)]"
-  [attr.aria-labelledby]="headingId()"
->
-  <header class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-    <div class="min-w-0">
-      <div class="flex flex-wrap items-baseline gap-2">
-        <span class="text-xs font-semibold tabular-nums text-[var(--color-text-tertiary)]">{{ rankLabel() }}</span>
-        <h3 [id]="headingId()" class="truncate text-lg font-semibold text-[var(--color-text-primary)]">
-          {{ title() }}
-        </h3>
-        @if (exportLabel(); as label) {
-          <span class="pv-code text-xs text-[var(--color-text-tertiary)]">{{ label }}</span>
-        }
-      </div>
-      @for (p of paths(); track p.path) {
-        <div class="mt-1 flex min-w-0 items-center gap-1" data-testid="component-path">
-          @if (p.label) {
-            <span class="shrink-0 text-xs font-semibold text-[var(--color-text-tertiary)]">{{ p.label }}</span>
-          }
-          <span class="pv-code truncate text-xs text-[var(--color-text-secondary)]" [title]="p.path">{{ p.path }}</span>
-          <button
-            mat-icon-button
-            type="button"
-            class="!h-7 !w-7 !p-0"
-            [cdkCopyToClipboard]="p.path"
-            [attr.aria-label]="p.label ? 'Copy ' + p.label.toLowerCase() + ' file path' : 'Copy file path'"
-            matTooltip="Copy path"
-          >
-            <mat-icon class="!text-base" aria-hidden="true">content_copy</mat-icon>
-          </button>
-        </div>
-      }
-    </div>
-    <div class="flex flex-wrap items-center gap-2">
-      <app-status-pill kind="change" [value]="component().changeKind" />
-      @if (harnessLabel(); as hl) {
-        <span class="dd-pill dd-pill--outline" data-testid="harness-origin">{{ hl }}</span>
-      }
-      @if (component().visualChange) {
-        <app-status-pill kind="visual" [value]="component().visualChange" [label]="visualLabel()" />
-      }
-      @if (showRenderPill()) {
-        <app-status-pill kind="render" [value]="component().renderStatus" />
-      }
-      @if (component().risk) {
-        <app-status-pill kind="risk" [value]="component().risk" ariaPrefix="Risk" />
-      }
-    </div>
-  </header>
-
-  @if (whatChanged(); as wc) {
-    <section
-      class="mt-4 rounded-l-md rounded-r-xl border border-l-4 border-[color:color-mix(in_srgb,var(--shell-accent)_22%,var(--color-border))] border-l-[var(--shell-accent)] bg-[color:color-mix(in_srgb,var(--shell-accent)_8%,var(--color-bg-secondary))] px-4 py-3"
-      [attr.aria-labelledby]="headingId() + '-what'"
-      data-testid="what-changed"
-    >
-      <div class="flex items-center gap-2">
-        <h4
-          [id]="headingId() + '-what'"
-          class="text-xs font-bold uppercase tracking-[0.08em] text-[var(--shell-accent)]"
+<article class="flex flex-col gap-4" [attr.aria-labelledby]="headingId()">
+  <header>
+    <div class="flex min-w-0 items-center gap-3">
+      <h3 [id]="headingId()" class="truncate text-lg font-semibold text-[var(--color-text-primary)]">
+        {{ title() }}
+      </h3>
+      @if (riskMark(); as mark) {
+        <span
+          class="inline-flex shrink-0 items-center gap-1.5 text-sm"
+          [style.color]="mark.color"
+          data-testid="risk-mark"
+          ><span class="h-2 w-2 rounded-full" [style.background]="mark.color" aria-hidden="true"></span
+          >{{ mark.label }}</span
         >
-          What changed
-        </h4>
-        @if (wc.fromAi) {
-          <span
-            class="dd-pill dd-pill--outline cursor-help !px-1.5 !py-0 text-[0.65rem]"
-            matTooltip="Written by AI, which can make mistakes. Check it against the screenshots."
-            tabindex="0"
-            data-testid="what-changed-ai"
-            >AI</span
-          >
+      }
+      <div class="flex-1"></div>
+      @if (canPlay()) {
+        <button
+          mat-stroked-button
+          type="button"
+          class="!rounded-lg"
+          data-testid="play"
+          [attr.aria-pressed]="playing()"
+          (click)="togglePlay()"
+        >
+          <mat-icon aria-hidden="true">{{ playing() ? 'stop' : 'play_arrow' }}</mat-icon>
+          {{ playing() ? 'Stop' : 'Play' }}
+        </button>
+      }
+      <button
+        mat-icon-button
+        type="button"
+        data-testid="details-toggle"
+        [attr.aria-expanded]="detailsOpen()"
+        [attr.aria-controls]="headingId() + '-details'"
+        [attr.aria-label]="detailsOpen() ? 'Hide details' : 'Show details'"
+        [matTooltip]="detailsOpen() ? 'Hide details' : 'Details'"
+        (click)="detailsOpen.set(!detailsOpen())"
+      >
+        <mat-icon aria-hidden="true">more_horiz</mat-icon>
+      </button>
+    </div>
+
+    <div
+      [id]="headingId() + '-details'"
+      class="mt-3 flex flex-col gap-3 rounded-xl border border-[color:var(--color-border)] p-4"
+      [hidden]="!detailsOpen()"
+      data-testid="card-details"
+    >
+      <div class="flex flex-col gap-1">
+        <div class="flex flex-wrap items-baseline gap-2">
+          <span class="text-xs font-semibold tabular-nums text-[var(--color-text-tertiary)]">{{ rankLabel() }}</span>
+          @if (exportLabel(); as label) {
+            <span class="pv-code text-xs text-[var(--color-text-tertiary)]">{{ label }}</span>
+          }
+        </div>
+        @for (p of paths(); track p.path) {
+          <div class="flex min-w-0 items-center gap-1" data-testid="component-path">
+            @if (p.label) {
+              <span class="shrink-0 text-xs font-semibold text-[var(--color-text-tertiary)]">{{ p.label }}</span>
+            }
+            <span class="pv-code truncate text-xs text-[var(--color-text-secondary)]" [title]="p.path">{{
+              p.path
+            }}</span>
+            <button
+              mat-icon-button
+              type="button"
+              class="!h-7 !w-7 !p-0"
+              [cdkCopyToClipboard]="p.path"
+              [attr.aria-label]="p.label ? 'Copy ' + p.label.toLowerCase() + ' file path' : 'Copy file path'"
+              matTooltip="Copy path"
+            >
+              <mat-icon class="!text-base" aria-hidden="true">content_copy</mat-icon>
+            </button>
+          </div>
         }
       </div>
-      <p
-        class="mt-1 whitespace-pre-line text-[0.95rem] font-medium leading-6 text-[var(--color-text-primary)]"
-        data-testid="what-changed-main"
-      >
-        {{ wc.main }}
-      </p>
-      @if (wc.reason; as reason) {
-        <p class="mt-1.5 break-words text-sm text-[var(--color-text-secondary)]" data-testid="change-reason">
+      <div class="flex flex-wrap items-center gap-2">
+        <app-status-pill kind="change" [value]="component().changeKind" />
+        @if (harnessLabel(); as hl) {
+          <span class="dd-pill dd-pill--outline" data-testid="harness-origin">{{ hl }}</span>
+        }
+        @if (component().visualChange) {
+          <app-status-pill kind="visual" [value]="component().visualChange" [label]="visualLabel()" />
+        }
+        @if (showRenderPill()) {
+          <app-status-pill kind="render" [value]="component().renderStatus" />
+        }
+        @if (component().risk) {
+          <app-status-pill kind="risk" [value]="component().risk" ariaPrefix="Risk" />
+        }
+      </div>
+      @if (whatChanged()?.reason; as reason) {
+        <p class="break-words text-sm text-[var(--color-text-secondary)]" data-testid="change-reason">
           <span class="font-semibold">Changed because:</span> {{ reason }}
         </p>
       }
       @if (evidenceLines().length) {
-        <p class="mt-2 text-sm font-semibold text-[var(--color-text-secondary)]">Why this is a replacement:</p>
-        <ul
-          class="mt-1 list-disc space-y-0.5 pl-5 text-sm text-[var(--color-text-secondary)]"
-          data-testid="replaced-evidence"
-        >
-          @for (line of evidenceLines(); track line) {
-            <li>{{ line }}</li>
-          }
-        </ul>
+        <div>
+          <p class="text-sm font-semibold text-[var(--color-text-secondary)]">Why this is a replacement:</p>
+          <ul
+            class="mt-1 list-disc space-y-0.5 pl-5 text-sm text-[var(--color-text-secondary)]"
+            data-testid="replaced-evidence"
+          >
+            @for (line of evidenceLines(); track line) {
+              <li>{{ line }}</li>
+            }
+          </ul>
+        </div>
       }
-    </section>
-  }
+      @if (sourceChanged()) {
+        <p class="text-xs text-[var(--color-text-tertiary)]" data-testid="harness-source-changed">
+          The component changed since this harness was written.
+        </p>
+      }
+      @if (component().codeDiff; as diff) {
+        <details
+          class="group overflow-hidden rounded-xl border border-[color:var(--color-border)] bg-[var(--color-bg-secondary)]"
+          data-section="code"
+          (toggle)="onToggle('code', $event)"
+        >
+          <summary class="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4">
+            <div class="min-w-0">
+              <div class="text-base font-semibold text-[var(--color-text-primary)]">Code diff</div>
+              <div class="text-[0.86rem] text-[var(--color-text-tertiary)]">{{ diffStatsLabel() }}</div>
+            </div>
+            <mat-icon
+              class="!h-4 !w-4 !text-base text-[var(--color-text-tertiary)] transition-transform group-open:rotate-180"
+              aria-hidden="true"
+              >expand_more</mat-icon
+            >
+          </summary>
+          <div class="px-5 pb-5">
+            @if (codeOpen()) {
+              <app-code-diff [diff]="diff" />
+            }
+          </div>
+        </details>
+      } @else if (showParentNote()) {
+        <p class="text-xs text-[var(--color-text-tertiary)]" data-testid="parent-note">
+          Re-rendered because a component or hook it uses changed. Its own file has no diff.
+        </p>
+      }
+
+      @if (component().structuralDiff; as changes) {
+        @if (changes.length) {
+          <details
+            class="group overflow-hidden rounded-xl border border-[color:var(--color-border)] bg-[var(--color-bg-secondary)]"
+            data-section="structure"
+            (toggle)="onToggle('structure', $event)"
+          >
+            <summary class="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4">
+              <div class="min-w-0">
+                <div class="text-base font-semibold text-[var(--color-text-primary)]">{{ structuralTitle() }}</div>
+                <div class="text-[0.86rem] text-[var(--color-text-tertiary)]">{{ structuralLabel() }}</div>
+              </div>
+              <mat-icon
+                class="!h-4 !w-4 !text-base text-[var(--color-text-tertiary)] transition-transform group-open:rotate-180"
+                aria-hidden="true"
+                >expand_more</mat-icon
+              >
+            </summary>
+            <div class="px-5 pb-5">
+              @if (structureOpen()) {
+                <app-structural-diff-list [changes]="changes" [framework]="framework()" />
+              }
+            </div>
+          </details>
+        }
+      }
+    </div>
+  </header>
 
   @if (needsUpdate()) {
-    <app-inline-alert class="mt-4" tone="warning" title="Harness needs updating" data-testid="needs-update">
+    <app-inline-alert tone="warning" title="Harness needs updating" data-testid="needs-update">
       {{ needsUpdateText() }}
       @if (!runActive()) {
         <button
@@ -120,13 +194,8 @@
       }
     </app-inline-alert>
   }
-  @if (sourceChanged()) {
-    <p class="mt-3 text-xs text-[var(--color-text-tertiary)]" data-testid="harness-source-changed">
-      The component changed since this harness was written.
-    </p>
-  }
 
-  <div class="mt-4">
+  <div>
     @switch (component().renderStatus) {
       @case ('pending') {
         <app-empty-state [title]="pendingText()" [message]="null" />
@@ -181,16 +250,15 @@
               [stateName]="multiState() ? state().name : null"
               [baseUrl]="state().baseImageUrl"
               [headUrl]="state().headImageUrl"
-              [diffUrl]="state().diffImageUrl"
               [width]="state().imageWidth"
               [height]="state().imageHeight"
-              [diffPixelRatio]="state().diffPixelRatio"
               [visualChange]="state().visualChange"
               [baseError]="state().baseError"
               [headError]="state().headError"
               [liveEnabled]="liveEnabled()"
               [liveTarget]="liveTarget()"
               [stepSummary]="state().stepSummary"
+              [live]="playing()"
             />
           </div>
         }
@@ -198,92 +266,55 @@
     }
   </div>
 
-  <div class="mt-4 flex flex-col gap-3">
-    @if (hasErrors()) {
-      <details
-        class="group overflow-hidden rounded-xl border border-[color:var(--color-border)] bg-[var(--color-bg-secondary)]"
-        open
-        data-section="errors"
-        (toggle)="onToggle('errors', $event)"
+  @if (whatChanged(); as wc) {
+    <section class="flex items-start gap-2" [attr.aria-labelledby]="headingId() + '-what'" data-testid="what-changed">
+      <h4 [id]="headingId() + '-what'" class="sr-only">What changed</h4>
+      <p
+        class="whitespace-pre-line text-sm leading-5 text-[var(--color-text-secondary)]"
+        data-testid="what-changed-main"
       >
-        <summary class="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4">
-          <div class="min-w-0">
-            <div class="text-base font-semibold text-[var(--color-text-primary)]">Render errors</div>
-            <div class="text-[0.86rem] text-[var(--color-text-tertiary)]">{{ errorsLabel() }}</div>
-          </div>
-          <mat-icon
-            class="!h-4 !w-4 !text-base text-[var(--color-text-tertiary)] transition-transform group-open:rotate-180"
-            aria-hidden="true"
-            >expand_more</mat-icon
-          >
-        </summary>
-        <div class="flex flex-col gap-3 px-5 pb-5">
-          @for (b of errorBlocks(); track b.side) {
-            <div
-              class="rounded-xl border border-[color:color-mix(in_srgb,var(--color-error)_18%,var(--color-border))] p-3"
-            >
-              <p class="text-sm font-semibold text-[var(--color-error)]">{{ b.title }}</p>
-              <pre class="pv-code pv-code-block mt-2 max-h-48 whitespace-pre-wrap break-words">{{ b.text }}</pre>
-            </div>
-          }
-        </div>
-      </details>
-    }
-
-    @if (component().codeDiff; as diff) {
-      <details
-        class="group overflow-hidden rounded-xl border border-[color:var(--color-border)] bg-[var(--color-bg-secondary)]"
-        data-section="code"
-        (toggle)="onToggle('code', $event)"
-      >
-        <summary class="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4">
-          <div class="min-w-0">
-            <div class="text-base font-semibold text-[var(--color-text-primary)]">Code diff</div>
-            <div class="text-[0.86rem] text-[var(--color-text-tertiary)]">{{ diffStatsLabel() }}</div>
-          </div>
-          <mat-icon
-            class="!h-4 !w-4 !text-base text-[var(--color-text-tertiary)] transition-transform group-open:rotate-180"
-            aria-hidden="true"
-            >expand_more</mat-icon
-          >
-        </summary>
-        <div class="px-5 pb-5">
-          @if (codeOpen()) {
-            <app-code-diff [diff]="diff" />
-          }
-        </div>
-      </details>
-    } @else if (showParentNote()) {
-      <p class="text-xs text-[var(--color-text-tertiary)]" data-testid="parent-note">
-        Re-rendered because a component or hook it uses changed. Its own file has no diff.
+        {{ wc.main }}
       </p>
-    }
-
-    @if (component().structuralDiff; as changes) {
-      @if (changes.length) {
-        <details
-          class="group overflow-hidden rounded-xl border border-[color:var(--color-border)] bg-[var(--color-bg-secondary)]"
-          data-section="structure"
-          (toggle)="onToggle('structure', $event)"
+      @if (wc.fromAi) {
+        <span
+          class="dd-pill dd-pill--outline mt-px shrink-0 cursor-help !px-1.5 !py-0 text-[0.65rem]"
+          matTooltip="Written by AI, which can make mistakes. Check it against the screenshots."
+          tabindex="0"
+          data-testid="what-changed-ai"
+          >AI</span
         >
-          <summary class="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4">
-            <div class="min-w-0">
-              <div class="text-base font-semibold text-[var(--color-text-primary)]">{{ structuralTitle() }}</div>
-              <div class="text-[0.86rem] text-[var(--color-text-tertiary)]">{{ structuralLabel() }}</div>
-            </div>
-            <mat-icon
-              class="!h-4 !w-4 !text-base text-[var(--color-text-tertiary)] transition-transform group-open:rotate-180"
-              aria-hidden="true"
-              >expand_more</mat-icon
-            >
-          </summary>
-          <div class="px-5 pb-5">
-            @if (structureOpen()) {
-              <app-structural-diff-list [changes]="changes" [framework]="framework()" />
-            }
-          </div>
-        </details>
       }
-    }
-  </div>
+    </section>
+  }
+
+  @if (hasErrors()) {
+    <details
+      class="group overflow-hidden rounded-xl border border-[color:var(--color-border)] bg-[var(--color-bg-secondary)]"
+      open
+      data-section="errors"
+      (toggle)="onToggle('errors', $event)"
+    >
+      <summary class="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4">
+        <div class="min-w-0">
+          <div class="text-base font-semibold text-[var(--color-text-primary)]">Render errors</div>
+          <div class="text-[0.86rem] text-[var(--color-text-tertiary)]">{{ errorsLabel() }}</div>
+        </div>
+        <mat-icon
+          class="!h-4 !w-4 !text-base text-[var(--color-text-tertiary)] transition-transform group-open:rotate-180"
+          aria-hidden="true"
+          >expand_more</mat-icon
+        >
+      </summary>
+      <div class="flex flex-col gap-3 px-5 pb-5">
+        @for (b of errorBlocks(); track b.side) {
+          <div
+            class="rounded-xl border border-[color:color-mix(in_srgb,var(--color-error)_18%,var(--color-border))] p-3"
+          >
+            <p class="text-sm font-semibold text-[var(--color-error)]">{{ b.title }}</p>
+            <pre class="pv-code pv-code-block mt-2 max-h-48 whitespace-pre-wrap break-words">{{ b.text }}</pre>
+          </div>
+        }
+      </div>
+    </details>
+  }
 </article>

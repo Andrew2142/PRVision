@@ -101,7 +101,12 @@ describe('VisualizationDetailComponent', () => {
     expect(textWithoutIcons(repoLink)).toBe('sample-react-app');
     expect(textWithoutIcons(el.querySelector('[data-testid="refs"]'))).toBe('main @ a1b2c3d to fix/cart @ d4e5f6a');
     expect(el.querySelector('[aria-label="Status: Rendering"]')).not.toBeNull();
-    expect(el.querySelector('app-pipeline-stepper')).not.toBeNull();
+    // A running run shows one thin progress bar in place of the stepper.
+    expect(el.querySelector('app-pipeline-stepper')).toBeNull();
+    const bar = el.querySelector('[data-testid="run-progress"] [role="progressbar"]');
+    expect(bar?.getAttribute('aria-valuenow')).toBe('5');
+    expect(bar?.getAttribute('aria-valuemax')).toBe('7');
+    expect(el.querySelector('[data-testid="run-progress"]')?.textContent?.trim()).toBe('Step 5 of 7 · Rendering');
     expect(el.querySelector('app-console-panel')).not.toBeNull();
     done();
   }));
@@ -177,15 +182,28 @@ describe('VisualizationDetailComponent', () => {
     done();
   }));
 
-  it('Delete visible only terminal, confirm → navigate', fakeAsync(() => {
+  it('Delete sits in the run menu, only terminal, confirm → navigate', fakeAsync(() => {
     load({ status: 'completed' });
     expect(button('Cancel')).toBeUndefined();
-    button('Delete')?.click();
+    expect(button('Delete')).toBeUndefined();
+    el.querySelector<HTMLButtonElement>('[data-testid="run-menu"]')?.click();
+    fixture.detectChanges();
+    const item = Array.from(document.querySelectorAll<HTMLButtonElement>('[mat-menu-item]')).find((b) =>
+      b.textContent?.includes('Delete'),
+    );
+    item?.click();
     expect(confirm.confirm.calls.mostRecent().args[0].message).toContain('"feature/button-restyle → main"');
     const del = httpMock.expectOne((r) => r.method === 'DELETE' && r.url === `${BASE}/visualizations/7`);
     del.flush({ status: 200, data: { id: 7 } });
     expect(notifications.success.calls.allArgs()).toEqual([['Visualization deleted']]);
     expect(navigate.calls.mostRecent().args[0]).toEqual(['/visualizations']);
+    done();
+  }));
+
+  it('failed and cancelled runs keep the stepper to show where they stopped', fakeAsync(() => {
+    load({ status: 'failed', failedStage: 'rendering', errorMessage: 'x' });
+    expect(el.querySelector('app-pipeline-stepper')).not.toBeNull();
+    expect(el.querySelector('[data-testid="run-progress"]')).toBeNull();
     done();
   }));
 
@@ -304,17 +322,13 @@ describe('VisualizationDetailComponent', () => {
       components: [componentView({ id: 1, visualChange: 'changed', displayName: 'CartSummary' })],
     };
 
-    it('is a tablist with Components (count), Summary and Console under the stepper', fakeAsync(() => {
+    it('is a tablist with Components (count), Summary and Console; a completed run hides the stepper', fakeAsync(() => {
       load(COMPLETED);
       const list = el.querySelector('[role="tablist"]');
       expect(list?.getAttribute('aria-label')).toBe('Visualization sections');
-      expect(tabs().map((t) => t.textContent?.replace(/\s+/g, ''))).toEqual([
-        'widgetsComponents1',
-        'auto_awesomeSummary',
-        'terminalConsole',
-      ]);
-      const stepper = el.querySelector('app-pipeline-stepper')!;
-      expect(stepper.compareDocumentPosition(list!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(tabs().map((t) => t.textContent?.replace(/\s+/g, ''))).toEqual(['Components1', 'Summary', 'Console']);
+      expect(el.querySelector('app-pipeline-stepper')).toBeNull();
+      expect(el.querySelector('[data-testid="run-progress"]')).toBeNull();
       const panel = el.querySelector('[role="tabpanel"]');
       expect(panel?.id).toBe('viz-view-panel');
       expect(panel?.getAttribute('aria-labelledby')).toBe('viz-view-tab-summary');
@@ -593,13 +607,12 @@ describe('VisualizationDetailComponent', () => {
   describe('live mode (16j)', () => {
     const liveUrl = `${BASE}/visualizations/7/live`;
     const liveRow = componentView({ id: 11, harnessSource: 'export default definePrvisionHarness({ states: [] });' });
-    function liveButton(): HTMLButtonElement | null {
-      return el.querySelector<HTMLButtonElement>('app-component-card [data-testid="mode-live"]');
+    function playButton(): HTMLButtonElement | null {
+      return el.querySelector<HTMLButtonElement>('app-component-card [data-testid="play"]');
     }
+    /** Play starts the run's live session by itself. */
     function startLive(): void {
-      liveButton()?.click();
-      fixture.detectChanges();
-      el.querySelector<HTMLButtonElement>('[data-testid="live-start-button"]')?.click();
+      playButton()?.click();
       fixture.detectChanges();
       httpMock
         .expectOne((r) => r.method === 'POST' && r.url === liveUrl)
@@ -610,15 +623,15 @@ describe('VisualizationDetailComponent', () => {
       fixture.detectChanges();
     }
 
-    it('Live is offered on cards of a run that can go live, for rows with a harness', fakeAsync(() => {
+    it('Play is offered on cards of a run that can go live, for rows with a harness', fakeAsync(() => {
       load({ status: 'completed', liveAvailable: true, components: [liveRow] }, '7', 'components');
-      expect(liveButton()?.disabled).toBeFalse();
+      expect(playButton()?.disabled).toBeFalse();
       done();
     }));
 
-    it('no Live when the run cannot go live or the row has no harness', fakeAsync(() => {
+    it('no Play when the run cannot go live', fakeAsync(() => {
       load({ status: 'completed', liveAvailable: false, components: [liveRow] }, '7', 'components');
-      expect(liveButton()?.disabled).toBeTrue();
+      expect(playButton()).toBeNull();
       done();
     }));
 
@@ -628,7 +641,7 @@ describe('VisualizationDetailComponent', () => {
         '7',
         'components',
       );
-      expect(liveButton()?.disabled).toBeTrue();
+      expect(playButton()).toBeNull();
       done();
     }));
 

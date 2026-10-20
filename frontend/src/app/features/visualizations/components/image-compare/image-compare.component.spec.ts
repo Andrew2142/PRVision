@@ -14,10 +14,8 @@ import { ImageCompareComponent, type LiveTarget } from './image-compare.componen
 interface Inputs {
   baseUrl?: string | null;
   headUrl?: string | null;
-  diffUrl?: string | null;
   width?: number | null;
   height?: number | null;
-  diffPixelRatio?: number | null;
   visualChange?: VisualChange | null;
   baseError?: string | null;
   headError?: string | null;
@@ -43,10 +41,8 @@ describe('ImageCompareComponent', () => {
     const all: Required<Inputs> = {
       baseUrl: '/artifacts/7/11/base.png',
       headUrl: '/artifacts/7/11/head.png',
-      diffUrl: '/artifacts/7/11/diff.png',
       width: 800,
       height: 600,
-      diffPixelRatio: 0.042,
       visualChange: 'changed',
       baseError: null,
       headError: null,
@@ -57,24 +53,7 @@ describe('ImageCompareComponent', () => {
     for (const [k, v] of Object.entries(all)) fixture.componentRef.setInput(k, v);
     fixture.detectChanges();
   }
-  function modeButton(label: string): HTMLButtonElement {
-    const group = el.querySelector('[aria-label="Comparison mode"]');
-    const b = Array.from(group?.querySelectorAll('button') ?? []).find((x) => x.textContent?.includes(label));
-    if (!b) throw new Error(`no ${label}`);
-    return b;
-  }
-  function zoomButton(label: string): HTMLButtonElement {
-    const group = el.querySelector('[aria-label="Zoom"]');
-    const b = Array.from(group?.querySelectorAll('button') ?? []).find((x) => x.textContent?.includes(label));
-    if (!b) throw new Error(`no ${label}`);
-    return b;
-  }
-  function select(button: HTMLButtonElement): void {
-    button.click();
-    fixture.detectChanges();
-  }
   const imgs = (): HTMLImageElement[] => Array.from(el.querySelectorAll('img'));
-  const range = (): HTMLInputElement => el.querySelector('input[type="range"]')!;
 
   it('side-by-side shows both images with alt text and width/height attributes', () => {
     render();
@@ -85,138 +64,48 @@ describe('ImageCompareComponent', () => {
     expect(base?.getAttribute('width')).toBe('800');
     expect(base?.getAttribute('height')).toBe('600');
     expect(head?.getAttribute('draggable')).toBe('false');
-    expect(Array.from(el.querySelectorAll('figcaption')).map((f) => f.textContent?.trim())).toEqual(['Base', 'Head']);
+    expect(Array.from(el.querySelectorAll('figcaption')).map((f) => f.textContent?.trim())).toEqual([
+      'Before',
+      'After',
+    ]);
   });
 
-  it('new component: base placeholder text, slider and diff disabled', () => {
-    render({ baseUrl: null, diffUrl: null, visualChange: 'new' });
+  it('shows the screenshots only: no mode, zoom, slider or diff controls', () => {
+    render();
+    expect(el.querySelector('[aria-label="Comparison mode"]')).toBeNull();
+    expect(el.querySelector('[aria-label="Zoom"]')).toBeNull();
+    expect(el.querySelector('input[type="range"]')).toBeNull();
+    expect(imgs().map((i) => i.alt)).not.toContain('Pixel differences for CartSummary');
+  });
+
+  it('loads the screenshots with CORS so they can be measured for the crop', () => {
+    render();
+    expect(imgs().map((i) => i.getAttribute('crossorigin'))).toEqual(['anonymous', 'anonymous']);
+  });
+
+  it('new component: base placeholder text', () => {
+    render({ baseUrl: null, visualChange: 'new' });
     expect(imgs().length).toBe(1);
     expect(el.textContent).toContain('Not present on base — new component');
-    expect(modeButton('Slider').disabled).toBeTrue();
-    expect(modeButton('Diff').disabled).toBeTrue();
   });
 
   it('deleted component: head placeholder', () => {
-    render({ headUrl: null, diffUrl: null, visualChange: 'deleted' });
+    render({ headUrl: null, visualChange: 'deleted' });
+    expect(imgs().length).toBe(1);
     expect(el.textContent).toContain('Removed in head — deleted component');
-    expect(modeButton('Slider').disabled).toBeTrue();
   });
 
   it('failed side shows the render-failed placeholder', () => {
-    render({ headUrl: null, diffUrl: null, visualChange: null, headError: 'TypeError: x is undefined' });
+    render({ headUrl: null, visualChange: null, headError: 'TypeError: x is undefined' });
     expect(el.textContent).toContain('Render failed — see Render errors below');
   });
 
-  it('slider: range input updates clip-path', () => {
+  it('image error marks the side unavailable', () => {
     render();
-    select(modeButton('Slider'));
-    const head = imgs()[1];
-    expect(head?.style.clipPath).toBe('inset(0px 0px 0px 50%)');
-    range().value = '30';
-    range().dispatchEvent(new Event('input'));
-    fixture.detectChanges();
-    expect(head?.style.clipPath).toBe('inset(0px 0px 0px 30%)');
-  });
-
-  it('range has aria-label and aria-valuetext', () => {
-    render();
-    select(modeButton('Slider'));
-    expect(range().getAttribute('aria-label')).toBe('Comparison slider for CartSummary');
-    expect(range().getAttribute('aria-valuetext')).toBe('50% base, 50% head');
-  });
-
-  it('ArrowRight on range increases split', () => {
-    render();
-    select(modeButton('Slider'));
-    const input = range();
-    input.focus();
-    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
-    // Synthetic key events do not move a native range; do what the browser does on ArrowRight (+1 step).
-    input.stepUp();
-    input.dispatchEvent(new Event('input'));
-    fixture.detectChanges();
-    expect(input.getAttribute('aria-valuetext')).toBe('51% base, 49% head');
-    expect(imgs()[1]?.style.clipPath).toBe('inset(0px 0px 0px 51%)');
-  });
-
-  it('pointer drag sets split', () => {
-    render();
-    select(modeButton('Slider'));
-    const stage = el.querySelector<HTMLElement>('[data-testid="slider-stage"]')!;
-    stage.style.width = '400px';
-    stage.style.height = '300px';
-    const rect = stage.getBoundingClientRect();
-    const at = (x: number): PointerEventInit => ({
-      clientX: rect.left + x,
-      clientY: rect.top + 10,
-      pointerId: 1,
-      bubbles: true,
-    });
-    stage.dispatchEvent(new PointerEvent('pointerdown', at(100)));
-    fixture.detectChanges();
-    expect(range().getAttribute('aria-valuetext')).toBe('25% base, 75% head');
-    stage.dispatchEvent(new PointerEvent('pointermove', at(300)));
-    fixture.detectChanges();
-    expect(range().getAttribute('aria-valuetext')).toBe('75% base, 25% head');
-    stage.dispatchEvent(new PointerEvent('pointerup', at(300)));
-    stage.dispatchEvent(new PointerEvent('pointermove', at(50)));
-    fixture.detectChanges();
-    expect(range().getAttribute('aria-valuetext')).toBe('75% base, 25% head');
-  });
-
-  it('diff mode opacity binding and Diff only hides head', () => {
-    render();
-    select(modeButton('Diff'));
-    const stage = (): HTMLElement => el.querySelector('[data-testid="diff-stage"]')!;
-    let stageImgs = Array.from(stage().querySelectorAll('img'));
-    expect(stageImgs.map((i) => i.alt)).toEqual(['Head render of CartSummary', 'Pixel differences for CartSummary']);
-    expect(stageImgs[1]?.style.opacity).toBe('0.75');
-    range().value = '40';
-    range().dispatchEvent(new Event('input'));
-    fixture.detectChanges();
-    expect(stageImgs[1]?.style.opacity).toBe('0.4');
-    expect(el.textContent).toContain('Highlighted pixels differ between base and head (4.2% of the image).');
-
-    el.querySelector<HTMLButtonElement>('mat-slide-toggle button')!.click();
-    fixture.detectChanges();
-    stageImgs = Array.from(stage().querySelectorAll('img'));
-    expect(stageImgs.map((i) => i.alt)).toEqual(['Pixel differences for CartSummary']);
-    expect(stageImgs[0]?.style.opacity).toBe('1');
-    expect(range().disabled).toBeTrue();
-  });
-
-  it('image error marks side unavailable and falls back to side mode', () => {
-    render();
-    select(modeButton('Slider'));
     imgs()[0]?.dispatchEvent(new Event('error'));
     fixture.detectChanges();
-    expect(el.querySelector('[data-testid="slider-stage"]')).toBeNull();
+    expect(imgs().length).toBe(1);
     expect(el.textContent).toContain('Image unavailable');
-    expect(modeButton('Slider').disabled).toBeTrue();
-    expect(modeButton('Side by side').getAttribute('aria-pressed')).toBe('true');
-  });
-
-  it('defaults to 100% zoom with image width and scroll region; Fit removes both', () => {
-    render();
-    expect(zoomButton('100%').getAttribute('aria-pressed')).toBe('true');
-    const region = el.querySelector('[role="region"]');
-    expect(region?.getAttribute('aria-label')).toBe('CartSummary at 100% zoom, scrollable');
-    expect(region?.getAttribute('tabindex')).toBe('0');
-    expect(el.querySelector<HTMLElement>('.pv-checkerboard')!.style.width).toBe('800px');
-    select(zoomButton('Fit'));
-    expect(el.querySelector('[role="region"]')).toBeNull();
-    expect(el.querySelector<HTMLElement>('.pv-checkerboard')!.style.width).toBe('');
-    select(zoomButton('100%'));
-    expect(el.querySelector<HTMLElement>('.pv-checkerboard')!.style.width).toBe('800px');
-  });
-
-  it('lists 100% before Fit', () => {
-    render();
-    const group = el.querySelector('[aria-label="Zoom"]');
-    const labels = Array.from(group?.querySelectorAll('button') ?? []).map((b) =>
-      b.textContent?.includes('Fit') ? 'Fit' : '100%',
-    );
-    expect(labels).toEqual(['100%', 'Fit']);
   });
 
   it('artifact URLs prefixed with environment.artifactBaseUrl via artifactUrl()', () => {
@@ -231,7 +120,6 @@ describe('ImageCompareComponent', () => {
     render({ baseUrl: 'https://evil.example/x.png', headUrl: '/artifacts/../etc/passwd', visualChange: null });
     expect(imgs().length).toBe(0);
     expect(el.textContent).toContain('Not rendered');
-    expect(modeButton('Slider').disabled).toBeTrue();
   });
 
   describe('state input (16 §15.5.2)', () => {
@@ -246,10 +134,10 @@ describe('ImageCompareComponent', () => {
     });
 
     it('a state only on head or only on base says which version lacks it', () => {
-      render({ stateName: 'Overdue', visualChange: 'new', baseUrl: null, diffUrl: null });
+      render({ stateName: 'Overdue', visualChange: 'new', baseUrl: null });
       expect(el.textContent).toContain('Not in the base version');
       expect(el.textContent).not.toContain('new component');
-      render({ stateName: 'Overdue', visualChange: 'deleted', headUrl: null, diffUrl: null });
+      render({ stateName: 'Overdue', visualChange: 'deleted', headUrl: null });
       expect(el.textContent).toContain('Not in the head version');
     });
 
@@ -262,7 +150,6 @@ describe('ImageCompareComponent', () => {
         stateName: 'Menu open',
         baseUrl: '/artifacts/7/11/s1/base.png',
         headUrl: '/artifacts/7/11/s1/head.png',
-        diffUrl: '/artifacts/7/11/s1/diff.png',
       });
       expect(imgs().map((i) => i.getAttribute('src'))).toEqual([
         `${ART}/artifacts/7/11/s1/base.png`,
@@ -309,27 +196,29 @@ describe('ImageCompareComponent Live mode (16j)', () => {
     for (const r of httpMock.match((req) => req.url.startsWith(liveUrl))) r.flush({ status: 200, data: {} });
   });
 
-  function render(liveEnabled = true, liveTarget: LiveTarget | null = target): void {
+  function render(liveEnabled = true, liveTarget: LiveTarget | null = target, live = false): void {
     fixture.componentRef.setInput('label', 'CartSummary');
     fixture.componentRef.setInput('baseUrl', '/artifacts/7/11/base.png');
     fixture.componentRef.setInput('headUrl', '/artifacts/7/11/head.png');
-    fixture.componentRef.setInput('diffUrl', '/artifacts/7/11/diff.png');
     fixture.componentRef.setInput('visualChange', 'changed');
     fixture.componentRef.setInput('liveEnabled', liveEnabled);
     fixture.componentRef.setInput('liveTarget', liveTarget);
     fixture.componentRef.setInput('stepSummary', ['Click button "More actions"']);
+    fixture.componentRef.setInput('live', live);
     fixture.detectChanges();
   }
-  const liveButton = (): HTMLButtonElement | null => el.querySelector<HTMLButtonElement>('[data-testid="mode-live"]');
   const testId = (id: string): HTMLElement | null => el.querySelector<HTMLElement>(`[data-testid="${id}"]`);
-  function chooseLive(): void {
-    liveButton()?.click();
+  const startRequest = (): TestRequest => httpMock.expectOne((r) => r.method === 'POST' && r.url === liveUrl);
+  /** The card's Play button: the viewer starts the run's session by itself. */
+  function play(): TestRequest {
+    fixture.componentRef.setInput('live', true);
     fixture.detectChanges();
+    return startRequest();
   }
   function clickStart(): TestRequest {
     testId('live-start-button')?.click();
     fixture.detectChanges();
-    return httpMock.expectOne((r) => r.method === 'POST' && r.url === liveUrl);
+    return startRequest();
   }
   function answer(req: TestRequest, session: Partial<LiveSessionView>, status = 200): void {
     req.flush({ status, data: liveSession(session) });
@@ -339,20 +228,17 @@ describe('ImageCompareComponent Live mode (16j)', () => {
     return httpMock.match((r) => r.url === `${liveUrl}/open`);
   }
 
-  it('offers Live as a fourth mode, enabled only when liveEnabled and a target are set; screenshots stay default', () => {
-    render(false);
-    expect(liveButton()?.textContent).toContain('Live');
-    expect(liveButton()?.textContent).toContain('sensors');
-    expect(liveButton()?.disabled).toBeTrue();
-    render(true, null);
-    expect(liveButton()?.disabled).toBeTrue();
-    render(true);
-    expect(liveButton()?.disabled).toBeFalse();
-    expect(liveButton()?.getAttribute('aria-pressed')).toBe('false');
+  it('live shows only when the card plays, Live is enabled and there is a target; screenshots otherwise', () => {
+    render(true, target, false);
     expect(el.querySelectorAll('img').length).toBe(2);
+    render(false, target, true);
+    expect(el.querySelectorAll('img').length).toBe(2);
+    render(true, null, true);
+    expect(el.querySelectorAll('img').length).toBe(2);
+    expect(httpMock.match((r) => r.method === 'POST' && r.url === liveUrl).length).toBe(0);
   });
 
-  it('Live is disabled where no LiveSessionStore is provided', async () => {
+  it('live is ignored where no LiveSessionStore is provided', async () => {
     TestBed.resetTestingModule();
     await TestBed.configureTestingModule({
       imports: [ImageCompareComponent],
@@ -360,25 +246,23 @@ describe('ImageCompareComponent Live mode (16j)', () => {
     }).compileComponents();
     const bare = TestBed.createComponent(ImageCompareComponent);
     bare.componentRef.setInput('label', 'CartSummary');
+    bare.componentRef.setInput('baseUrl', '/artifacts/7/11/base.png');
+    bare.componentRef.setInput('headUrl', '/artifacts/7/11/head.png');
     bare.componentRef.setInput('liveEnabled', true);
     bare.componentRef.setInput('liveTarget', target);
+    bare.componentRef.setInput('live', true);
     bare.detectChanges();
-    const button = (bare.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('[data-testid="mode-live"]');
-    expect(button?.disabled).toBeTrue();
+    const root = bare.nativeElement as HTMLElement;
+    expect(root.querySelectorAll('img').length).toBe(2);
+    expect(root.querySelector('[data-testid="live-starting"]')).toBeNull();
     bare.destroy();
   });
 
-  it('choosing Live without a session asks to start it; Start posts and shows the preparing spinner', () => {
+  it('playing without a session starts it and shows the preparing spinner', () => {
     render();
-    chooseLive();
-    expect(testId('live-start')?.textContent).toContain(
-      'Live mode runs the before and after components in your browser, each side on its own. Start it for this run?',
-    );
-    expect(testId('live-start-button')?.textContent?.trim()).toContain('Start live mode');
-    expect(el.querySelector('[aria-label="Zoom"]')).toBeNull();
-    expect(el.querySelectorAll('img').length).toBe(0);
-    const req = clickStart();
+    const req = play();
     expect(testId('live-starting')?.textContent).toContain('Preparing the before and after code…');
+    expect(el.querySelectorAll('img').length).toBe(0);
     answer(req, { status: 'starting', readyAt: null }, 202);
     expect(testId('live-starting')?.textContent).toContain('Preparing the before and after code…');
     expect(opens().length).toBe(0);
@@ -386,8 +270,7 @@ describe('ImageCompareComponent Live mode (16j)', () => {
 
   it('once ready, opens the open state on both sides and shows the live compare', () => {
     render();
-    chooseLive();
-    answer(clickStart(), { hosts: [] }, 202);
+    answer(play(), { hosts: [] }, 202);
     const [open] = opens();
     expect(open?.request.body).toEqual({ componentId: 11, stateName: 'Menu open' });
     open?.flush({ status: 202, data: liveSession({ hosts: readyHosts() }) });
@@ -399,8 +282,7 @@ describe('ImageCompareComponent Live mode (16j)', () => {
 
   it('switching the state tab while in Live opens the new state', () => {
     render();
-    chooseLive();
-    answer(clickStart(), { hosts: readyHosts() }, 202);
+    answer(play(), { hosts: readyHosts() }, 202);
     opens()[0]?.flush({ status: 202, data: liveSession({ hosts: readyHosts() }) });
     fixture.componentRef.setInput('liveTarget', { ...target, stateName: 'Default' });
     fixture.detectChanges();
@@ -409,22 +291,18 @@ describe('ImageCompareComponent Live mode (16j)', () => {
     open?.flush({ status: 202, data: liveSession({ hosts: readyHosts() }) });
   });
 
-  it('the two-session limit error is shown on the start panel', () => {
+  it('the two-session limit error is shown with a retry, and is not retried by itself', () => {
     render();
-    chooseLive();
-    clickStart().flush(
-      { status: 409, error: TWO_SESSIONS, error_reason: 'conflict' },
-      { status: 409, statusText: 'x' },
-    );
+    play().flush({ status: 409, error: TWO_SESSIONS, error_reason: 'conflict' }, { status: 409, statusText: 'x' });
     fixture.detectChanges();
     expect(testId('live-message')?.textContent?.trim()).toBe(TWO_SESSIONS);
     expect(testId('live-start-button')).not.toBeNull();
+    expect(httpMock.match((r) => r.method === 'POST' && r.url === liveUrl).length).toBe(0);
   });
 
   it('an idle stop says so and offers Start again', () => {
     render();
-    chooseLive();
-    answer(clickStart(), { status: 'stopped', stopReason: 'idle', stoppedAt: '2026-10-07T10:11:00.000Z' }, 202);
+    answer(play(), { status: 'stopped', stopReason: 'idle', stoppedAt: '2026-10-07T10:11:00.000Z' }, 202);
     expect(testId('live-message')?.textContent?.trim()).toBe('Live mode stopped after 10 minutes idle.');
     expect(testId('live-start-button')?.textContent).toContain('Start again');
     const again = clickStart();
@@ -435,25 +313,17 @@ describe('ImageCompareComponent Live mode (16j)', () => {
 
   it('a failed session shows its error with Try again', () => {
     render();
-    chooseLive();
-    answer(
-      clickStart(),
-      { status: 'failed', errorMessage: 'Could not prepare the before and after code in time.' },
-      202,
-    );
+    answer(play(), { status: 'failed', errorMessage: 'Could not prepare the before and after code in time.' }, 202);
     expect(testId('live-message')?.textContent?.trim()).toBe('Could not prepare the before and after code in time.');
     expect(testId('live-start-button')?.textContent).toContain('Try again');
   });
 
-  it('leaving Live mode returns to the screenshots', () => {
+  it('stopping returns to the screenshots', () => {
     render();
-    chooseLive();
-    const sideBySide = Array.from(el.querySelectorAll('[aria-label="Comparison mode"] button')).find((b) =>
-      b.textContent?.includes('Side by side'),
-    ) as HTMLButtonElement;
-    sideBySide.click();
+    play().flush({ status: 202, data: liveSession({ status: 'starting', readyAt: null }) });
+    fixture.componentRef.setInput('live', false);
     fixture.detectChanges();
     expect(el.querySelectorAll('img').length).toBe(2);
-    expect(testId('live-start')).toBeNull();
+    expect(testId('live-starting')).toBeNull();
   });
 });

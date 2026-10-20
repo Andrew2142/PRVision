@@ -1,22 +1,14 @@
-import { NgTemplateOutlet } from '@angular/common';
 import { ChangeDetectionStrategy, Component, computed, effect, inject, input, signal, untracked } from '@angular/core';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
-import { MatSlideToggleModule } from '@angular/material/slide-toggle';
 import { type VisualChange } from '../../../../core/models/domain-enums.model';
 import { artifactUrl } from '../../../../core/utils/artifact-url.util';
-import {
-  type SegmentOption,
-  SegmentedControlComponent,
-} from '../../../../shared/components/segmented-control/segmented-control.component';
-import { formatDiffPercent } from '../../../../shared/pipes/diff-percent.pipe';
 import { LiveSessionStore } from '../../visualization-detail/live-session.store';
 import { LiveCompareComponent } from '../live-compare/live-compare.component';
+import { type ContentCrop, measureContentCrop } from './content-crop';
 
-type CompareMode = 'side' | 'slider' | 'diff' | 'live';
-type ZoomMode = 'fit' | 'actual';
-type Side = 'base' | 'head' | 'diff';
+type Side = 'base' | 'head';
 
 interface Placeholder {
   icon: string;
@@ -71,21 +63,14 @@ function livePanel(store: LiveSessionStore): LivePanelView {
 }
 
 /**
- * Base/head/diff viewer (13 §5.9.9): Side by side, keyboard-operable Slider, Diff overlay; 100% (default) or Fit zoom.
- * Image `src` values come only from `artifactUrl()`.
+ * Before/after viewer: the two screenshots side by side, cropped to the part that holds the component (one crop for
+ * both, so they line up), or the live components while the card is playing (16 §15.6). Image `src` values come only
+ * from `artifactUrl()`.
  */
 @Component({
   selector: 'app-image-compare',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [
-    NgTemplateOutlet,
-    MatButtonModule,
-    MatIconModule,
-    MatProgressSpinnerModule,
-    MatSlideToggleModule,
-    SegmentedControlComponent,
-    LiveCompareComponent,
-  ],
+  imports: [MatButtonModule, MatIconModule, MatProgressSpinnerModule, LiveCompareComponent],
   templateUrl: './image-compare.component.html',
   styleUrl: './image-compare.component.scss',
 })
@@ -94,10 +79,8 @@ export class ImageCompareComponent {
   /** Raw `/artifacts/…` paths from the API. */
   readonly baseUrl = input<string | null>(null);
   readonly headUrl = input<string | null>(null);
-  readonly diffUrl = input<string | null>(null);
   readonly width = input<number | null>(null);
   readonly height = input<number | null>(null);
-  readonly diffPixelRatio = input<number | null>(null);
   readonly visualChange = input<VisualChange | null>(null);
   readonly baseError = input<string | null>(null);
   readonly headError = input<string | null>(null);
@@ -112,52 +95,31 @@ export class ImageCompareComponent {
   readonly liveTarget = input<LiveTarget | null>(null);
   /** 16j: the open state's steps in words, for the "do them yourself" banner. */
   readonly stepSummary = input<readonly string[]>([]);
+  /** The card's Play button: show the live components instead of the screenshots. */
+  readonly live = input(false);
 
   /** Provided by the visualization detail page; absent elsewhere, which keeps Live off. */
-  protected readonly live = inject(LiveSessionStore, { optional: true });
+  protected readonly liveStore = inject(LiveSessionStore, { optional: true });
 
-  protected readonly mode = signal<CompareMode>('side');
-  protected readonly zoom = signal<ZoomMode>('actual');
-  /** % of the width showing base (left). */
-  protected readonly split = signal(50);
-  protected readonly diffOpacity = signal(75);
-  protected readonly diffOnly = signal(false);
-  protected readonly dragging = signal(false);
   /** Raw URLs that failed to load; keyed by URL so switching to another state's images starts clean. */
   private readonly failedLoads = signal<ReadonlySet<string>>(new Set());
+  /** Measured crop for the current pair of screenshots; null shows them whole. */
+  protected readonly crop = signal<ContentCrop | null>(null);
 
   protected readonly baseSrc = computed(() => this.loadableSrc(this.baseUrl()));
   protected readonly headSrc = computed(() => this.loadableSrc(this.headUrl()));
-  protected readonly diffSrc = computed(() => this.loadableSrc(this.diffUrl()));
-  protected readonly canSlide = computed(() => !!this.baseSrc() && !!this.headSrc());
-  protected readonly canDiff = computed(() => !!this.diffSrc() && !!this.headSrc());
-  protected readonly canLive = computed(() => this.live !== null && this.liveEnabled() && this.liveTarget() !== null);
-  protected readonly effectiveMode = computed<CompareMode>(() =>
-    (this.mode() === 'slider' && !this.canSlide()) ||
-    (this.mode() === 'diff' && !this.canDiff()) ||
-    (this.mode() === 'live' && !this.canLive())
-      ? 'side'
-      : this.mode(),
+  protected readonly canLive = computed(
+    () => this.liveStore !== null && this.liveEnabled() && this.liveTarget() !== null,
   );
-  protected readonly isLive = computed(() => this.effectiveMode() === 'live');
+  protected readonly isLive = computed(() => this.live() && this.canLive());
   protected readonly livePanel = computed<LivePanelView | null>(() =>
-    this.live === null || !this.isLive() ? null : livePanel(this.live),
+    this.liveStore === null || !this.isLive() ? null : livePanel(this.liveStore),
   );
   protected readonly aspectRatio = computed(() => {
     const w = this.width();
     const h = this.height();
     return w && h ? `${w} / ${h}` : null;
   });
-  protected readonly modeOptions = computed<SegmentOption<CompareMode>[]>(() => [
-    { value: 'side', label: 'Side by side', icon: 'view_column' },
-    { value: 'slider', label: 'Slider', icon: 'compare', disabled: !this.canSlide() },
-    { value: 'diff', label: 'Diff', icon: 'difference', disabled: !this.canDiff() },
-    { value: 'live', label: 'Live', icon: 'sensors', disabled: !this.canLive(), testId: 'mode-live' },
-  ]);
-  protected readonly zoomOptions: SegmentOption<ZoomMode>[] = [
-    { value: 'actual', label: '100%', icon: 'crop_free' },
-    { value: 'fit', label: 'Fit', icon: 'fit_screen' },
-  ];
 
   /** "CartSummary" or, for a named state, "CartSummary · Menu open". */
   private readonly subject = computed(() => {
@@ -169,92 +131,78 @@ export class ImageCompareComponent {
   protected readonly sides = computed(() => [
     {
       key: 'base' as const,
-      caption: 'Base',
+      caption: 'Before',
       src: this.baseSrc(),
       alt: this.baseAlt(),
       placeholder: this.placeholderFor('base'),
     },
     {
       key: 'head' as const,
-      caption: 'Head',
+      caption: 'After',
       src: this.headSrc(),
       alt: this.headAlt(),
       placeholder: this.placeholderFor('head'),
     },
   ]);
-  protected readonly isActualZoom = computed(() => this.zoom() === 'actual');
-  /** Image frame width in px at 100% zoom; null (fill the column) at Fit. */
-  protected readonly frameWidth = computed(() => (this.zoom() === 'actual' ? this.width() : null));
-  protected readonly zoomRegionLabel = computed(() => `${this.label()} at 100% zoom, scrollable`);
-  protected readonly clipPath = computed(() => `inset(0 0 0 ${this.split()}%)`);
-  protected readonly sliderLabel = computed(() => `Comparison slider for ${this.label()}`);
-  protected readonly sliderValueText = computed(() => `${this.split()}% base, ${100 - this.split()}% head`);
-  protected readonly diffImageOpacity = computed(() => (this.diffOnly() ? 1 : this.diffOpacity() / 100));
-  protected readonly diffOpacityText = computed(() => `${this.diffOpacity()}%`);
-  protected readonly diffAlt = computed(() => `Pixel differences for ${this.subject()}`);
-  protected readonly diffLegend = computed(() => {
-    const r = this.diffPixelRatio();
-    return r === null
-      ? 'Highlighted pixels differ between base and head.'
-      : `Highlighted pixels differ between base and head (${formatDiffPercent(r)} of the image).`;
+  /** Where the full screenshot sits inside the crop box, in % of the box. */
+  protected readonly cropStyle = computed(() => {
+    const c = this.crop();
+    if (!c) return null;
+    return {
+      ratio: `${String(c.width)} / ${String(c.height)}`,
+      maxWidth: c.width,
+      imgWidth: (c.imageWidth / c.width) * 100,
+      left: (-c.x / c.width) * 100,
+      top: (-c.y / c.height) * 100,
+      background: c.background,
+    };
   });
 
+  /** Guards against an older measurement landing after the images changed. */
+  private cropToken = 0;
+
   constructor() {
-    // Live starts from the open state tab and follows tab switches (D10): ask the session for this component's hosts.
+    // Measure one crop for both screenshots whenever the pair changes.
+    effect(() => {
+      const srcs = [this.baseSrc(), this.headSrc()].filter((s): s is string => s !== null);
+      const token = ++this.cropToken;
+      untracked(() => {
+        this.crop.set(null);
+      });
+      if (!srcs.length) return;
+      void measureContentCrop(srcs).then((crop) => {
+        if (token === this.cropToken) this.crop.set(crop);
+      });
+    });
+    // Play starts the run's live session when there is none yet; after an error or a stop the panel asks first.
+    effect(() => {
+      const store = this.liveStore;
+      if (!store || !this.isLive()) return;
+      if (store.session() === null && !store.starting() && store.error() === null) {
+        untracked(() => {
+          store.start();
+        });
+      }
+    });
+    // Live follows the open state tab (D10): ask the session for this component's hosts.
     effect(() => {
       const target = this.liveTarget();
-      const ready = this.live?.session()?.status === 'ready';
+      const ready = this.liveStore?.session()?.status === 'ready';
       if (!this.isLive() || !ready || target === null) return;
       untracked(() => {
-        this.live?.ensureOpen(target.componentId, target.stateName, { base: target.onBase, head: target.onHead });
+        this.liveStore?.ensureOpen(target.componentId, target.stateName, { base: target.onBase, head: target.onHead });
       });
     });
   }
 
-  /** Start live mode / Start again / Try again: one session serves every card of the run. */
+  /** Start again / Try again: one session serves every card of the run. */
   protected startLive(): void {
-    this.live?.start();
+    this.liveStore?.start();
   }
 
   protected markFailed(side: Side): void {
-    const url = side === 'base' ? this.baseUrl() : side === 'head' ? this.headUrl() : this.diffUrl();
+    const url = side === 'base' ? this.baseUrl() : this.headUrl();
     if (url) this.failedLoads.update((s) => new Set(s).add(url));
-  }
-
-  /** Range inputs: read the value in the class (templates may not use $any, 01 template/no-any). */
-  protected onSplitInput(event: Event): void {
-    this.split.set(Number((event.target as HTMLInputElement).value));
-  }
-
-  protected onOpacityInput(event: Event): void {
-    this.diffOpacity.set(Number((event.target as HTMLInputElement).value));
-  }
-
-  protected onPointerDown(event: PointerEvent): void {
-    const stage = event.currentTarget as HTMLElement;
-    this.dragging.set(true);
-    // Not every environment supports capture for synthetic pointers (tests); dragging still works without it.
-    try {
-      stage.setPointerCapture(event.pointerId);
-    } catch {
-      /* no active pointer with this id */
-    }
-    this.splitFromPointer(event);
-  }
-
-  protected onPointerMove(event: PointerEvent): void {
-    if (this.dragging()) this.splitFromPointer(event);
-  }
-
-  protected stopDragging(): void {
-    this.dragging.set(false);
-  }
-
-  private splitFromPointer(event: PointerEvent): void {
-    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
-    if (rect.width <= 0) return;
-    const pct = ((event.clientX - rect.left) / rect.width) * 100;
-    this.split.set(Math.round(Math.min(100, Math.max(0, pct))));
   }
 
   private loadableSrc(url: string | null): string | null {
@@ -262,7 +210,7 @@ export class ImageCompareComponent {
   }
 
   /** Reads signals, so `sides` tracks them. */
-  private placeholderFor(side: 'base' | 'head'): Placeholder {
+  private placeholderFor(side: Side): Placeholder {
     const change = this.visualChange();
     const url = side === 'base' ? this.baseUrl() : this.headUrl();
     const error = side === 'base' ? this.baseError() : this.headError();
