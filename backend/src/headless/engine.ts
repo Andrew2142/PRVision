@@ -22,7 +22,8 @@ import { RunFolder, type RunStatusFile } from "./run-folder";
  * Headless engine: one visualization in one process, with an embedded database (PGlite) and no server, worker
  * or Redis. Started in the background by the prvision CLI, which sets PRVISION_DATA_DIR to `<run>/data`:
  *
- *   node dist/headless/engine.js --run <dir> --repo <path> [--app-root <dir>]
+ *   node dist/headless/engine.js --run <dir> --repo <path> [--app-root <dir>] [--angular-project <name>]
+ *        [--viewport desktop|tablet|mobile] [--states <1-5>]
  *        (--working | --head <ref> [--base <ref>]) [--limit <n>] [--cli "<command>"]
  *
  * Every AI request goes to the Claude Code session through the run folder (see run-folder.ts); the engine exits
@@ -36,6 +37,9 @@ interface EngineArgs {
   run: string;
   repo: string;
   appRoot: string | null;
+  angularProject: string | null;
+  viewport: "desktop" | "tablet" | "mobile" | null;
+  states: number | null;
   working: boolean;
   head: string | null;
   base: string | null;
@@ -50,6 +54,9 @@ function parseArgs(argv: readonly string[]): EngineArgs {
     run: "",
     repo: "",
     appRoot: null,
+    angularProject: null,
+    viewport: null,
+    states: null,
     working: false,
     head: null,
     base: null,
@@ -72,6 +79,16 @@ function parseArgs(argv: readonly string[]): EngineArgs {
       args.repo = path.resolve(value(flag));
     } else if (flag === "--app-root") {
       args.appRoot = value(flag);
+    } else if (flag === "--angular-project") {
+      args.angularProject = value(flag);
+    } else if (flag === "--viewport") {
+      const viewport = value(flag);
+      if (viewport !== "desktop" && viewport !== "tablet" && viewport !== "mobile") {
+        throw new EngineError("--viewport must be desktop, tablet or mobile");
+      }
+      args.viewport = viewport;
+    } else if (flag === "--states") {
+      args.states = Number(value(flag));
     } else if (flag === "--working") {
       args.working = true;
     } else if (flag === "--head") {
@@ -91,6 +108,9 @@ function parseArgs(argv: readonly string[]): EngineArgs {
   }
   if (!args.working && args.head === null) {
     throw new EngineError("Pass --working or --head <ref>");
+  }
+  if (args.states !== null && !(Number.isSafeInteger(args.states) && args.states >= 1 && args.states <= 5)) {
+    throw new EngineError("--states must be between 1 and 5");
   }
   if (args.limit !== null && !(Number.isSafeInteger(args.limit) && args.limit > 0)) {
     throw new EngineError("--limit must be a positive integer");
@@ -198,7 +218,13 @@ function modelWithId(id: number): VisualizationModel {
 }
 
 async function registerRepository(args: EngineArgs): Promise<{ id: number; name: string; framework: string }> {
-  const model = new RepositoryModel({ localPath: args.repo, ...(args.appRoot ? { appRoot: args.appRoot } : {}) });
+  const model = new RepositoryModel({
+    localPath: args.repo,
+    ...(args.appRoot !== null ? { appRoot: args.appRoot } : {}),
+    ...(args.angularProject !== null ? { angularProject: args.angularProject } : {}),
+    ...(args.viewport !== null ? { renderViewport: args.viewport } : {}),
+    ...(args.states !== null ? { stateAllowance: args.states } : {})
+  });
   const created = await new RepositoriesService(model).create();
   if (created.status !== 201 || !created.data) {
     throw new EngineError(errorText(created));

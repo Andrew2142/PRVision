@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 // Headless PRVision for the Claude Code `prvision` skill: no server, database or Docker.
 //
+//   prvision.mjs init [--path <dir>] [--viewport desktop|tablet|mobile] [--states <1-5>] [--limit <n>]
+//                     [--app-root <dir>] [--angular-project <name>]
 //   prvision.mjs run [--path <dir>] [--source auto|working|branch] [--head <ref>] [--base <ref>] [--limit <n>]
 //   prvision.mjs wait <runDir>
 //   prvision.mjs continue <runDir> --limit <n>
@@ -13,7 +15,10 @@
 // Code session as a folder (task.md, schema.json); answers come back through `answer`.
 //
 // Exit codes of run/wait/continue: 0 completed, 1 failed or error, 2 paused for confirmation, 3 AI requests need
-// answers.
+// answers, 4 (run only) the repository has no .prvision/config.json yet: ask the setup questions, then `init`.
+//
+// .prvision/config.json (committed with the repository) holds the answers to the setup questions:
+//   { "viewport": "desktop", "states": 3, "componentLimit": 12, "appRoot": ".", "angularProject": null }
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
@@ -31,7 +36,9 @@ const POLL_MS = 1_500;
 const WAIT_TIMEOUT_MS = 90 * 60_000;
 const ANSWER_TIMEOUT_MS = 60_000;
 const TERMINAL = new Set(["completed", "failed", "cancelled", "error"]);
-const COMMANDS = ["run", "wait", "continue", "answer", "fail", "open"];
+const COMMANDS = ["init", "run", "wait", "continue", "answer", "fail", "open"];
+const CONFIG_FILE = path.join(".prvision", "config.json");
+const NEEDS_SETUP = 4;
 const VIEWER_DIR = path.join(PRVISION_ROOT, "frontend", "dist", "frontend", "browser");
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -67,6 +74,10 @@ function parseArgs(argv) {
     limit: null,
     port: 4317,
     open: true,
+    viewport: null,
+    states: null,
+    appRoot: null,
+    angularProject: null,
     positional: []
   };
   while (rest.length > 0) {
@@ -82,6 +93,10 @@ function parseArgs(argv) {
     else if (item === "--base") args.base = value();
     else if (item === "--limit") args.limit = Number(value());
     else if (item === "--port") args.port = Number(value());
+    else if (item === "--viewport") args.viewport = value();
+    else if (item === "--states") args.states = Number(value());
+    else if (item === "--app-root") args.appRoot = value();
+    else if (item === "--angular-project") args.angularProject = value();
     else if (item === "--no-open") args.open = false;
     else if (item.startsWith("--")) throw new CliError(`Unknown option ${item}`);
     else args.positional.push(item);
@@ -160,12 +175,44 @@ function runDirArg(args) {
   return resolved;
 }
 
+function readConfig(repo) {
+  const config = readJson(path.join(repo, CONFIG_FILE));
+  return config && typeof config === "object" ? config : null;
+}
+
+/** Writes the setup answers to .prvision/config.json; unspecified answers keep their previous value or default. */
+function init(args) {
+  const repo = topLevel(args.path);
+  const previous = readConfig(repo) ?? {};
+  const config = {
+    viewport: args.viewport ?? previous.viewport ?? "desktop",
+    states: args.states ?? previous.states ?? 3,
+    componentLimit: args.limit ?? previous.componentLimit ?? 12,
+    appRoot: args.appRoot ?? previous.appRoot ?? ".",
+    angularProject: args.angularProject ?? previous.angularProject ?? null
+  };
+  if (!["desktop", "tablet", "mobile"].includes(config.viewport)) throw new CliError("--viewport must be desktop, tablet or mobile");
+  if (!(Number.isSafeInteger(config.states) && config.states >= 1 && config.states <= 5)) {
+    throw new CliError("--states must be between 1 and 5");
+  }
+  mkdirSync(path.join(repo, ".prvision"), { recursive: true });
+  writeFileSync(path.join(repo, CONFIG_FILE), `${JSON.stringify(config, null, 2)}\n`);
+  log(`Saved ${path.join(repo, CONFIG_FILE)}`);
+}
+
 function startEngine(args) {
   if (!existsSync(ENGINE)) {
     throw new CliError(`The engine is not built: run "npm install && npm run build" in ${path.join(PRVISION_ROOT, "backend")}`);
   }
   const repo = topLevel(args.path);
+  const config = readConfig(repo);
+  if (config === null) {
+    console.log(`[prvision] ${repo} is not set up for PRVision yet (no ${CONFIG_FILE}).`);
+    console.log("Ask the setup questions, then run init with the answers.");
+    process.exit(NEEDS_SETUP);
+  }
   const source = chooseSource(args, repo);
+  const limit = args.limit ?? config.componentLimit ?? null;
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const repoKey = `${path.basename(repo)}-${createHash("sha256").update(repo).digest("hex").slice(0, 8)}`;
   const runDir = path.join(RUNS_ROOT, repoKey, stamp);
@@ -180,7 +227,11 @@ function startEngine(args) {
       "--repo",
       repo,
       ...source.flags,
-      ...(args.limit !== null ? ["--limit", String(args.limit)] : []),
+      ...(limit !== null ? ["--limit", String(limit)] : []),
+      ...(config.viewport ? ["--viewport", config.viewport] : []),
+      ...(config.states ? ["--states", String(config.states)] : []),
+      ...(config.appRoot && config.appRoot !== "." ? ["--app-root", config.appRoot] : []),
+      ...(config.angularProject ? ["--angular-project", config.angularProject] : []),
       "--cli",
       SELF
     ],
@@ -366,6 +417,7 @@ function openReport(args) {
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.command === "open") return openReport(args);
+  if (args.command === "init") return init(args);
   if (args.command === "answer") return answer(args);
   if (args.command === "fail") return fail(args);
   let runDir;
