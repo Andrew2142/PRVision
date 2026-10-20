@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Drives a PRVision run from the command line for the Claude Code `prvision` skill (sheet 17 §10).
 //
-//   prvision-run.mjs [run] [--path <dir>] [--source auto|working|branch] [--base <ref>] [--limit <n>]
+//   prvision-run.mjs [run] [--path <dir>] [--source auto|working|branch] [--head <branch>] [--base <ref>] [--limit <n>]
 //                          [--ai agent|settings] [--no-open]
 //   prvision-run.mjs wait <visualizationId> [--no-open]
 //   prvision-run.mjs continue <visualizationId> --limit <n> [--no-open]
@@ -49,6 +49,7 @@ function parseArgs(argv) {
     path: process.cwd(),
     source: "auto",
     base: null,
+    head: null,
     limit: null,
     ai: "agent",
     open: true,
@@ -86,6 +87,7 @@ function parseArgs(argv) {
     if (flag === "--path") args.path = path.resolve(expandHome(value()));
     else if (flag === "--source") args.source = value();
     else if (flag === "--base") args.base = value();
+    else if (flag === "--head") args.head = value();
     else if (flag === "--limit") args.limit = Number(value());
     else if (flag === "--ai") args.ai = value();
     else if (flag === "--no-open") args.open = false;
@@ -187,10 +189,14 @@ async function findOrRegisterRepository(topLevel, cwd) {
 function chooseSource(args, topLevel, repository) {
   const dirty = git(topLevel, ["status", "--porcelain"]).length > 0;
   const branch = git(topLevel, ["rev-parse", "--abbrev-ref", "HEAD"]);
-  const wantBranch = args.source === "branch" || (args.source === "auto" && !dirty);
+  const wantBranch = args.head !== null || args.source === "branch" || (args.source === "auto" && !dirty);
   if (!wantBranch) {
     if (!dirty) throw new CliError("The working tree is clean; there are no uncommitted changes to show");
     return { sourceType: "working_tree", label: "uncommitted changes" };
+  }
+  if (args.head !== null) {
+    const baseRef = args.base ?? repository.defaultBranch;
+    return { sourceType: "local_branch", headRef: args.head, baseRef, label: `${args.head} against ${baseRef}` };
   }
   if (branch === "HEAD") throw new CliError("HEAD is detached; check out a branch or use --source working");
   const baseRef = args.base ?? repository.defaultBranch;

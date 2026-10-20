@@ -3,7 +3,7 @@
  * is sanitized and merged with PRVision's overrides, and served with `configFile: false` so PRVision controls
  * plugin order (mock plugin first, harness plugin last).
  *
- * PURE: runs inside the Vite host child; no IO except `detectConfigFile`.
+ * PURE: runs inside the Vite host child; no IO except `detectConfigFile` and `detectViteMode`.
  */
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -70,6 +70,70 @@ export async function detectConfigFile(viteRoot: string): Promise<string | null>
   return null;
 }
 
+/** Vite's own default mode for `vite` / `vite serve`. */
+export const DEFAULT_VITE_MODE = "development";
+
+/** package.json scripts that start the dev server, in the order they are trusted. */
+const DEV_SCRIPT_NAMES = ["dev", "start", "serve"] as const;
+
+/**
+ * The `--mode` a repository's dev server runs with, read from its package.json scripts (`dev`, then `start`, then
+ * `serve`): the first command segment that runs `vite` (not `vitest`, `vite build` or `vite preview`) and passes
+ * `--mode <name>` or `--mode=<name>`. Configs that only accept their own modes (one env file per mode) fail to load
+ * in Vite's default `development` mode.
+ *
+ * @param scripts - The `scripts` field of package.json (anything).
+ * @returns The mode name, or null when no dev script names one.
+ */
+export function viteModeFromScripts(scripts: unknown): string | null {
+  if (!isRecord(scripts)) {
+    return null;
+  }
+  for (const name of DEV_SCRIPT_NAMES) {
+    const script = scripts[name];
+    if (typeof script !== "string") {
+      continue;
+    }
+    for (const segment of script.split(/&&|\|\||;|\|/)) {
+      const tokens = segment.trim().split(/\s+/);
+      const viteIndex = tokens.findIndex((token) => token === "vite" || token.endsWith("/vite"));
+      if (viteIndex === -1) {
+        continue;
+      }
+      const subcommand = tokens[viteIndex + 1];
+      if (subcommand === "build" || subcommand === "preview" || subcommand === "optimize") {
+        continue;
+      }
+      for (const [index, token] of tokens.entries()) {
+        const inline = /^--mode=([A-Za-z0-9._-]+)$/.exec(token);
+        if (inline?.[1] !== undefined) {
+          return inline[1];
+        }
+        const next = tokens[index + 1];
+        if (token === "--mode" && next !== undefined && /^[A-Za-z0-9._-]+$/.test(next)) {
+          return next;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * The mode to load the repository's Vite config and .env files with: its dev script's `--mode`, else
+ * DEFAULT_VITE_MODE.
+ *
+ * @param viteRoot - Absolute Vite root (holds the app's package.json).
+ */
+export async function detectViteMode(viteRoot: string): Promise<string> {
+  try {
+    const parsed: unknown = JSON.parse(await fs.readFile(path.join(viteRoot, "package.json"), "utf8"));
+    return (isRecord(parsed) ? viteModeFromScripts(parsed.scripts) : null) ?? DEFAULT_VITE_MODE;
+  } catch {
+    return DEFAULT_VITE_MODE;
+  }
+}
+
 function isPluginLike(value: unknown): value is VitePluginLike {
   return isRecord(value) && typeof value.name === "string";
 }
@@ -126,6 +190,8 @@ export interface BuildInlineConfigInput {
   envDefines: Record<string, string>;
   reactDomMajor: number;
   port: number; // probed free port (10 §5.6.3 step 7b)
+  /** The repository's dev mode (`detectViteMode`); default DEFAULT_VITE_MODE. */
+  mode?: string;
 }
 
 const REMOVED_TOP_LEVEL_KEYS = [
@@ -219,7 +285,7 @@ export function buildViteInlineConfig(input: BuildInlineConfigInput): { config: 
   const overrides: UnknownRecord = {
     root: options.viteRoot,
     base: "/",
-    mode: "development",
+    mode: input.mode ?? DEFAULT_VITE_MODE,
     appType: "mpa", // HTML middleware serves .prvision-harness/index.html (runs transformIndexHtml); no SPA fallback
     cacheDir: options.cacheDir, // isolated per worktree; never the user's node_modules/.vite
     clearScreen: false,

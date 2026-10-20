@@ -34,7 +34,9 @@ import { createHarnessPlugin } from "./vite-harness-plugin";
 import { loadTargetVite, ViteLoadError } from "./vite-loader";
 import {
   buildViteInlineConfig,
+  DEFAULT_VITE_MODE,
   detectConfigFile,
+  detectViteMode,
   filterUserPlugins,
   flattenUserPlugins,
   PLUGIN_DENYLIST_PREFIXES
@@ -297,13 +299,17 @@ async function startHost(options: ViteHostStartOptions): Promise<void> {
   // 3. Logger forwarding over IPC.
   const logger = createForwardingLogger(vite);
 
-  // 4. User config.
+  // 4. User config, loaded in the mode the repository's dev script uses (`vite --mode dev`), else "development".
+  const mode = await detectViteMode(options.viteRoot);
+  if (mode !== DEFAULT_VITE_MODE) {
+    log("info", `Using Vite mode "${mode}" from the dev script in package.json.`);
+  }
   const configFile = options.configFile ?? (await detectConfigFile(options.viteRoot));
   let userConfig: UnknownRecord = {};
   if (configFile !== null) {
     try {
       const result = await vite.loadConfigFromFile(
-        { command: "serve", mode: "development", isSsrBuild: false, isPreview: false, ssrBuild: false },
+        { command: "serve", mode, isSsrBuild: false, isPreview: false, ssrBuild: false },
         configFile,
         options.viteRoot,
         "silent"
@@ -373,7 +379,7 @@ async function startHost(options: ViteHostStartOptions): Promise<void> {
       : "VITE_";
   let loadedEnv: Record<string, string> = {};
   try {
-    loadedEnv = vite.loadEnv("development", envDir, prefixes);
+    loadedEnv = vite.loadEnv(mode, envDir, prefixes);
   } catch (error) {
     log("warn", `Loading .env files failed: ${describeError(error)}`);
   }
@@ -420,7 +426,8 @@ async function startHost(options: ViteHostStartOptions): Promise<void> {
     fsAllow,
     envDefines,
     reactDomMajor: react.major,
-    port
+    port,
+    mode
   });
   warnings.push(...built.warnings);
 

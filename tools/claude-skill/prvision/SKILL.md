@@ -26,7 +26,7 @@ It starts PRVision with Docker if it is down, registers the repository if needed
 
 Remember the answer for the whole run and pass it as `model` (`opus`, `sonnet`, `haiku`, or `fable` if the user typed it) on every subagent you spawn in section 3. For "Same as this chat", omit `model`. Answer requests that arrive before the user replies with the chat's model rather than waiting.
 
-What it visualizes (`--source`, default `auto`): uncommitted changes when the working tree is dirty, otherwise the current branch against the default branch. `--source branch [--base <ref>]` shows the whole branch; `--source working` only uncommitted changes. Other flags: `--path <dir>`, `--limit <n>` (render up to n components without pausing), `--no-open`, `--ai settings` (use PRVision's own configured AI provider instead of this session).
+What it visualizes (`--source`, default `auto`): uncommitted changes when the working tree is dirty, otherwise the current branch against the default branch. `--source branch [--base <ref>]` shows the whole branch; `--source working` only uncommitted changes; `--head <branch> [--base <ref>]` shows another local branch without checking it out. Other flags: `--path <dir>`, `--limit <n>` (render up to n components without pausing), `--no-open`, `--ai settings` (use PRVision's own configured AI provider instead of this session).
 
 ## 2. Loop on the exit code
 

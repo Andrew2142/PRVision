@@ -667,3 +667,11 @@ Source: sheet 17. Decision (2026-10-20): a run can be driven by the Claude Code 
 5. **00 §9 / §14.4:** `VisualizationCreateRequest` gains `aiProvider?: "agent"` (per run only; skips the AI readiness check). New routes: `GET /api/visualizations/:id/agent-requests`, `POST /api/visualizations/:id/agent-requests/claim`, `POST /api/agent-requests/:id/answer` (`{ response }`, validated against the request's JSON schema: 400 `validation_failed`), `POST /api/agent-requests/:id/fail` (`{ message }`); 409 `conflict` when the request is no longer open. Views `AgentRequestSummaryView`, `AgentRequestView` (sheet 17 §8).
 6. **00 §14.8:** `ai.config.ts` gains `AI_AGENT_MODEL_LABEL`, `HARNESS_CONCURRENCY_AGENT`, `AGENT_REQUEST_POLL_MS`, `AGENT_REQUEST_CLAIM_TIMEOUT_MS`, `AGENT_REQUEST_ANSWER_TIMEOUT_MS`, `AGENT_CLAIM_MAX`, `AGENT_FAIL_MESSAGE_MAX_CHARS`; `app.config.ts` gains `AGENT_REQUESTS_DIR_NAME`.
 7. **Errors:** an agent request nobody claims within 10 minutes raises `AiProviderError("config")`, which fails the run (09's fatal rule); a claimed request unanswered within 30 minutes raises `network` (not retryable) and fails that component.
+
+## 24. Revision 12 — Vite mode from the dev script (overrides earlier sections)
+
+Decision (2026-10-20): some Vite configs accept only their own modes (one env file per mode) and throw in Vite's default `development` mode.
+
+- The Vite host (sheet 10 §5.7) reads `<viteRoot>/package.json` on each side and takes the `--mode <name>` (or `--mode=<name>`) of the first `dev`, `start` or `serve` script segment that runs `vite` (not `vite build`, `vite preview` or `vitest`). Mode names match `^[A-Za-z0-9._-]+$`. Without one the mode stays `development`.
+- That mode is used for `loadConfigFromFile`, `loadEnv` and the inline config's `mode`. The host logs `Using Vite mode "<name>" from the dev script in package.json.` when it is not `development`.
+- No schema or API change. Helpers `viteModeFromScripts` and `detectViteMode` live in `pipeline/render/vite-server-config.ts`.

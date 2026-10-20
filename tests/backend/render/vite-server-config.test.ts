@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import path from "node:path";
 import { test } from "node:test";
 import type {
   UnknownRecord,
@@ -9,10 +11,13 @@ import type {
 import {
   PLUGIN_DENYLIST_PREFIXES,
   buildViteInlineConfig,
+  detectViteMode,
   filterUserPlugins,
   flattenUserPlugins,
+  viteModeFromScripts,
   type BuildInlineConfigInput
 } from "../../../backend/src/services/visualizations/pipeline/render/vite-server-config";
+import { withTempDir } from "../helpers/test-context";
 
 function isPlainObject(value: unknown): value is UnknownRecord {
   return (
@@ -294,4 +299,41 @@ test("a live plugin is ignored for a screenshot host (no live option)", () => {
   const { config } = build({ livePlugin: { name: "prvision:live" } });
   assert.deepEqual(config.plugins, [mockPlugin, harnessPlugin]);
   assert.equal(record(config.server).cors, false);
+});
+
+test("serves in the repository's dev mode when one is given", () => {
+  const { config } = build({ mode: "dev" });
+  assert.equal(config.mode, "dev");
+});
+
+test("viteModeFromScripts reads --mode from the dev, start or serve script", () => {
+  assert.equal(viteModeFromScripts({ dev: "npx vite --mode dev --port 4303" }), "dev");
+  assert.equal(viteModeFromScripts({ dev: "vite --mode=staging" }), "staging");
+  assert.equal(
+    viteModeFromScripts({ start: "node scripts/prep.mjs && ./node_modules/.bin/vite serve --mode local" }),
+    "local"
+  );
+  assert.equal(viteModeFromScripts({ dev: "vite", start: "vite --mode other" }), "other");
+});
+
+test("viteModeFromScripts ignores builds, previews, vitest and scripts without a mode", () => {
+  assert.equal(viteModeFromScripts({ dev: "vite build --mode prod" }), null);
+  assert.equal(viteModeFromScripts({ dev: "vite preview --mode prod" }), null);
+  assert.equal(viteModeFromScripts({ dev: "vitest --mode test" }), null);
+  assert.equal(viteModeFromScripts({ dev: "vite --port 3000", build: "vite build --mode prod" }), null);
+  assert.equal(viteModeFromScripts({ dev: "vite --mode '$(rm -rf /)'" }), null);
+  assert.equal(viteModeFromScripts(undefined), null);
+  assert.equal(viteModeFromScripts({ dev: 3 }), null);
+});
+
+test("detectViteMode falls back to development without a package.json or a mode", async () => {
+  await withTempDir(async (dir) => {
+    assert.equal(await detectViteMode(dir), "development");
+    await fs.writeFile(path.join(dir, "package.json"), JSON.stringify({ scripts: { dev: "vite" } }));
+    assert.equal(await detectViteMode(dir), "development");
+    await fs.writeFile(path.join(dir, "package.json"), JSON.stringify({ scripts: { dev: "npx vite --mode dev" } }));
+    assert.equal(await detectViteMode(dir), "dev");
+    await fs.writeFile(path.join(dir, "package.json"), "{ not json");
+    assert.equal(await detectViteMode(dir), "development");
+  });
 });
