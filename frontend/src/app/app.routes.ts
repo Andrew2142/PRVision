@@ -5,6 +5,12 @@ import { MainLayoutComponent } from './layouts/main-layout/main-layout.component
 /** Route table from 00 §12. The layout is eager; features are lazy. `**` stays inside the shell. */
 export const routes: Routes = [
   {
+    // A headless run's report (report.json via ?src=), full width without the app shell.
+    path: 'report',
+    title: 'PRVision report',
+    loadComponent: () => import('./features/report/report-viewer.component').then((m) => m.ReportViewerComponent),
+  },
+  {
     path: '',
     component: MainLayoutComponent,
     children: [

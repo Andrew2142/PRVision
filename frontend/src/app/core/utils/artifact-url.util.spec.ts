@@ -1,5 +1,5 @@
 import { environment } from '../../../environments/environment';
-import { artifactUrl } from './artifact-url.util';
+import { artifactUrl, setArtifactBaseUrl } from './artifact-url.util';
 
 describe('artifactUrl', () => {
   it('prefixes environment.artifactBaseUrl', () => {
@@ -25,5 +25,16 @@ describe('artifactUrl', () => {
     expect(artifactUrl(null)).toBeNull();
     expect(artifactUrl(undefined)).toBeNull();
     expect(artifactUrl('')).toBeNull();
+  });
+
+  it('the report viewer serves images from the report folder; the path rules stay the same', () => {
+    setArtifactBaseUrl('http://127.0.0.1:4317/report-data/');
+    try {
+      expect(artifactUrl('/artifacts/4/12/head.png')).toBe('http://127.0.0.1:4317/report-data/artifacts/4/12/head.png');
+      expect(artifactUrl('artifacts/4/12/head.png')).toBeNull();
+      expect(artifactUrl('/artifacts/../.env')).toBeNull();
+    } finally {
+      setArtifactBaseUrl(environment.artifactBaseUrl);
+    }
   });
 });

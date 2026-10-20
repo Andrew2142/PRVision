@@ -27,6 +27,14 @@ export class DrizzleDb {
     return DrizzleDb.getInstance().transaction(fn);
   }
 
+  /**
+   * Headless runs: use an embedded database (PGlite) instead of the pg pool. PGlite's Drizzle database has the
+   * same query API as node-postgres's; only the driver type differs, hence the cast.
+   */
+  static use(database: unknown): void {
+    DrizzleDb.instance = database as Database;
+  }
+
   /** Test hook: forget the cached instance (after DbPool.close()). */
   static reset(): void {
     DrizzleDb.instance = null;
