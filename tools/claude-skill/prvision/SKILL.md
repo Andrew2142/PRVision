@@ -17,6 +17,15 @@ node ~/.claude/skills/prvision/prvision-run.mjs
 
 It starts PRVision with Docker if it is down, registers the repository if needed, starts the run, opens it in the browser and prints `Link: http://localhost:4210/visualizations/<id>`. Send the user that link as soon as you see it.
 
+**Model choice.** Right after starting the run (it prepares and analyzes for a while before the first request), ask which model writes the harnesses and the summary, unless the user already named one ("use prvision with sonnet"). Use AskUserQuestion with header "Model" and these options:
+
+- "Same as this chat (Recommended)": subagents inherit this session's model.
+- "Opus": best harnesses on complex components.
+- "Sonnet": good balance of quality and speed.
+- "Haiku": fastest and cheapest; fine for simple components.
+
+Remember the answer for the whole run and pass it as `model` (`opus`, `sonnet`, `haiku`, or `fable` if the user typed it) on every subagent you spawn in section 3. For "Same as this chat", omit `model`. Answer requests that arrive before the user replies with the chat's model rather than waiting.
+
 What it visualizes (`--source`, default `auto`): uncommitted changes when the working tree is dirty, otherwise the current branch against the default branch. `--source branch [--base <ref>]` shows the whole branch; `--source working` only uncommitted changes. Other flags: `--path <dir>`, `--limit <n>` (render up to n components without pausing), `--no-open`, `--ai settings` (use PRVision's own configured AI provider instead of this session).
 
 ## 2. Loop on the exit code
@@ -28,7 +37,7 @@ What it visualizes (`--source`, default `auto`): uncommitted changes when the wo
 
 ## 3. Subagent prompt
 
-Replace `<folder>`, `<id>` and `<repository>` (the repository path printed in the task file header; the current repository is fine):
+Spawn each with the model chosen in section 1 (the Agent tool's `model` parameter). Replace `<folder>`, `<id>` and `<repository>` (the repository path printed in the task file header; the current repository is fine):
 
 ```
 You are answering one AI request for PRVision, a tool that renders UI components before and after a change.

@@ -297,6 +297,7 @@ Answer each (one subagent per folder: read task.md), then run: node ~/.claude/sk
 Triggers: "use prvision", "run prvision", "show me the changes in prvision", "visualize my changes". Flow for the session:
 
 1. Run `prvision-run.mjs` in the background. Tell the user the run URL as soon as it is printed.
+   While the run prepares, ask which model answers the requests (AskUserQuestion: same as this chat, Opus, Sonnet, Haiku) unless the user named one; every subagent of the run is spawned with that model.
 2. On exit 3: spawn one background subagent per folder with the prompt in §10.4.1, then run `wait <id>` in the background straight away (more requests appear while subagents work).
 3. Repeat until exit 0, 1 or 2. Exit 2: ask the user how many components to render, then `continue`.
 4. On exit 0: send the link, then two or three lines on what changed and anything that looks wrong (read the `diff` PNGs of risky or failed components).
