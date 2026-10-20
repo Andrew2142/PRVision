@@ -57,7 +57,7 @@ Out of scope:
 ## 4. Engineering decisions taken by this sheet
 
 - **E1 — per run, not a setting.** A run started from the UI must never wait for an agent that does not exist, so `agent` is accepted only on the create request. `PUT /api/settings` keeps rejecting it (`SELECTABLE_AI_PROVIDER_KINDS`).
-- **E2 — Postgres, not Redis or files.** The worker writes requests and the API answers them; both already share Postgres. A row gives an atomic claim (`update … where status = 'pending' returning`), survives restarts, and is deleted with the run by `on delete cascade`.
+- **E2 — Postgres, not Redis or files.** The worker writes requests and the API answers them; both already share Postgres. A row gives an atomic claim (`update … where status = 'pending' returning`), survives restarts, and is deleted with the run (§9.3).
 - **E3 — the API validates answers.** `POST /api/agent-requests/:id/answer` validates the response against the request's JSON schema with `JsonSchemaValidator` and returns 400 with the errors, so the subagent fixes and resubmits instead of failing the component. The provider validates again before returning (defence in depth; a row edited by hand cannot reach the pipeline).
 - **E4 — no agent, fail fast.** A request nobody claims within `AGENT_REQUEST_CLAIM_TIMEOUT_MS` raises `AiProviderError("config")`, which 09 treats as fatal for the run. A claimed request not answered within `AGENT_REQUEST_ANSWER_TIMEOUT_MS` raises `network` (not retryable): that component fails, the run goes on.
 - **E5 — images as files.** Summary PNGs arrive base64 in `AiStructuredRequest.images`. The provider writes them to `<dataDir>/agent-requests/<visualizationId>/` and stores absolute paths. The data dir is the same path on the host and in Docker (compose mounts `$HOME`), so the session reads them directly.
@@ -80,7 +80,7 @@ Out of scope:
 | `backend/src/config-consts/ai.config.ts` | §12 |
 | `backend/src/dtos/settings/settings-update.dto.ts` | `IsIn(SELECTABLE_AI_PROVIDER_KINDS)` |
 | `backend/src/dtos/visualizations/visualization-create.dto.ts` | `aiProvider?: "agent"` |
-| `backend/src/dtos/agent-requests/{agent-request-answer.dto.ts, agent-request-fail.dto.ts, agent-request-view.dto.ts, index.ts}` (new) | §8 |
+| `backend/src/dtos/agent-requests/{agent-request-answer.dto.ts, agent-request-fail.dto.ts, agent-request-view.dto.ts}` (new), `dtos/index.ts` | §8 |
 | `backend/src/utilities/services/ai/agent-request-store.ts` (new) | §7.1 |
 | `backend/src/utilities/services/ai/agent-provider.ts` (new) | §7.2 |
 | `backend/src/utilities/services/ai/index.ts` | export both |
@@ -155,6 +155,8 @@ Thin persistence over `QueryHandler` / direct Drizzle (utilities may use the dat
 - `read(id): Promise<{ status, response, errorMessage, createdAt, claimedAt } | null>`.
 - `cancel(id, message)`: `pending|claimed → cancelled` (no-op otherwise).
 - `cancelOpen(visualizationId, message)`: every open row of the run → `cancelled`; returns the count.
+- `deleteForVisualization(visualizationId)`: hard-deletes the run's rows (§9.3).
+- API side: `get`, `listForVisualization`, `claimPending`, `answer`, `fail` (§8).
 
 ### 7.2 `AgentAiProvider` (`utilities/services/ai/agent-provider.ts`)
 
@@ -240,7 +242,7 @@ In the run's `finally`, for agent runs: `cancelOpen(visualizationId, "The run en
 
 ### 9.3 Remove
 
-`VisualizationsService.remove` deletes `<dataDir>/agent-requests/<visualizationId>/` (best effort, like the snapshot folder). Rows go with the cascade.
+`VisualizationsService.remove` deletes the run's `agent_ai_requests` rows (visualizations are soft-deleted, so the FK cascade does not fire, and the prompts hold source code) and `<dataDir>/agent-requests/<visualizationId>/`, best effort like the snapshot folder.
 
 ## 10. Skill driver (17b)
 
