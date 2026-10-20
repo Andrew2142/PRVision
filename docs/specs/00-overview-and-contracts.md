@@ -655,3 +655,15 @@ Decision (2026-10-08): the Claude Code provider returns, rebuilt on the Claude C
 - Harness concurrency for `claude_code` is `HARNESS_CONCURRENCY_CLAUDE_CODE` (4).
 - Docker: compose sets `PRVISION_CLAUDE_COMMAND` to `${HOME}/.local/bin/claude`; the home folder is already mounted, so the CLI and its login are the host's.
 - Settings screen: the provider choice returns ("Anthropic API key" / "Claude Code (your subscription)") with a note that runs count against the plan's limits and that Anthropic's terms have changed.
+
+## 23. Revision 11 — agent provider (overrides earlier sections)
+
+Source: sheet 17. Decision (2026-10-20): a run can be driven by the Claude Code session that started it. The session writes the harnesses and the summary; PRVision makes no model call of its own for that run. Sheet 17 is authoritative for the detailed design.
+
+1. **00 §5:** `AiProviderKind` gains `AGENT: "agent"`; new `SELECTABLE_AI_PROVIDER_KINDS` (`anthropic_api`, `claude_code`), the only values `PUT /api/settings` accepts; new enum `AgentRequestStatus` (`pending`, `claimed`, `answered`, `failed`, `cancelled`); `Table.AGENT_AI_REQUESTS`.
+2. **00 §6 / §14.3:** migration `0010` adds `agent_ai_requests` (sheet 17 §6.2, cascade-deleted with the visualization) and regenerates the `ai_provider` CHECKs of `app_settings` and `visualizations` with `agent`.
+3. **00 §4:** new data-dir path `<dataDir>/agent-requests/<visualizationId>/` (summary images of agent requests; deleted with the run).
+4. **00 §8:** `AiProvider.kind` is `"anthropic_api" | "claude_code" | "agent"`. Agent calls report usage `{ inputTokens: 0, outputTokens: 0, calls: 1 }` and model `"agent"`.
+5. **00 §9 / §14.4:** `VisualizationCreateRequest` gains `aiProvider?: "agent"` (per run only; skips the AI readiness check). New routes: `GET /api/visualizations/:id/agent-requests`, `POST /api/visualizations/:id/agent-requests/claim`, `POST /api/agent-requests/:id/answer` (`{ response }`, validated against the request's JSON schema: 400 `validation_failed`), `POST /api/agent-requests/:id/fail` (`{ message }`); 409 `conflict` when the request is no longer open. Views `AgentRequestSummaryView`, `AgentRequestView` (sheet 17 §8).
+6. **00 §14.8:** `ai.config.ts` gains `AI_AGENT_MODEL_LABEL`, `HARNESS_CONCURRENCY_AGENT`, `AGENT_REQUEST_POLL_MS`, `AGENT_REQUEST_CLAIM_TIMEOUT_MS`, `AGENT_REQUEST_ANSWER_TIMEOUT_MS`, `AGENT_CLAIM_MAX`, `AGENT_FAIL_MESSAGE_MAX_CHARS`; `app.config.ts` gains `AGENT_REQUESTS_DIR_NAME`.
+7. **Errors:** an agent request nobody claims within 10 minutes raises `AiProviderError("config")`, which fails the run (09's fatal rule); a claimed request unanswered within 30 minutes raises `network` (not retryable) and fails that component.

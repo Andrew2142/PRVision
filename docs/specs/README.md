@@ -21,6 +21,7 @@ These sheets describe the full PRVision prototype build. Each sheet is sized to 
 | 6 | 14 Full test catalogue + manual E2E QA | — |
 | 7 | 15a–15f Angular support (see sheet 15 §0 for the split and dispatch order) | 7a yes, 7b after 7a |
 | 8 | 16a–16l Harness library, states, live mode, export/import (see sheet 16 §0 for the split and dispatch order) | 8a (16a) alone; 8b (16b, 16c, 16e, 16h, 16l fixtures) yes; 8c (16d), 8d (16f), 8e (16g) one at a time; 8f (16i, 16j live) yes; 8g (16k export/import); 8h (16l integration tests, QA) last |
+| 9 | 17a (backend) alone; then 17b (skill) and 17c (frontend label) | 9b yes |
 
 Sheet 01 is a reference for every wave, not a build task.
 
@@ -43,3 +44,4 @@ Sheet 01 is a reference for every wave, not a build task.
 | 14 | [Testing, fixtures and QA](14-testing-fixtures-and-qa.md) |
 | 15 | [Angular support (app roots, analysis, harness, render, structural diff)](15-angular-support.md) |
 | 16 | [Harness library, states and live mode](16-harness-library.md) |
+| 17 | [Agent provider: headless runs driven by a Claude Code session](17-agent-provider.md) |
